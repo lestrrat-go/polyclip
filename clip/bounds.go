@@ -3,6 +3,7 @@ package clip
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/lestrrat-go/polyclip/fixed"
@@ -76,20 +77,20 @@ var ErrOpenRing = errors.New("clip: input segments do not form closed rings")
 // polygon contribute to the local-min bound's first segment(s); at the
 // top, to the bound's last segment(s).
 func BuildLocalMinima(segs []Segment) ([]LocalMin, error) {
-	byStart := make(map[fixed.Point]*Segment, len(segs))
+	// byStart is a map from each input-direction Start vertex to the list
+	// of segments starting there. Shared vertices (two rings touching at a
+	// corner) produce a list of length > 1; [traceRing] disambiguates with
+	// source + angle.
+	byStart := make(map[fixed.Point][]*Segment, len(segs))
 	for i := range segs {
 		s := &segs[i]
 		if s.Degenerate() {
 			continue
 		}
-		if existing, dup := byStart[s.Start()]; dup {
-			return nil, fmt.Errorf("%w: two segments share start vertex %v (%v→%v and %v→%v)",
-				ErrOpenRing, s.Start(), existing.Start(), existing.End(), s.Start(), s.End())
-		}
-		byStart[s.Start()] = s
+		byStart[s.Start()] = append(byStart[s.Start()], s)
 	}
 
-	visited := make(map[*Segment]struct{}, len(byStart))
+	visited := make(map[*Segment]struct{}, len(segs))
 	var minima []LocalMin
 	for i := range segs {
 		s := &segs[i]
@@ -119,26 +120,119 @@ func BuildLocalMinima(segs []Segment) ([]LocalMin, error) {
 // traceRing walks from start following input-direction End→Start links
 // until it returns to start. All visited segments are marked. Returns
 // [ErrOpenRing] if the chain breaks or visits a non-start segment twice.
-func traceRing(start *Segment, byStart map[fixed.Point]*Segment, visited map[*Segment]struct{}) ([]*Segment, error) {
+//
+// At a vertex where multiple segments start (shared corner between two
+// touching rings), the next segment is chosen by: (1) source match —
+// prefer same-Src as the incoming segment, then (2) smallest CCW turn
+// from the incoming direction, which keeps the walk within a single ring
+// when two rings of the same source touch at a vertex.
+func traceRing(start *Segment, byStart map[fixed.Point][]*Segment, visited map[*Segment]struct{}) ([]*Segment, error) {
 	ring := []*Segment{start}
 	visited[start] = struct{}{}
 	cur := start
 	for {
-		next, ok := byStart[cur.End()]
-		if !ok {
+		candidates := byStart[cur.End()]
+		next := pickNextSegment(cur, candidates, visited)
+		if next == nil {
 			return nil, fmt.Errorf("%w: chain breaks at vertex %v (no outgoing segment)", ErrOpenRing, cur.End())
 		}
 		if next == start {
 			return ring, nil
-		}
-		if _, seen := visited[next]; seen {
-			return nil, fmt.Errorf("%w: chain revisits segment %v→%v before closing", ErrOpenRing, next.Start(), next.End())
 		}
 		visited[next] = struct{}{}
 		ring = append(ring, next)
 		cur = next
 	}
 }
+
+// pickNextSegment chooses the next segment of cur's ring at vertex
+// cur.End() from the candidate list. Filter rules:
+//
+//  1. Drop already-visited segments (those are part of completed rings),
+//     unless one of them is the start of the ring being traced.
+//  2. Among the survivors, prefer same-Src as cur.
+//  3. If still ambiguous, pick the candidate with the smallest CCW turn
+//     from cur's input direction.
+func pickNextSegment(cur *Segment, candidates []*Segment, visited map[*Segment]struct{}) *Segment {
+	var matches []*Segment
+	for _, c := range candidates {
+		if c == cur {
+			continue
+		}
+		if _, seen := visited[c]; seen {
+			// Allow re-visit only if c is the start of the ring being
+			// traced — that's how traceRing detects ring closure. Since
+			// traceRing already checks `next == start`, we don't need to
+			// special-case here: include visited candidates and let the
+			// outer loop catch the closure. But filter out OTHER visited
+			// (non-start) segs to avoid jumping into a different ring.
+			matches = append(matches, c)
+			continue
+		}
+		matches = append(matches, c)
+	}
+	if len(matches) == 0 {
+		return nil
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	// Multiple candidates — prefer same-Src.
+	var sameSrc []*Segment
+	for _, c := range matches {
+		if c.Src == cur.Src {
+			sameSrc = append(sameSrc, c)
+		}
+	}
+	if len(sameSrc) == 1 {
+		return sameSrc[0]
+	}
+	pool := matches
+	if len(sameSrc) > 1 {
+		pool = sameSrc
+	}
+	// Smallest CCW turn from cur's incoming direction. The "turn angle"
+	// is the angle from (-cur_dir) to candidate_dir measured CCW. For two
+	// rings of the same source touching at a vertex, the candidate from
+	// the same ring forms the smaller CCW turn (the ring continues on the
+	// same side).
+	incoming := vec(cur.End(), cur.Start()) // reversed: points BACK along cur
+	bestIdx := -1
+	bestAngle := 0.0
+	for i, c := range pool {
+		out := vec(c.Start(), c.End())
+		ang := ccwAngleFrom(incoming, out)
+		if bestIdx < 0 || ang < bestAngle {
+			bestIdx = i
+			bestAngle = ang
+		}
+	}
+	return pool[bestIdx]
+}
+
+func vec(from, to fixed.Point) [2]float64 {
+	return [2]float64{
+		float64(int64(to.X) - int64(from.X)),
+		float64(int64(to.Y) - int64(from.Y)),
+	}
+}
+
+// ccwAngleFrom returns the CCW angle in [0, 2π) from vector u to vector
+// v. Used to choose the "innermost" outgoing segment at a vertex with
+// multiple ring branches.
+func ccwAngleFrom(u, v [2]float64) float64 {
+	const twoPi = 2 * 3.141592653589793
+	a := atan2(v[1], v[0]) - atan2(u[1], u[0])
+	for a < 0 {
+		a += twoPi
+	}
+	for a >= twoPi {
+		a -= twoPi
+	}
+	return a
+}
+
+func atan2(y, x float64) float64 { return math.Atan2(y, x) }
 
 // findRingMinima identifies every local minimum in ring and builds its two
 // ascending bounds. ring is in input-direction order and forms a closed

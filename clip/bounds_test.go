@@ -1,7 +1,6 @@
 package clip
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
@@ -130,15 +129,26 @@ func TestBuildLocalMinimaNestedRectangles(t *testing.T) {
 	}
 }
 
-func TestBuildLocalMinimaSharedVertexErrors(t *testing.T) {
-	// Two squares sharing a corner — byStart map collision should be
-	// detected and return ErrOpenRing.
+func TestBuildLocalMinimaSharedVertex(t *testing.T) {
+	// Two squares sharing a corner at (5,5) — different sources. The
+	// source-based disambiguation in pickNextSegment keeps each ring's
+	// trace within its own source. Two local minima expected, one per
+	// square's bottom-left vertex.
 	var segs []Segment
 	segs = append(segs, axialRect(0, 0, 5, 5, Subject)...)
 	segs = append(segs, axialRect(5, 5, 10, 10, Clip)...)
-	_, err := BuildLocalMinima(segs)
-	if !errors.Is(err, ErrOpenRing) {
-		t.Fatalf("expected ErrOpenRing, got %v", err)
+	minima, err := BuildLocalMinima(segs)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(minima) != 2 {
+		t.Fatalf("expected 2 local minima, got %d", len(minima))
+	}
+	if minima[0].Vertex != (fixed.Point{X: 0, Y: 0}) {
+		t.Errorf("first min: %v want (0,0)", minima[0].Vertex)
+	}
+	if minima[1].Vertex != (fixed.Point{X: 5, Y: 5}) {
+		t.Errorf("second min: %v want (5,5)", minima[1].Vertex)
 	}
 }
 

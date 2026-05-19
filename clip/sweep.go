@@ -233,6 +233,14 @@ func (s *sweep) appendTrace(e Event, ae *ActiveEdge) {
 func (s *sweep) handleLocalMinimum(b1, b2 Event) {
 	ae1 := s.handleBot(b1)
 	ae2 := s.handleBot(b2)
+	// Re-classify both edges: when two new edges enter the AEL at the
+	// same point, the first one was classified WITHOUT the second's
+	// presence — but after both are inserted, the second sits between
+	// the first and its prior left neighbour (or vice versa, depending on
+	// slope), so the first edge's WindSelf/WindOther may now be stale.
+	// Re-running Classify against the final AEL state restores correctness.
+	Classify(s.ael, ae1, s.op)
+	Classify(s.ael, ae2, s.op)
 	s.appendTrace(b1, ae1)
 	s.appendTrace(b2, ae2)
 	if !ae1.Contributing || !ae2.Contributing {

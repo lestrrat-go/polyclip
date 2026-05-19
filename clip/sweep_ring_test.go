@@ -181,6 +181,46 @@ func TestSweepAxialRectangleSubject(t *testing.T) {
 	}
 }
 
+func TestSweepWShapePolygon(t *testing.T) {
+	// CCW "W" polygon with two local minima — exercises handleLocalMinimum
+	// with the bound pre-pass to ensure each minimum gets the correct
+	// Right/Left bound orientation regardless of heap order.
+	pts := []fixed.Point{
+		{X: 10, Y: 10}, // top-right
+		{X: 8, Y: 0},   // bottom-right local min
+		{X: 5, Y: 8},   // middle peak (local max)
+		{X: 2, Y: 0},   // bottom-left local min
+		{X: 0, Y: 10},  // top-left
+	}
+	n := len(pts)
+	segs := make([]Segment, 0, n)
+	for i := range n {
+		j := i + 1
+		if j == n {
+			j = 0
+		}
+		seg := NewSegment(pts[i], pts[j], Subject)
+		if !seg.Degenerate() {
+			segs = append(segs, seg)
+		}
+	}
+	r := Sweep(segs, OpUnion)
+	if r.Err != nil {
+		t.Fatalf("sweep err: %v", r.Err)
+	}
+	closed := closedRings(r.Rings)
+	if len(closed) != 1 {
+		t.Fatalf("closed ring count: %d want 1; rings=%v", len(closed), summarizeRings(r.Rings))
+	}
+	ringPts := closed[0].Points()
+	if len(ringPts) != 5 {
+		t.Errorf("vertex count: %d want 5; pts=%v", len(ringPts), ringPts)
+	}
+	if a := signedArea(ringPts); a <= 0 {
+		t.Errorf("ring traverses CW (signed area %d, want positive — CCW); pts=%v", a, ringPts)
+	}
+}
+
 func TestSweepTwoDisjointAxialRectangles(t *testing.T) {
 	// Two CCW axial rectangles, far apart. Bboxes don't intersect so the
 	// engine sees both independently.

@@ -546,9 +546,9 @@ Each stage has its own file; no stage knows the next stage's internals.
 3. For each ring (subject outer/holes, clip outer/holes) iterate edges; call `clip.NewSegment(snap(a), snap(b), src)` per edge.
 4. Drop degenerate segments (`Segment.Degenerate()`).
 5. **Overlap split.** Run `clip.Intersect` on every pair where the segments are exactly collinear (cheap pre-pass: sort by line equation hash). For any `CollinearOverlap` result, replace both segments with three pieces each so afterwards the only collinear pairs are *fully* coincident, not partially overlapping. This means the main sweep never sees `CollinearOverlap`.
-6. Push `EventBot{seg}` and `EventTop{seg}` for each surviving segment.
+6. Push `EventBot{seg}` and `EventTop{seg}` for each surviving non-horizontal segment. For each surviving horizontal segment push `EventHoriz{seg}` (see §11.8).
 
-Coincident-edge handling proper is in §11.7.
+Coincident-edge handling proper is in §11.7; horizontal-segment handling is in §11.8.
 
 ### 11.3 Sweep state — what an ActiveEdge tracks
 
@@ -658,13 +658,28 @@ The simplest implementation: during preprocess, after the overlap split, scan th
 
 ### 11.8 Horizontal segments
 
-Horizontal segments share `Bot.Y == Top.Y` and contribute zero to `WindSelf` (they don't cross any horizontal scanline). They are handled as a single combined event at their Y:
+A horizontal segment `h` has `Bot.Y == Top.Y` and lives at a single scanline `Y_h`. It contributes zero to `WindSelf` over any non-zero Y interval, so it never enters the AEL; instead, the engine processes horizontals via a dedicated **horizontal pass** at each scanline.
 
-1. At the scanline event for `Bot.Y`, before processing any non-horizontal events at this Y, gather all horizontal segments at this scanline.
-2. For each, walk the AEL from `Bot.X` to `Top.X`. Every AEL edge it passes "between" contributes a stitch point at the appropriate vertex.
-3. After this pass, continue with EventTop / EventBot / EventIntersection at this Y as normal.
+Event-queue contract for horizontals (changes to §11.5):
 
-For Phase 2 first cut: **assume no horizontal input edges** and reject them in preprocess with `ErrUnsupportedHorizontal`. Lift that restriction in Phase 5.
+- A horizontal segment generates a single `EventHoriz` event at `(Y_h, Bot.X)` carrying the full segment.
+- `EventKind` ordering at the same `(Y, X)` is: `Top < Horiz < Bot < Intersection`. Closing edges leave the AEL before horizontals walk through it; horizontals finish before new edges enter and before intersection swaps.
+
+Horizontal pass procedure (executed when `EventHoriz` fires):
+
+1. The horizontal's two endpoints are vertices of the input. Each endpoint also belongs to an adjacent non-horizontal segment of the same ring; those non-horizontals were already inserted (left endpoint) or are about to be inserted (right endpoint) into the AEL at this Y.
+2. Walk the AEL left-to-right from `min(Bot.X, Top.X)` to `max(Bot.X, Top.X)`. For each AEL edge `e` with `e.CurrX` in that range:
+   - If `e` is contributing **and** `h` is contributing (per the classification table — `h` has its own `WindSelf` and `WindOther` computed from its position in the segment list relative to other horizontals at this Y), emit an output point at `(e.CurrX, Y_h)` on `e.Out`'s chain.
+   - This stitches `h` into the contributing output rings as a horizontal segment between consecutive stitch points.
+3. If both endpoints of `h` are themselves stitch points (the common case — a horizontal connects two non-horizontal edges of the same ring), the horizontal's two endpoints close out the local minima / maxima of those two adjacent non-horizontal edges.
+
+Classification for horizontals:
+
+Treat `h` as if it were "swept" at `Y_h + ε`. Its `WindOther` equals the running winding count of the other source at `(Bot.X, Y_h)`. Its `WindSelf` equals the running self-count at `(Bot.X, Y_h)` plus its own ±1 contribution. From there the classification table in §11.4 applies unchanged.
+
+Coincident horizontals (two collinear horizontals at the same `Y_h` with overlapping X ranges) are handled by the preprocess overlap split in §11.2 — the sweep never sees partially overlapping horizontals.
+
+Implementation hint: store horizontals separately from non-horizontals during preprocess and emit `EventHoriz` events keyed only on `Y_h`. The horizontal pass then sees all horizontals at this scanline together, processes them in `Bot.X` order, and synchronises with the rest of the sweep via the `EventKind` ordering above.
 
 ### 11.9 Postprocess (clip/build.go)
 

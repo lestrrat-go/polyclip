@@ -145,12 +145,6 @@ func diamond(cx, cy, r float64) ExPolygon {
 }
 
 func TestUnionOverlappingDiamonds(t *testing.T) {
-	t.Skip("known issue: cycle-order in JoinOutrecPaths produces a self-" +
-		"intersecting output ring for the merged Union of overlapping inputs. " +
-		"All expected boundary vertices ARE emitted; the bug is in how " +
-		"OutPts get linked across the splice. See DESIGN.md §12.4 — needs " +
-		"correction in a future increment.")
-
 	a := MultiPolygon{diamond(0, 0, 10)}
 	b := MultiPolygon{diamond(5, 0, 10)}
 	got, err := Union(a, b)

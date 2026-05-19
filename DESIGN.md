@@ -1000,3 +1000,59 @@ In order, each as its own commit:
 
 Each step in isolation should keep tests green. The integration is fragile because of the cross-cutting state machines; isolating per commit makes regressions easy to bisect.
 
+#### 12.10.8 Lessons from the integration that the protocol must capture
+
+Three issues surfaced during implementation that aren't obvious from the algorithm alone. These rules are load-bearing — violating any one of them breaks overlapping-shape Union for non-obvious reasons.
+
+**Rule 1: `handleLocalMaximum` gates on `IsHotEdge`, not `Contributing`.**
+
+At a local maximum where two AEs from DIFFERENT OutRecs meet (overlapping shapes), the rings must be joined via `AddLocalMaxPoly` + `JoinOutrecPaths`. After an upstream `IntersectEdges` swap and reclassification, one of the AEs may have `Contributing=false` (its post-swap winding makes it interior to the union) yet still be in a hot OutRec that needs joining. Gating on `Contributing` skips the join, leaving the ring open with the top half disconnected from the cycle.
+
+```go
+// WRONG:
+if ae1.Contributing && ae2.Contributing { AddLocalMaxPoly(...) }
+// RIGHT:
+if ae1.IsHotEdge() && ae2.IsHotEdge() { AddLocalMaxPoly(...) }
+```
+
+Diagnostic signature: `Union` of two overlapping shapes produces a ring with only the bottom-half vertices; the top half is missing. The `r.Rings` list shows two rings — one with the bottom vertices and one with `Pts=nil` (orphaned `NewOutrec` from the upper intersection's `AddLocalMinPoly`).
+
+**Rule 2: `advanceBoundCursor` MUST call `maybeScheduleIntersect` against the new segment's neighbours.**
+
+After in-place cursor advance, the AE's segment changes. Its OLD segment's crossings have been resolved (or aged out), but the NEW segment may cross neighbours that the old one didn't — its slope is different. Without scheduling fresh intersection checks, future scanbeam intersections silently never fire.
+
+```go
+// In advanceBoundCursor, after `ae.Seg = b.Segs[next]; ae.CurrX = ...`:
+i := s.ael.IndexOf(ae)
+if i >= 0 {
+    if left := s.ael.LeftOf(i); left != nil {
+        s.maybeScheduleIntersect(left, ae, currentTop.Y)
+    }
+    if right := s.ael.RightOf(i); right != nil {
+        s.maybeScheduleIntersect(ae, right, currentTop.Y)
+    }
+}
+```
+
+Diagnostic signature: an `EventIntersection` you expect (e.g. `(2.5, 7.5)` for overlapping diamonds' top crossing) is absent from the trace. The intersection point is geometrically present in the inputs but the sweep never reaches it because no event was scheduled. This compounds with Rule 1 — the missed intersection leaves two AEs cold that should have become hot at the second intersection's `AddLocalMinPoly`.
+
+**Rule 3: `newSweep` tries `BuildLocalMinima` BEFORE `ClassifyHorizontals`.**
+
+`ClassifyHorizontals` strictly rejects mid-bound horizontals (`HorizClassMid`) — staircases would fail with `ErrUnsupportedHorizontal` before the bound model ever ran. But the bound model HANDLES mid-bound horizontals natively (they're regular `Bound.Segs` entries that `advanceBoundCursor` walks through). Reordering:
+
+```go
+// In newSweep:
+mins, mErr := BuildLocalMinima(s.segs)
+if mErr == nil {
+    // Bound model active. Schedule EventLocalMins, claim all bound segments.
+    // ClassifyHorizontals is NOT called — bound model owns horizontal handling.
+} else {
+    // Fall back to per-edge dispatch with strict ClassifyHorizontals.
+    hinfo, hErr := ClassifyHorizontals(s.segs)
+    if hErr != nil { s.err = hErr; return s }
+    s.horiz = hinfo
+}
+```
+
+Diagnostic signature: any closed-ring input with a mid-bound horizontal (e.g. an L-shape staircase polygon `(0,0)→(2,0)→(2,2)→(4,2)→(4,4)→(0,4)`) errors with `ErrUnsupportedHorizontal` even though the bound model could handle it.
+

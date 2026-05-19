@@ -4,17 +4,21 @@ import "github.com/lestrrat-go/polyclip/fixed"
 
 // Sweep runs the scanline sweep over segs for the given boolean operation
 // and returns both a trace of processed events and the constructed output
-// rings. See DESIGN.md §11.5 and §12.5 / §12.6 / §12.7 for the algorithm.
+// rings. See DESIGN.md §11.5 and §12.5 / §12.6 for the algorithm.
 //
 // segs is taken by value; callers should not mutate the slice after calling
 // Sweep, because the sweep retains pointers into it.
 //
-// Limitation: input segments must not be horizontal. Horizontal handling is
-// implemented separately at the caller level for now (see DESIGN.md §12.6).
-// Horizontal segments are skipped in this Sweep — they fire EventHoriz but
-// the handler is a no-op.
+// Horizontal-segment support: axial local-minimum and local-maximum
+// horizontals are handled per §12.6 by classifying them in a pre-pass and
+// scheduling [EventHoriz] / [EventHorizMaxOpen] events. Mid-bound
+// horizontals (staircases) are not yet supported; their presence produces
+// a SweepResult whose Err field is set.
 func Sweep(segs []Segment, op Operation) *SweepResult {
 	s := newSweep(segs, op)
+	if s.err != nil {
+		return &SweepResult{Err: s.err}
+	}
 	s.run()
 	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings()}
 }
@@ -29,6 +33,10 @@ type SweepResult struct {
 	// non-nil Pts; rings that were merged into another have Pts == nil and
 	// must be filtered out by postprocess.
 	Rings []*OutRec
+
+	// Err is non-nil if the sweep aborted before processing — currently
+	// only when [ClassifyHorizontals] rejects a mid-bound horizontal.
+	Err error
 }
 
 // TraceEvent is one entry in [SweepResult.Trace]. The WindSelf, WindOther
@@ -51,7 +59,9 @@ type sweep struct {
 	queue *EventQueue
 	ael   *AEL
 	bySeg map[*Segment]*ActiveEdge
+	horiz map[*Segment]*HorizInfo
 	trace []TraceEvent
+	err   error
 }
 
 func newSweep(segs []Segment, op Operation) *sweep {
@@ -62,13 +72,25 @@ func newSweep(segs []Segment, op Operation) *sweep {
 		ael:   NewAEL(),
 		bySeg: make(map[*Segment]*ActiveEdge, len(segs)),
 	}
+	hinfo, err := ClassifyHorizontals(s.segs)
+	if err != nil {
+		s.err = err
+		return s
+	}
+	s.horiz = hinfo
 	for i := range segs {
 		seg := &s.segs[i]
 		if seg.Degenerate() {
 			continue
 		}
 		if seg.Horizontal() {
-			s.queue.Push(Event{Kind: EventHoriz, P: seg.Bot, SegA: seg})
+			info := s.horiz[seg]
+			switch info.Class {
+			case HorizClassMin, HorizClassUnknown:
+				s.queue.Push(Event{Kind: EventHoriz, P: seg.Top, SegA: seg})
+			case HorizClassMax:
+				s.queue.Push(Event{Kind: EventHorizMaxOpen, P: seg.Bot, SegA: seg})
+			}
 			continue
 		}
 		s.queue.Push(Event{Kind: EventBot, P: seg.Bot, SegA: seg})
@@ -82,8 +104,8 @@ func (s *sweep) run() {
 		first := s.queue.Pop()
 		batch := []Event{first}
 		// Collect every event sharing this point. Within a batch the
-		// EventKind ordering (Top < Horiz < Bot < Intersection) is already
-		// preserved by the heap.
+		// EventKind ordering (HorizMaxOpen < Top < Bot < Horiz <
+		// Intersection) is already preserved by the heap.
 		for s.queue.Len() > 0 && s.queue.Peek().P == first.P {
 			batch = append(batch, s.queue.Pop())
 		}
@@ -92,34 +114,49 @@ func (s *sweep) run() {
 }
 
 // handleBatch dispatches based on the composition of simultaneous events at
-// a single (Y, X). Recognised configurations:
+// a single (Y, X). Recognised configurations for Top+Bot:
 //
 //   - 2 Tops + 0 Bots same source → local maximum.
 //   - 0 Tops + 2 Bots same source → local minimum.
 //   - 1 Top + 1 Bot same source   → through-vertex (bound continues).
 //   - 1 Intersection                → IntersectEdges dispatcher.
 //
+// Horizontal events fire on their own: [EventHorizMaxOpen] handles a
+// local-max horizontal (closes a ring whose two ascending bounds reach their
+// top at the horizontal's endpoints); [EventHoriz] handles a local-min
+// horizontal (spawns a ring whose two ascending bounds emerge from the
+// horizontal's endpoints). They are dispatched per-event rather than
+// batched.
+//
 // Mixed configurations (multiple sources at one point, intersections
 // coinciding with endpoints) fall back to per-event processing — output may
 // be wrong in those cases. They are explicitly addressed by a later
 // increment.
 func (s *sweep) handleBatch(batch []Event) {
-	tops := []Event{}
-	bots := []Event{}
+	var horizMaxOpens, tops, bots, horizMins, intersects []Event
 	for _, e := range batch {
 		switch e.Kind {
+		case EventHorizMaxOpen:
+			horizMaxOpens = append(horizMaxOpens, e)
 		case EventTop:
 			tops = append(tops, e)
 		case EventBot:
 			bots = append(bots, e)
-		case EventIntersection:
-			s.handleIntersection(e)
-			s.appendTrace(e, nil)
 		case EventHoriz:
-			s.appendTrace(e, nil)
+			horizMins = append(horizMins, e)
+		case EventIntersection:
+			intersects = append(intersects, e)
 		}
 	}
 
+	// Phase 1: local-max horizontals close their rings while the two
+	// adjacent verticals are still in the AEL.
+	for _, e := range horizMaxOpens {
+		s.handleHorizMax(e)
+		s.appendTrace(e, nil)
+	}
+
+	// Phase 2: regular Top/Bot dispatch by configuration.
 	switch {
 	case len(tops) == 1 && len(bots) == 1 && tops[0].SegA.Src == bots[0].SegA.Src:
 		s.handleThroughVertex(tops[0], bots[0])
@@ -144,6 +181,19 @@ func (s *sweep) handleBatch(batch []Event) {
 			ae := s.handleBot(e)
 			s.appendTrace(e, ae)
 		}
+	}
+
+	// Phase 3: local-min horizontals spawn rings after both endpoint Bots
+	// have populated the AEL.
+	for _, e := range horizMins {
+		s.handleHorizMin(e)
+		s.appendTrace(e, nil)
+	}
+
+	// Phase 4: intersections last.
+	for _, e := range intersects {
+		s.handleIntersection(e)
+		s.appendTrace(e, nil)
 	}
 }
 
@@ -256,6 +306,69 @@ func (s *sweep) handleTop(e Event) {
 	if left != nil && right != nil {
 		s.maybeScheduleIntersect(left, right, e.P.Y)
 	}
+}
+
+// handleHorizMin handles a local-min horizontal: spawn a new ring whose two
+// ascending bounds are the AEL entries at the horizontal's endpoints. See
+// DESIGN.md §11.8 / §12.6.
+//
+// Sequencing: the horizontal's event Y is the horizontal's own Y, and the
+// EventHoriz fires at h.Top so that both endpoint Bot events have already
+// inserted their AEL entries.
+//
+// AddLocalMinPoly is called with (rightAE, leftAE) — i.e. FrontEdge=rightAE
+// and BackEdge=leftAE. This matches the de facto orientation produced by
+// [sweep.handleLocalMinimum] for non-horizontal local minima (set by the
+// heap order of the two Bot events) and gives the resulting OutPt cycle a
+// CCW Next-direction for CCW input. The DESIGN.md §12.3 wording about
+// "front=leftmost" is inverted in our code; see [DESIGN.md §12.3] for the
+// formal statement and TODO to reconcile.
+func (s *sweep) handleHorizMin(e Event) {
+	h := e.SegA
+	info := s.horiz[h]
+	if info == nil {
+		return
+	}
+	leftAE := s.bySeg[info.LeftAdj]
+	rightAE := s.bySeg[info.RightAdj]
+	if leftAE == nil || rightAE == nil {
+		return
+	}
+	if !leftAE.Contributing || !rightAE.Contributing {
+		return
+	}
+	AddLocalMinPoly(s.ael, rightAE, leftAE, h.Bot, true)
+	AddOutPt(rightAE, h.Top)
+}
+
+// handleHorizMax handles a local-max horizontal: close the ring whose two
+// ascending bounds reach their top at the horizontal's endpoints. See
+// DESIGN.md §11.8 / §12.6.
+//
+// Sequencing: EventHorizMaxOpen fires before the two adjacent Top events at
+// the same Y, so the verticals are still in the AEL when this runs.
+// handleHorizMax removes the verticals and marks them as already-closed so
+// the subsequent EventTop events become no-ops (their seg is gone from
+// s.bySeg).
+func (s *sweep) handleHorizMax(e Event) {
+	h := e.SegA
+	info := s.horiz[h]
+	if info == nil {
+		return
+	}
+	leftAE := s.bySeg[info.LeftAdj]
+	rightAE := s.bySeg[info.RightAdj]
+	if leftAE == nil || rightAE == nil {
+		return
+	}
+	if leftAE.Contributing && rightAE.Contributing && leftAE.IsHotEdge() && rightAE.IsHotEdge() {
+		AddOutPt(rightAE, h.Top)
+		AddLocalMaxPoly(s.ael, leftAE, rightAE, h.Bot)
+	}
+	s.ael.Remove(leftAE)
+	s.ael.Remove(rightAE)
+	delete(s.bySeg, info.LeftAdj)
+	delete(s.bySeg, info.RightAdj)
 }
 
 func (s *sweep) handleIntersection(e Event) {

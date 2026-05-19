@@ -10,18 +10,28 @@ import (
 type EventKind uint8
 
 const (
+	// EventHorizMaxOpen fires for a horizontal segment whose ring context
+	// is a local maximum — the horizontal is the topmost edge of a
+	// polygon, with two non-horizontal bounds reaching their Top at the
+	// horizontal's endpoints. It is scheduled at the horizontal's
+	// (leftmost) Bot and orders BEFORE EventTop at the same point so that
+	// the two adjacent verticals are still in the AEL when the horizontal
+	// closes the ring. See DESIGN.md §12.6.
+	EventHorizMaxOpen EventKind = iota
 	// EventTop closes a segment: its top endpoint is reached and the
 	// segment should be removed from the active edge list.
-	EventTop EventKind = iota
-	// EventHoriz fires for a horizontal segment at its scanline Y; the
-	// segment is processed by walking the AEL between its endpoints and
-	// emitting contributions for every crossed active edge (see
-	// DESIGN.md §11.8). EventHoriz is ordered after EventTop and before
-	// EventBot at the same (Y, X) so closing edges leave the AEL first.
-	EventHoriz
+	EventTop
 	// EventBot opens a segment: its bottom endpoint is reached and the
 	// segment should be inserted into the active edge list.
 	EventBot
+	// EventHoriz fires for a local-minimum horizontal segment after every
+	// Top and Bot at the same Y. It is scheduled at the horizontal's
+	// (rightmost) Top so that the two adjacent verticals have both been
+	// inserted via EventBot before the horizontal spawns the ring. See
+	// DESIGN.md §11.8 / §12.6 for the rationale of the
+	// EventHorizMaxOpen < EventTop < EventBot < EventHoriz < EventIntersection
+	// ordering.
+	EventHoriz
 	// EventIntersection records that two segments cross at this point;
 	// their relative order in the active edge list must be swapped.
 	EventIntersection

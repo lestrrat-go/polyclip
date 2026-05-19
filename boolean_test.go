@@ -84,8 +84,11 @@ func TestUnionDisjointWithHole(t *testing.T) {
 }
 
 func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
-	// Axis-aligned inputs contain horizontal edges; the current engine
-	// rejects them with ErrHorizontalNotSupported.
+	// Two CCW axial squares that share the X=5 boundary. SplitOverlaps does
+	// not split them (they only touch at endpoints), but ClassifyHorizontals
+	// fails because the shared corners create byStart ambiguity. Output is
+	// ErrHorizontalNotSupported until a future increment handles shared
+	// vertices in the local-min/max pre-pass.
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(10, 0, 5)}
 	_, err := Union(a, b)
@@ -95,11 +98,41 @@ func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
 }
 
 func TestUnionOverlappingAxisAligned(t *testing.T) {
+	// Overlapping axial squares produce collinear-overlap splits in
+	// SplitOverlaps, which leave the byStart/byEnd lookup ambiguous and
+	// trip ErrHorizontalNotSupported.
 	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(3, 0, 5)} // overlaps with a
+	b := MultiPolygon{sq(3, 0, 5)}
 	_, err := Union(a, b)
 	if !errors.Is(err, ErrHorizontalNotSupported) {
 		t.Fatalf("expected ErrHorizontalNotSupported, got %v", err)
+	}
+}
+
+func TestUnionNestedAxialSquares(t *testing.T) {
+	// Big axial square as subject, small axial square strictly inside as
+	// clip. Bboxes overlap so the engine path runs; rings do not share any
+	// vertex so ClassifyHorizontals succeeds. Union should be the outer
+	// square (the inner is fully contained — no new edges contribute).
+	a := MultiPolygon{sq(0, 0, 10)}
+	b := MultiPolygon{sq(0, 0, 3)}
+	got, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 piece, got %d: %+v", len(got), got)
+	}
+	if len(got[0].Outer) != 4 {
+		t.Errorf("outer ring vertex count: %d want 4; outer=%v", len(got[0].Outer), got[0].Outer)
+	}
+	if len(got[0].Holes) != 0 {
+		t.Errorf("unexpected holes: %v", got[0].Holes)
+	}
+	gotArea := got.Area()
+	wantArea := 20.0 * 20.0
+	if gotArea < wantArea*0.99 || gotArea > wantArea*1.01 {
+		t.Errorf("Union area %v want ≈%v", gotArea, wantArea)
 	}
 }
 

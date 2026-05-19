@@ -9,10 +9,12 @@ import (
 )
 
 // ErrHorizontalNotSupported is returned by [Union] (and future boolean ops)
-// when an input contains an axis-aligned horizontal edge. The current engine
-// processes only non-horizontal segments; horizontal handling is the subject
-// of a future increment (see DESIGN.md §12.6).
-var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizontal edge — not yet supported by the Vatti engine")
+// when an input contains a horizontal edge that the engine cannot classify
+// as a local-min or local-max horizontal (typically a mid-bound horizontal
+// in a staircase). Axial rectangles and other inputs whose horizontals are
+// all local-min/max are supported; mid-bound horizontals are deferred to a
+// later increment (DESIGN.md §12.6 / §12.8 increment 4').
+var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizontal edge that is neither a local minimum nor a local maximum of its ring")
 
 // Union returns a ∪ b.
 //
@@ -22,14 +24,17 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 //     returns a.
 //   - Strictly disjoint bounding boxes: equivalent to concatenation. The
 //     two MultiPolygons are returned spliced together with no engine work.
-//   - Overlapping or boundary-touching inputs with no horizontal edges:
-//     the Vatti engine in [github.com/lestrrat-go/polyclip/clip] runs over
-//     the snapped segments. Output rings are converted back to a float64
+//   - Inputs with non-horizontal edges or with horizontal edges that are
+//     each a local minimum (polygon bottom) or local maximum (polygon
+//     top) of their ring: the Vatti engine in
+//     [github.com/lestrrat-go/polyclip/clip] runs over the snapped
+//     segments. Output rings are converted back to a float64
 //     MultiPolygon. Hole assignment uses signed-area sign and bbox-prefilter
 //     point-in-polygon (DESIGN.md §11.9).
 //
-// Inputs containing horizontal edges return [ErrHorizontalNotSupported].
-// This is a known limitation that will be lifted in a future increment.
+// Inputs containing a mid-bound horizontal (a staircase step) return
+// [ErrHorizontalNotSupported]. This is a known limitation that will be
+// lifted in a future increment.
 func Union(a, b MultiPolygon) (MultiPolygon, error) {
 	switch {
 	case len(a) == 0 && len(b) == 0:
@@ -57,42 +62,38 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
-	segs, err := collectSegments(a, clip.Subject, scale)
-	if err != nil {
-		return nil, err
-	}
-	bSegs, err := collectSegments(b, clip.Clip, scale)
-	if err != nil {
-		return nil, err
-	}
-	segs = append(segs, bSegs...)
+	segs := collectSegments(a, clip.Subject, scale)
+	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
 
 	segs = clip.SplitOverlaps(segs)
 	sw := clip.Sweep(segs, op)
+	if sw.Err != nil {
+		if errors.Is(sw.Err, clip.ErrUnsupportedHorizontal) {
+			return nil, fmt.Errorf("%w: %v", ErrHorizontalNotSupported, sw.Err)
+		}
+		return nil, sw.Err
+	}
 	return assembleResult(sw.Rings, scale), nil
 }
 
 // collectSegments converts every input edge into a fixed-point Segment and
-// returns the slice. Horizontal segments cause an immediate error.
-func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale) ([]clip.Segment, error) {
+// returns the slice. Horizontal segments are kept; the engine classifies
+// them in a pre-pass.
+func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale) []clip.Segment {
 	var out []clip.Segment
 	for _, ex := range m {
-		if err := appendRing(&out, ex.Outer, src, scale); err != nil {
-			return nil, err
-		}
+		appendRing(&out, ex.Outer, src, scale)
 		for _, h := range ex.Holes {
-			if err := appendRing(&out, h, src, scale); err != nil {
-				return nil, err
-			}
+			appendRing(&out, h, src, scale)
 		}
 	}
-	return out, nil
+	return out
 }
 
-func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale) error {
+func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale) {
 	n := len(ring)
 	if n < 3 {
-		return nil
+		return
 	}
 	for i := range n {
 		j := i + 1
@@ -105,12 +106,8 @@ func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.
 		if seg.Degenerate() {
 			continue
 		}
-		if seg.Horizontal() {
-			return fmt.Errorf("%w: ring vertex %v→%v lies on the same Y", ErrHorizontalNotSupported, ring[i], ring[j])
-		}
 		*dst = append(*dst, seg)
 	}
-	return nil
 }
 
 // assembleResult converts the sweep's closed output rings into a user-space

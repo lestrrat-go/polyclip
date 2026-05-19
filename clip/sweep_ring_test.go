@@ -102,3 +102,100 @@ func formatRing(pts []fixed.Point) string {
 	}
 	return "[" + strings.Join(parts, " ") + "]"
 }
+
+// axialRect returns the four segments of a CCW axis-aligned rectangle —
+// includes two horizontals (bottom and top) and two verticals. This is the
+// minimum input that exercises the EventHoriz / EventHorizMaxOpen handlers.
+func axialRect(x0, y0, x1, y1 int64, src Source) []Segment {
+	v0 := fixed.Point{X: fixed.Coord(x0), Y: fixed.Coord(y0)}
+	v1 := fixed.Point{X: fixed.Coord(x1), Y: fixed.Coord(y0)}
+	v2 := fixed.Point{X: fixed.Coord(x1), Y: fixed.Coord(y1)}
+	v3 := fixed.Point{X: fixed.Coord(x0), Y: fixed.Coord(y1)}
+	return []Segment{
+		NewSegment(v0, v1, src),
+		NewSegment(v1, v2, src),
+		NewSegment(v2, v3, src),
+		NewSegment(v3, v0, src),
+	}
+}
+
+func signedArea(pts []fixed.Point) int64 {
+	if len(pts) < 3 {
+		return 0
+	}
+	var s int64
+	n := len(pts)
+	for i := range n {
+		j := i + 1
+		if j == n {
+			j = 0
+		}
+		s += int64(pts[i].X)*int64(pts[j].Y) - int64(pts[j].X)*int64(pts[i].Y)
+	}
+	return s
+}
+
+func TestSweepAxialRectangleSubject(t *testing.T) {
+	// One CCW axial rectangle as subject only. Must produce a single closed
+	// ring of 4 vertices in CCW order (positive signed area).
+	segs := axialRect(0, 0, 10, 5, Subject)
+	r := Sweep(segs, OpUnion)
+	if r.Err != nil {
+		t.Fatalf("sweep err: %v", r.Err)
+	}
+
+	closed := closedRings(r.Rings)
+	if len(closed) != 1 {
+		t.Fatalf("closed ring count: %d want 1; rings=%v", len(closed), summarizeRings(r.Rings))
+	}
+	pts := closed[0].Points()
+	if len(pts) != 4 {
+		t.Errorf("vertex count: %d want 4; pts=%v", len(pts), pts)
+	}
+
+	want := map[fixed.Point]bool{
+		{X: 0, Y: 0}:  true,
+		{X: 10, Y: 0}: true,
+		{X: 10, Y: 5}: true,
+		{X: 0, Y: 5}:  true,
+	}
+	for _, p := range pts {
+		if !want[p] {
+			t.Errorf("unexpected vertex %v in ring", p)
+		}
+		delete(want, p)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing vertices: %v", want)
+	}
+
+	// Signed area: 2*Area of unit rectangle = 2*50 = 100 (CCW positive).
+	if a := signedArea(pts); a <= 0 {
+		t.Errorf("ring traverses CW (signed area %d, want positive); pts=%v", a, pts)
+	}
+}
+
+func TestSweepTwoDisjointAxialRectangles(t *testing.T) {
+	// Two CCW axial rectangles, far apart. Bboxes don't intersect so the
+	// engine sees both independently.
+	var segs []Segment
+	segs = append(segs, axialRect(0, 0, 10, 5, Subject)...)
+	segs = append(segs, axialRect(100, 100, 110, 105, Clip)...)
+	r := Sweep(segs, OpUnion)
+	if r.Err != nil {
+		t.Fatalf("sweep err: %v", r.Err)
+	}
+	closed := closedRings(r.Rings)
+	if len(closed) != 2 {
+		t.Fatalf("closed ring count: %d want 2; rings=%v", len(closed), summarizeRings(r.Rings))
+	}
+	for _, ring := range closed {
+		pts := ring.Points()
+		if len(pts) != 4 {
+			t.Errorf("vertex count: %d want 4", len(pts))
+		}
+		if a := signedArea(pts); a <= 0 {
+			t.Errorf("ring traverses CW (signed area %d, want positive); pts=%v", a, pts)
+		}
+	}
+}

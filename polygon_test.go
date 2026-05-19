@@ -182,7 +182,7 @@ func TestMultiPolygonContains(t *testing.T) {
 // Sanity: signed-area sign should be consistent with cross-product winding.
 func TestSignedAreaSign(t *testing.T) {
 	// Generate a few random simple polygons (rotated squares) and check.
-	for k := 0; k < 8; k++ {
+	for k := range 8 {
 		theta := float64(k) * math.Pi / 4
 		c, s := math.Cos(theta), math.Sin(theta)
 		base := Polygon{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}}

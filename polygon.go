@@ -41,7 +41,7 @@ func (p Polygon) SignedArea() float64 {
 		return 0
 	}
 	var s float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		j := i + 1
 		if j == n {
 			j = 0
@@ -128,7 +128,7 @@ func (p Polygon) Contains(q Point) bool {
 	if n < 3 {
 		return false
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		j := i + 1
 		if j == n {
 			j = 0
@@ -213,7 +213,7 @@ func pointOnSegmentEpsilon(a, b Point) float64 {
 
 func pointOnRingBoundary(p Polygon, q Point) bool {
 	n := len(p)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		j := i + 1
 		if j == n {
 			j = 0

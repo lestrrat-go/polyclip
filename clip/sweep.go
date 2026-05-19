@@ -349,16 +349,13 @@ func (s *sweep) handleLocalMin(e Event) {
 	// or the AEs sit in the AEL with no advance and the sweep stalls.
 	if leftAE.Contributing && rightAE.Contributing {
 		AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
-		// Leading horizontals: if a bound's first non-horizontal segment
-		// doesn't start at the local-min vertex, the bound traversed one
-		// or more horizontals to get there. Emit the segment's Bot as a
-		// ring vertex so the horizontal endpoint isn't lost.
-		if rightAE.Seg.Bot != lm.Vertex {
-			AddOutPt(rightAE, rightAE.Seg.Bot)
-		}
-		if leftAE.Seg.Bot != lm.Vertex {
-			AddOutPt(leftAE, leftAE.Seg.Bot)
-		}
+		// Leading horizontals: emit an OutPt at each horizontal's far
+		// endpoint (in bound traversal direction). Missing intermediate
+		// vertices was a bug — for a bound with leading horizontals split
+		// by an overlap (e.g. two axial squares' bottom edges meeting at
+		// X=-2), the cycle needs every intermediate vertex.
+		emitLeadingHorizOutPts(rightAE, lm.Vertex)
+		emitLeadingHorizOutPts(leftAE, lm.Vertex)
 	}
 	// Schedule first EventTop for each bound (lazy scheduling per §12.10.4).
 	// Subsequent EventTops are scheduled by advanceBoundCursor as the cursor
@@ -667,6 +664,27 @@ func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fix
 	s.ael.Remove(partner)
 	delete(s.bySeg, ae.Seg)
 	delete(s.bySeg, partner.Seg)
+}
+
+// emitLeadingHorizOutPts walks ae's bound from its start (the local-min
+// vertex) through any leading horizontals and emits an OutPt at each
+// horizontal's far endpoint. Skips when ae has no leading horizontals
+// (first segment is already non-horizontal at the local-min vertex).
+func emitLeadingHorizOutPts(ae *ActiveEdge, lmVertex fixed.Point) {
+	if ae == nil || ae.Bound == nil {
+		return
+	}
+	for i := range ae.EdgeIdx {
+		h := ae.Bound.Segs[i]
+		if !h.Horizontal() {
+			continue
+		}
+		farX := boundHorizontalFarX(ae.Bound, h)
+		pt := fixed.Point{X: farX, Y: lmVertex.Y}
+		if ae.Contributing && ae.IsHotEdge() {
+			AddOutPt(ae, pt)
+		}
+	}
 }
 
 // boundHorizontalFarX returns the X of horizontal h's "far" endpoint as

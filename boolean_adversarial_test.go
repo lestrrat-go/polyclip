@@ -112,7 +112,6 @@ func TestUnionTouchingAtVertex(t *testing.T) {
 
 func TestUnionIdempotent(t *testing.T) {
 	// Union(A, A) should equal A (modulo orientation/start-vertex).
-	t.Skip("§11.7 same-source-same-direction coincident dedup not implemented")
 	a := MultiPolygon{diamond(0, 0, 10)}
 	got, err := Union(a, a)
 	if err != nil {
@@ -124,7 +123,6 @@ func TestUnionIdempotent(t *testing.T) {
 }
 
 func TestIntersectIdempotent(t *testing.T) {
-	t.Skip("§11.7 same-source-same-direction coincident dedup not implemented")
 	a := MultiPolygon{diamond(0, 0, 10)}
 	got, err := Intersect(a, a)
 	if err != nil {
@@ -137,7 +135,6 @@ func TestIntersectIdempotent(t *testing.T) {
 
 func TestDifferenceSelf(t *testing.T) {
 	// Difference(A, A) should be empty.
-	t.Skip("§11.7 same-source-same-direction coincident dedup not implemented")
 	a := MultiPolygon{diamond(0, 0, 10)}
 	got, err := Difference(a, a)
 	if err != nil {

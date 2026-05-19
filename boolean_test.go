@@ -101,14 +101,20 @@ func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
 }
 
 func TestUnionOverlappingAxisAligned(t *testing.T) {
-	// Two axial squares that OVERLAP — after SplitOverlaps the bottom and
-	// top edges are split into coincident-pair fragments (same source-
-	// direction-but-different-source). Per DESIGN.md §11.7 these pairs
-	// should emit ONE edge with combined winding; the current sweep
-	// classifies both as non-contributing and the merged outline is
-	// incomplete. Tracked as a known limitation; the union returns
-	// without error but with an under-area shape.
-	t.Skip("§11.7 coincident same-source-same-direction not implemented; overlap area computed incorrectly")
+	// Two axial squares that OVERLAP. After SplitOverlaps the bottom and
+	// top edges are split into coincident-pair fragments (different-source
+	// same-direction). Per DESIGN.md §11.7 these pairs should emit ONE
+	// edge with combined winding, which requires topological merging of
+	// two rings into one in the bound model — not yet supported.
+	//
+	// The output is currently under-area: sq1's outline is produced (with
+	// intermediate split vertices), but sq2's exterior segments are missed
+	// because sq2's local-min classification is non-contributing (the bound
+	// emerges INSIDE sq1). A proper fix requires either (a) topological
+	// ring merging at the coincident edges, or (b) a Clipper2-style
+	// classification that handles diff-src same-dir coincident pairs at
+	// the AEL level.
+	t.Skip("§11.7 different-source same-direction coincident-edge merging not yet implemented (topological merge needed)")
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Union(a, b)

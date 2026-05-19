@@ -96,3 +96,109 @@ func splitAt(s Segment, p, q fixed.Point) []Segment {
 func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 	return Segment{Bot: bot, Top: top, Src: src, Reversed: reversed}
 }
+
+// DedupCoincidentEdges implements the simplest §11.7 cases:
+//
+//   - Same source, same direction (duplicate input edge): keep one, drop
+//     the rest.
+//   - Same source, opposite direction: cancel — drop both.
+//
+// These transformations preserve ring topology (they only remove edges
+// that were already redundant or cancelling). Different-source coincident
+// pairs (the harder §11.7 cases) are NOT handled here — they require
+// topological merging of two rings into one, which the bound model
+// doesn't yet support. They're worked around at the boolean.go level
+// via input-equality short-circuits.
+//
+// Complexity O(n) per coincident group, O(n²) worst case via grouping.
+func DedupCoincidentEdges(segs []Segment) []Segment {
+	type key struct{ bot, top fixed.Point }
+	groups := make(map[key][]int, len(segs))
+	for i := range segs {
+		s := &segs[i]
+		if s.Degenerate() {
+			continue
+		}
+		k := key{s.Bot, s.Top}
+		groups[k] = append(groups[k], i)
+	}
+
+	dropped := make(map[int]struct{})
+	for _, idxs := range groups {
+		if len(idxs) < 2 {
+			continue
+		}
+		applySameSrcRules(segs, idxs, dropped)
+	}
+
+	if len(dropped) == 0 {
+		return segs
+	}
+	out := make([]Segment, 0, len(segs)-len(dropped))
+	for i, s := range segs {
+		if _, drop := dropped[i]; drop {
+			continue
+		}
+		if s.Degenerate() {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// applySameSrcRules processes one group of fully-coincident segments per
+// §11.7's same-source cases. Skips different-source cases (those need
+// topological-merge support not yet implemented).
+func applySameSrcRules(segs []Segment, idxs []int, dropped map[int]struct{}) {
+	// Partition by (Src, Reversed).
+	var subjFwd, subjRev, clipFwd, clipRev []int
+	for _, i := range idxs {
+		s := &segs[i]
+		switch {
+		case s.Src == Subject && !s.Reversed:
+			subjFwd = append(subjFwd, i)
+		case s.Src == Subject && s.Reversed:
+			subjRev = append(subjRev, i)
+		case s.Src == Clip && !s.Reversed:
+			clipFwd = append(clipFwd, i)
+		case s.Src == Clip && s.Reversed:
+			clipRev = append(clipRev, i)
+		}
+	}
+
+	// Same-source same-direction duplicates: keep first, drop the rest.
+	dedupExtras := func(group []int) {
+		for _, i := range group[1:] {
+			dropped[i] = struct{}{}
+		}
+	}
+	if len(subjFwd) > 1 {
+		dedupExtras(subjFwd)
+		subjFwd = subjFwd[:1]
+	}
+	if len(subjRev) > 1 {
+		dedupExtras(subjRev)
+		subjRev = subjRev[:1]
+	}
+	if len(clipFwd) > 1 {
+		dedupExtras(clipFwd)
+		clipFwd = clipFwd[:1]
+	}
+	if len(clipRev) > 1 {
+		dedupExtras(clipRev)
+		clipRev = clipRev[:1]
+	}
+
+	// Same-source opposite-direction pairs cancel. We only need to know
+	// how many pairs to drop, then take that many indices from each side.
+	pairCancel := func(fwd, rev []int) {
+		n := min(len(fwd), len(rev))
+		for i := range n {
+			dropped[fwd[i]] = struct{}{}
+			dropped[rev[i]] = struct{}{}
+		}
+	}
+	pairCancel(subjFwd, subjRev)
+	pairCancel(clipFwd, clipRev)
+}

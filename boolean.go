@@ -45,6 +45,14 @@ func Union(a, b MultiPolygon) (MultiPolygon, error) {
 		return a, nil
 	}
 
+	// Idempotency short-circuit: Union(A, A) = A. Otherwise the sweep
+	// would feed every Subject edge alongside a coincident Clip edge of
+	// the same direction — a §11.7 case the current engine doesn't yet
+	// handle by emitting one merged edge.
+	if mpolyEqual(a, b) {
+		return a, nil
+	}
+
 	if !a.BoundingBox().Intersects(b.BoundingBox()) {
 		out := make(MultiPolygon, 0, len(a)+len(b))
 		out = append(out, a...)
@@ -65,6 +73,10 @@ func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
 	if len(a) == 0 || len(b) == 0 {
 		return MultiPolygon{}, nil
 	}
+	// Idempotency short-circuit: Intersect(A, A) = A. See [Union] note.
+	if mpolyEqual(a, b) {
+		return a, nil
+	}
 	if !a.BoundingBox().Intersects(b.BoundingBox()) {
 		return MultiPolygon{}, nil
 	}
@@ -82,6 +94,10 @@ func Difference(a, b MultiPolygon) (MultiPolygon, error) {
 	}
 	if len(b) == 0 {
 		return a, nil
+	}
+	// Identity short-circuit: Difference(A, A) = ∅.
+	if mpolyEqual(a, b) {
+		return MultiPolygon{}, nil
 	}
 	if !a.BoundingBox().Intersects(b.BoundingBox()) {
 		return a, nil
@@ -104,6 +120,10 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 	case len(b) == 0:
 		return a, nil
 	}
+	// Identity short-circuit: Xor(A, A) = ∅.
+	if mpolyEqual(a, b) {
+		return MultiPolygon{}, nil
+	}
 	if !a.BoundingBox().Intersects(b.BoundingBox()) {
 		out := make(MultiPolygon, 0, len(a)+len(b))
 		out = append(out, a...)
@@ -111,6 +131,44 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 		return out, nil
 	}
 	return runBooleanOp(a, b, clip.OpXor)
+}
+
+// mpolyEqual reports whether two MultiPolygons are deeply equal — same
+// piece count, same outer ring vertices in the same order, same holes.
+// Used by the idempotency short-circuits in [Union] / [Intersect] /
+// [Difference] / [Xor] to bypass the engine when inputs are identical.
+// The engine doesn't yet handle the §11.7 same-direction-different-source
+// coincident edges that arise from identical inputs.
+func mpolyEqual(a, b MultiPolygon) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !polyEqual(a[i].Outer, b[i].Outer) {
+			return false
+		}
+		if len(a[i].Holes) != len(b[i].Holes) {
+			return false
+		}
+		for j := range a[i].Holes {
+			if !polyEqual(a[i].Holes[j], b[i].Holes[j]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func polyEqual(a, b Polygon) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
@@ -124,6 +182,7 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
 
 	segs = clip.SplitOverlaps(segs)
+	segs = clip.DedupCoincidentEdges(segs)
 	sw := clip.Sweep(segs, op)
 	if sw.Err != nil {
 		if errors.Is(sw.Err, clip.ErrUnsupportedHorizontal) {

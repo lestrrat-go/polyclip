@@ -157,3 +157,41 @@ func TestSplitAtPreservesDirection(t *testing.T) {
 		}
 	}
 }
+
+func TestDedupCoincidentEdgesSameSrcSameDir(t *testing.T) {
+	// Two identical Subject segments — same Bot/Top/Src/Reversed.
+	// DedupCoincidentEdges should keep one, drop the duplicate.
+	a := segSrc(0, 0, 10, 10, Subject)
+	segs := []Segment{a, a, segSrc(5, 5, 15, 15, Clip)}
+	out := DedupCoincidentEdges(segs)
+	if len(out) != 2 {
+		t.Errorf("len: got %d want 2 (1 dedup + 1 untouched); out=%+v", len(out), out)
+	}
+}
+
+func TestDedupCoincidentEdgesSameSrcOppositeDir(t *testing.T) {
+	// Two Subject segments with opposite input directions (one Reversed,
+	// one not) — same canonical Bot/Top. Cancel — drop both.
+	fwd := NewSegment(fixed.Point{X: 0, Y: 0}, fixed.Point{X: 10, Y: 10}, Subject)
+	rev := NewSegment(fixed.Point{X: 10, Y: 10}, fixed.Point{X: 0, Y: 0}, Subject)
+	if fwd.Reversed == rev.Reversed {
+		t.Fatalf("test setup: expected opposite Reversed flags; fwd=%+v rev=%+v", fwd, rev)
+	}
+	segs := []Segment{fwd, rev, segSrc(5, 5, 15, 15, Clip)}
+	out := DedupCoincidentEdges(segs)
+	if len(out) != 1 {
+		t.Errorf("len: got %d want 1 (both cancelled, 1 untouched); out=%+v", len(out), out)
+	}
+}
+
+func TestDedupCoincidentEdgesDifferentSrcUnchanged(t *testing.T) {
+	// Different-source coincident pair — NOT dropped by Dedup (needs the
+	// full §11.7 topological merge which isn't implemented yet).
+	subj := segSrc(0, 0, 10, 10, Subject)
+	clip := NewSegment(fixed.Point{X: 0, Y: 0}, fixed.Point{X: 10, Y: 10}, Clip)
+	segs := []Segment{subj, clip}
+	out := DedupCoincidentEdges(segs)
+	if len(out) != 2 {
+		t.Errorf("len: got %d want 2 (diff-src preserved); out=%+v", len(out), out)
+	}
+}

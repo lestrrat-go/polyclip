@@ -181,6 +181,58 @@ func TestSweepAxialRectangleSubject(t *testing.T) {
 	}
 }
 
+func TestSweepStaircasePolygon(t *testing.T) {
+	// L-shaped staircase polygon with a mid-bound horizontal (e2 = (2,2)→(4,2))
+	// inside the Right bound from the local minimum at (0,0). Per DESIGN.md
+	// §12.10.5's worked trace, this exercises advanceBoundCursor's mid-bound
+	// horizontal emission and the trailing-horizontal close path.
+	pts := []fixed.Point{
+		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2},
+		{X: 4, Y: 2}, {X: 4, Y: 4}, {X: 0, Y: 4},
+	}
+	n := len(pts)
+	segs := make([]Segment, 0, n)
+	for i := range n {
+		j := i + 1
+		if j == n {
+			j = 0
+		}
+		seg := NewSegment(pts[i], pts[j], Subject)
+		if !seg.Degenerate() {
+			segs = append(segs, seg)
+		}
+	}
+	r := Sweep(segs, OpUnion)
+	if r.Err != nil {
+		t.Fatalf("sweep err: %v", r.Err)
+	}
+	closed := closedRings(r.Rings)
+	if len(closed) != 1 {
+		t.Fatalf("closed ring count: %d want 1; rings=%v", len(closed), summarizeRings(r.Rings))
+	}
+	ringPts := closed[0].Points()
+	if len(ringPts) != 6 {
+		t.Errorf("vertex count: %d want 6; pts=%v", len(ringPts), ringPts)
+	}
+	if a := signedArea(ringPts); a <= 0 {
+		t.Errorf("ring traverses CW (signed area %d, want positive — CCW); pts=%v", a, ringPts)
+	}
+	// All six input vertices should appear in the output ring.
+	want := map[fixed.Point]bool{
+		{X: 0, Y: 0}: true, {X: 2, Y: 0}: true, {X: 2, Y: 2}: true,
+		{X: 4, Y: 2}: true, {X: 4, Y: 4}: true, {X: 0, Y: 4}: true,
+	}
+	for _, p := range ringPts {
+		if !want[p] {
+			t.Errorf("unexpected vertex %v", p)
+		}
+		delete(want, p)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing vertices: %v", want)
+	}
+}
+
 func TestSweepWShapePolygon(t *testing.T) {
 	// CCW "W" polygon with two local minima — exercises handleLocalMinimum
 	// with the bound pre-pass to ensure each minimum gets the correct

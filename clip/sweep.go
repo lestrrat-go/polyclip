@@ -74,29 +74,33 @@ func newSweep(segs []Segment, op Operation) *sweep {
 		bySeg:  make(map[*Segment]*ActiveEdge, len(segs)),
 		minima: make(map[fixed.Point]*LocalMin),
 	}
-	hinfo, err := ClassifyHorizontals(s.segs)
-	if err != nil {
-		s.err = err
-		return s
-	}
-	s.horiz = hinfo
-
-	// Compute local minima via the bound-model pre-pass (DESIGN.md §12.7).
-	// On success, schedule EventLocalMin per minimum and mark "claimed"
-	// segments (leading horizontals + first non-horizontal of each bound)
-	// so their per-segment Bot/Horiz events are skipped — the bound-model
-	// spawn in handleLocalMin subsumes them. Tolerated failure
-	// (ErrOpenRing for non-ring inputs like single-segment unit tests):
-	// leave the map empty and let the per-edge dispatch keep working.
+	// Try the bound-model pre-pass first (DESIGN.md §12.7 / §12.10). On
+	// success it claims every segment of every bound — handleLocalMin
+	// spawns at minima, advanceBoundCursor advances through mid-bound
+	// horizontals, closeBound closes at local maxima. ClassifyHorizontals
+	// is NOT called in this path: the bound model subsumes horizontal
+	// handling, including mid-bound (staircase) horizontals that the
+	// strict ClassifyHorizontals rejects.
+	//
+	// On BLM failure (open-chain inputs, shared vertices, etc.) fall back
+	// to the legacy per-edge dispatch with strict ClassifyHorizontals.
 	claimed := make(map[*Segment]struct{})
-	if mins, mErr := BuildLocalMinima(s.segs); mErr == nil {
+	mins, mErr := BuildLocalMinima(s.segs)
+	if mErr == nil {
 		for i := range mins {
 			lm := &mins[i]
 			s.minima[lm.Vertex] = lm
 			s.queue.Push(Event{Kind: EventLocalMin, P: lm.Vertex, LocalMin: lm})
-			claimSpawnSegments(claimed, lm.Left)
-			claimSpawnSegments(claimed, lm.Right)
+			claimAllSegments(claimed, lm.Left)
+			claimAllSegments(claimed, lm.Right)
 		}
+	} else {
+		hinfo, hErr := ClassifyHorizontals(s.segs)
+		if hErr != nil {
+			s.err = hErr
+			return s
+		}
+		s.horiz = hinfo
 	}
 
 	for i := range segs {
@@ -105,12 +109,7 @@ func newSweep(segs []Segment, op Operation) *sweep {
 			continue
 		}
 		if _, isClaimed := claimed[seg]; isClaimed {
-			// Bound-model spawn handles the local-min side; Top still
-			// fires for non-horizontals so handleThroughVertex /
-			// handleLocalMaximum can close or advance.
-			if !seg.Horizontal() {
-				s.queue.Push(Event{Kind: EventTop, P: seg.Top, SegA: seg})
-			}
+			// Bound model owns every event for this segment.
 			continue
 		}
 		if seg.Horizontal() {
@@ -129,20 +128,16 @@ func newSweep(segs []Segment, op Operation) *sweep {
 	return s
 }
 
-// claimSpawnSegments marks every segment of b up to and including the first
-// non-horizontal as "claimed" by the bound-model spawn. Subsequent per-
-// segment Bot/Horiz events for these segments are skipped — handleLocalMin
-// does the equivalent work via [sweep.spawnBoundActive] plus inline OutPt
-// emission for any leading horizontals.
-func claimSpawnSegments(claimed map[*Segment]struct{}, b *Bound) {
+// claimAllSegments marks every segment of b as "claimed" by the bound
+// model. Per-segment event scheduling for these segments is suppressed
+// in newSweep — handleLocalMin spawns, handleTop advances the cursor and
+// closes via §12.10's in-place protocol.
+func claimAllSegments(claimed map[*Segment]struct{}, b *Bound) {
 	if b == nil {
 		return
 	}
 	for _, seg := range b.Segs {
 		claimed[seg] = struct{}{}
-		if !seg.Horizontal() {
-			return
-		}
 	}
 }
 
@@ -360,6 +355,11 @@ func (s *sweep) handleLocalMin(e Event) {
 	if leftAE.Seg.Bot != lm.Vertex {
 		AddOutPt(leftAE, leftAE.Seg.Bot)
 	}
+	// Schedule first EventTop for each bound (lazy scheduling per §12.10.4).
+	// Subsequent EventTops are scheduled by advanceBoundCursor as the cursor
+	// walks the bound's Segs.
+	s.queue.Push(Event{Kind: EventTop, P: leftAE.Seg.Top, SegA: leftAE.Seg})
+	s.queue.Push(Event{Kind: EventTop, P: rightAE.Seg.Top, SegA: rightAE.Seg})
 	// Schedule intersection checks with new AEL neighbours.
 	iL := s.ael.IndexOf(leftAE)
 	if iL >= 0 {
@@ -404,7 +404,12 @@ func (s *sweep) spawnBoundActive(b *Bound) *ActiveEdge {
 }
 
 // handleLocalMaximum closes the two AEL edges meeting at a top vertex,
-// emitting AddLocalMaxPoly if both were contributing.
+// emitting AddLocalMaxPoly if both are hot (assigned to an OutRec).
+// Contributing is not the right check here: at intersected/overlapping
+// inputs, an edge may have Contributing=false after a post-swap
+// reclassification yet still belong to a hot OutRec that needs to be
+// joined/closed at this vertex. IsHotEdge captures membership in a ring,
+// which is what AddLocalMaxPoly needs.
 func (s *sweep) handleLocalMaximum(t1, t2 Event) {
 	ae1, ok1 := s.bySeg[t1.SegA]
 	ae2, ok2 := s.bySeg[t2.SegA]
@@ -416,7 +421,7 @@ func (s *sweep) handleLocalMaximum(t1, t2 Event) {
 		s.appendTrace(t2, nil)
 		return
 	}
-	if ae1.Contributing && ae2.Contributing {
+	if ae1.IsHotEdge() && ae2.IsHotEdge() {
 		AddLocalMaxPoly(s.ael, ae1, ae2, t1.P)
 	}
 	s.ael.Remove(ae1)
@@ -494,6 +499,18 @@ func (s *sweep) handleTop(e Event) {
 	if !ok {
 		return
 	}
+
+	// Bound-model path (§12.10.4 / §12.10.5).
+	if ae.Bound != nil {
+		if ae.IsBoundLast() {
+			s.closeBound(ae, nil, e.P.Y, true)
+			return
+		}
+		s.advanceBoundCursor(ae, e.P)
+		return
+	}
+
+	// Legacy path: per-segment Top with no bound info.
 	i := s.ael.IndexOf(ae)
 	left, right := s.ael.LeftOf(i), s.ael.RightOf(i)
 	if ae.Contributing && ae.IsHotEdge() {
@@ -504,6 +521,168 @@ func (s *sweep) handleTop(e Event) {
 	if left != nil && right != nil {
 		s.maybeScheduleIntersect(left, right, e.P.Y)
 	}
+}
+
+// advanceBoundCursor advances ae's bound cursor past one or more horizontals
+// to the next non-horizontal segment, emitting OutPts at horizontal endpoints
+// along the way. Per DESIGN.md §12.10.4 the update is IN PLACE — the AE
+// keeps its AEL position (mirroring Clipper2's UpdateEdgeIntoAEL at
+// engine.cpp:1731). Schedules the next EventTop for the new current edge.
+//
+// If the run of horizontals reaches the end of the bound (trailing
+// horizontals at a local max), delegates to closeBound.
+func (s *sweep) advanceBoundCursor(ae *ActiveEdge, currentTop fixed.Point) {
+	if ae.Contributing && ae.IsHotEdge() {
+		AddOutPt(ae, currentTop)
+	}
+	b := ae.Bound
+	next := ae.EdgeIdx + 1
+	var horizontals []*Segment
+	for next < len(b.Segs) && b.Segs[next].Horizontal() {
+		horizontals = append(horizontals, b.Segs[next])
+		next++
+	}
+	if next >= len(b.Segs) {
+		// advanceBoundCursor already emitted ae.Seg.Top — closeBound
+		// should not re-emit.
+		s.closeBound(ae, horizontals, currentTop.Y, false)
+		return
+	}
+	// Mid-bound: emit at each horizontal's far endpoint in bound traversal
+	// direction.
+	for _, h := range horizontals {
+		if ae.Contributing && ae.IsHotEdge() {
+			AddOutPt(ae, fixed.Point{X: boundHorizontalFarX(b, h), Y: currentTop.Y})
+		}
+	}
+	// IN-PLACE update: do NOT remove/reinsert in the AEL. The slope may
+	// change but AEL ordering is fixed by the next scanbeam's intersection
+	// pass (§12.10.1).
+	delete(s.bySeg, ae.Seg)
+	ae.EdgeIdx = next
+	ae.Seg = b.Segs[next]
+	ae.CurrX = ae.Seg.Bot.X
+	s.bySeg[ae.Seg] = ae
+	s.queue.Push(Event{Kind: EventTop, P: ae.Seg.Top, SegA: ae.Seg})
+	// Schedule intersection checks against the new segment's slope: the
+	// previous segment's crossings have been processed but the new edge
+	// may cross neighbours that the old one didn't.
+	i := s.ael.IndexOf(ae)
+	if i >= 0 {
+		if left := s.ael.LeftOf(i); left != nil {
+			s.maybeScheduleIntersect(left, ae, currentTop.Y)
+		}
+		if right := s.ael.RightOf(i); right != nil {
+			s.maybeScheduleIntersect(ae, right, currentTop.Y)
+		}
+	}
+}
+
+// closeBound closes the ring at a local maximum. Per DESIGN.md §12.10.5.
+// trailingHorizontals is the list of trailing horizontals advanced through
+// (nil for the no-trailing case where ae's last bound segment is non-
+// horizontal).
+//
+// emitTopFirst controls whether to emit ae.Seg.Top before the rest of the
+// trailing-horizontal walk. handleTop callers pass true (no prior emit);
+// advanceBoundCursor passes false (it already emitted the Top).
+func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fixed.Coord, emitTopFirst bool) {
+	if emitTopFirst && ae.Contributing && ae.IsHotEdge() {
+		AddOutPt(ae, ae.Seg.Top)
+	}
+	// Emit far ends of intermediate trailing horizontals (all but the
+	// last — the last's far end is the local-max vertex and is emitted
+	// once via AddLocalMaxPoly or by the symmetric partner).
+	if len(trailingHorizontals) > 1 {
+		for _, hh := range trailingHorizontals[:len(trailingHorizontals)-1] {
+			if ae.Contributing && ae.IsHotEdge() {
+				AddOutPt(ae, fixed.Point{X: boundHorizontalFarX(ae.Bound, hh), Y: y})
+			}
+		}
+	}
+	// Resolve local-max vertex.
+	var maxPt fixed.Point
+	if len(trailingHorizontals) > 0 {
+		h := trailingHorizontals[len(trailingHorizontals)-1]
+		maxPt = fixed.Point{X: boundHorizontalFarX(ae.Bound, h), Y: y}
+	} else {
+		maxPt = ae.Seg.Top
+	}
+
+	// Find partner via OutRec.
+	var partner *ActiveEdge
+	if ae.Outrec != nil {
+		if ae.Outrec.FrontEdge != nil && ae.Outrec.FrontEdge != ae {
+			partner = ae.Outrec.FrontEdge
+		} else if ae.Outrec.BackEdge != nil && ae.Outrec.BackEdge != ae {
+			partner = ae.Outrec.BackEdge
+		}
+	}
+
+	// Case A: partner doesn't exist or isn't at its bound's last. Emit
+	// maxPt on ae's chain to capture the local-max vertex in the ring;
+	// remove ae but leave Outrec.FrontEdge / BackEdge intact so the
+	// partner's eventual closeBound can detect "ae already finished."
+	if partner == nil || !partner.IsBoundLast() {
+		if ae.Contributing && ae.IsHotEdge() {
+			AddOutPt(ae, maxPt)
+		}
+		s.ael.Remove(ae)
+		delete(s.bySeg, ae.Seg)
+		return
+	}
+
+	// Case B: partner at end but already removed (Case A on partner's
+	// earlier closeBound). The local-max vertex was emitted by partner;
+	// just close the ring without re-emitting.
+	if s.ael.IndexOf(partner) < 0 {
+		outrec := ae.Outrec
+		if outrec != nil {
+			outrec.FrontEdge = nil
+			outrec.BackEdge = nil
+		}
+		ae.Outrec = nil
+		partner.Outrec = nil
+		s.ael.Remove(ae)
+		delete(s.bySeg, ae.Seg)
+		return
+	}
+
+	// Case C: symmetric — both at end, both in AEL. AddLocalMaxPoly closes
+	// with FrontEdge passed first by convention so the local-max vertex
+	// prepends to Pts.
+	front, back := partner, ae
+	if ae.IsFront() {
+		front, back = ae, partner
+	}
+	if front.Contributing && front.IsHotEdge() && back.Contributing && back.IsHotEdge() {
+		AddLocalMaxPoly(s.ael, front, back, maxPt)
+	}
+	s.ael.Remove(ae)
+	s.ael.Remove(partner)
+	delete(s.bySeg, ae.Seg)
+	delete(s.bySeg, partner.Seg)
+}
+
+// boundHorizontalFarX returns the X of horizontal h's "far" endpoint as
+// traversed by bound b. Bound direction (forward = input order, backward =
+// reverse input) is inferred from the first non-horizontal segment's
+// Reversed flag — non-horizontals in a forward bound are Reversed=false,
+// in a backward bound Reversed=true (DESIGN.md §12.10.4).
+func boundHorizontalFarX(b *Bound, h *Segment) fixed.Coord {
+	forward := true
+	for _, seg := range b.Segs {
+		if !seg.Horizontal() {
+			forward = !seg.Reversed
+			break
+		}
+	}
+	// far is canonical Top iff traversal +X (forward AND h not reversed,
+	// or backward AND h reversed).
+	if forward == !h.Reversed {
+		return h.Top.X
+	}
+	return h.Bot.X
 }
 
 // handleHorizMin handles a local-min horizontal: spawn a new ring whose two

@@ -666,6 +666,8 @@ After §11.2 step 5, the only collinear pairs the sweep sees are pairs that shar
 
   3. `closeBound`'s Case C is also relaxed from `Contributing && IsHotEdge` to just `IsHotEdge`. After a synth-intersect, the new owner of a chain may be classified non-contributing at the local-max scanline but is still hot — its closure must run so the ring closes cleanly.
 
+  **Scope limitation**: the synth-intersect mechanism is currently Union-specific. For Intersect / Difference / Xor on axially-overlapping inputs (the case where two rectangles share a horizontal coincident edge that gets dropped/split by preprocess), the engine produces incorrect rings. Diamonds and other non-axial overlaps work for all four ops because they cross via real `IntersectEdges` events. Op-aware synth-intersect (different swap semantics per op) is a planned follow-up. `TestIntersect/Difference/XorOverlappingAxisAligned` in `boolean_adversarial_test.go` are skipped pending this work.
+
   Identical inputs (`Union(A, A)` and analogues) remain a degenerate case — every edge becomes a diff-src coincident pair at the SAME local-min vertex, which the bound model's BuildLocalMinima can't disambiguate. These are short-circuited at the API level in `boolean.go` (`mpolyEqual` check).
 
 ### 11.8 Horizontal segments

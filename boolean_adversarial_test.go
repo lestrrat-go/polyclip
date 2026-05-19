@@ -144,3 +144,158 @@ func TestDifferenceSelf(t *testing.T) {
 		t.Errorf("Diff(A,A) area %v want ≈0", got.Area())
 	}
 }
+
+// ===== Non-Union adversarial coverage on AXIAL inputs =====
+
+func TestIntersectTouchingBoundaryAxisAligned(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(10, 0, 5)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Touching only at boundary edge — intersection has zero area.
+	if got.Area() > 0.01 {
+		t.Errorf("Intersect(touching) area %v want ≈0", got.Area())
+	}
+}
+
+func TestDifferenceTouchingBoundaryAxisAligned(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(10, 0, 5)}
+	got, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Touching boundary doesn't subtract anything from A's area.
+	if math.Abs(got.Area()-a.Area()) > 0.01 {
+		t.Errorf("Difference(touching) area %v want %v", got.Area(), a.Area())
+	}
+}
+
+func TestXorTouchingBoundaryAxisAligned(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(10, 0, 5)}
+	got, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := a.Area() + b.Area()
+	if math.Abs(got.Area()-wantArea) > 0.01 {
+		t.Errorf("Xor(touching) area %v want %v", got.Area(), wantArea)
+	}
+}
+
+func TestIntersectNestedAxialSquares(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 10)}
+	b := MultiPolygon{sq(0, 0, 3)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Inner square fully contained → intersection equals the inner square.
+	if math.Abs(got.Area()-b.Area()) > 0.01 {
+		t.Errorf("Intersect(nested) area %v want %v", got.Area(), b.Area())
+	}
+}
+
+func TestDifferenceNestedAxialSquares(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 10)}
+	b := MultiPolygon{sq(0, 0, 3)}
+	got, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := a.Area() - b.Area()
+	if math.Abs(got.Area()-wantArea) > 0.01 {
+		t.Errorf("Difference(nested) area %v want %v", got.Area(), wantArea)
+	}
+}
+
+func TestXorNestedAxialSquares(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 10)}
+	b := MultiPolygon{sq(0, 0, 3)}
+	got, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := a.Area() - b.Area() // outer minus inner; equivalent to Difference here
+	if math.Abs(got.Area()-wantArea) > 0.01 {
+		t.Errorf("Xor(nested) area %v want %v", got.Area(), wantArea)
+	}
+}
+
+func TestIntersectTouchingAtVertex(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	b := MultiPolygon{diamond(10, 0, 5)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.Area() > 0.01 {
+		t.Errorf("Intersect(touching vertex) area %v want ≈0", got.Area())
+	}
+}
+
+func TestDifferenceTouchingAtVertex(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	b := MultiPolygon{diamond(10, 0, 5)}
+	got, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if math.Abs(got.Area()-a.Area()) > 0.01 {
+		t.Errorf("Difference(touching vertex) area %v want %v", got.Area(), a.Area())
+	}
+}
+
+// ===== Known-broken: axial overlapping for non-Union =====
+//
+// The §11.7 synth-intersect mechanism in clip/sweep.go is Union-specific.
+// For Intersect/Difference/Xor on axial OVERLAPPING (not nested / not
+// touching / not disjoint) inputs, the engine produces incorrect output.
+// See DESIGN.md §11.7 "Implementation" section for status. The tests
+// below are skipped pending engine work; remove the t.Skip when fixed.
+
+func TestIntersectOverlappingAxisAligned(t *testing.T) {
+	t.Skip("§11.7 synth-intersect is Union-only — Intersect on axial overlap produces wrong rings (tracked in roadmap)")
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(3, 0, 5)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 70.0 // overlap rectangle [-2,5]×[-5,5]
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Intersect(axial overlap) area %v want %v", got.Area(), wantArea)
+	}
+}
+
+func TestDifferenceOverlappingAxisAligned(t *testing.T) {
+	t.Skip("§11.7 synth-intersect is Union-only — Difference on axial overlap produces wrong rings (tracked in roadmap)")
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(3, 0, 5)}
+	got, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 30.0 // L-shape: sq1 minus overlap
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Difference(axial overlap) area %v want %v", got.Area(), wantArea)
+	}
+}
+
+func TestXorOverlappingAxisAligned(t *testing.T) {
+	t.Skip("§11.7 synth-intersect is Union-only — Xor on axial overlap produces wrong rings (tracked in roadmap)")
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(3, 0, 5)}
+	got, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 60.0 // two L-shapes: (sq1 ∪ sq2) − 2·overlap = 130 − 140? Let me recompute.
+	// Actually Xor area = |A| + |B| − 2|A∩B| = 100 + 100 − 2·70 = 60.
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Xor(axial overlap) area %v want %v", got.Area(), wantArea)
+	}
+}

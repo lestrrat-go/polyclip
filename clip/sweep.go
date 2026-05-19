@@ -207,6 +207,26 @@ func (s *sweep) run() {
 // coinciding with endpoints) fall back to per-event processing — output may
 // be wrong in those cases. They are explicitly addressed by a later
 // increment.
+// topsAreLocalMax reports whether the two Top events in tops correspond
+// to a real local-max meeting: both AEs are at their bound's last segment.
+// If either AE is mid-bound (advanceBoundCursor still has work to do),
+// the shared point is a through-vertex, NOT a local-max — dispatching to
+// handleLocalMaximum in that case incorrectly removes both AEs from the
+// AEL.
+func topsAreLocalMax(s *sweep, tops []Event) bool {
+	if len(tops) != 2 {
+		return false
+	}
+	ae1, ok1 := s.bySeg[tops[0].SegA]
+	ae2, ok2 := s.bySeg[tops[1].SegA]
+	if !ok1 || !ok2 {
+		// Unknown — defer to existing behavior (handleLocalMaximum's
+		// own fallback handles missing AEs).
+		return true
+	}
+	return ae1.IsBoundLast() && ae2.IsBoundLast()
+}
+
 func (s *sweep) handleBatch(batch []Event) {
 	var horizMaxOpens, tops, bots, localMins, horizMins, intersects []Event
 	for _, e := range batch {
@@ -238,7 +258,21 @@ func (s *sweep) handleBatch(batch []Event) {
 	case len(tops) == 1 && len(bots) == 1 && tops[0].SegA.Src == bots[0].SegA.Src:
 		s.handleThroughVertex(tops[0], bots[0])
 	case len(tops) == 2 && len(bots) == 0:
-		s.handleLocalMaximum(tops[0], tops[1])
+		// Two Tops at the same point: real local-max only if BOTH AEs are
+		// at their bound's last segment. Otherwise the AEs belong to
+		// different rings (or different bounds of the same ring) and the
+		// shared point is a "through-vertex" for one or both. Process
+		// each individually via handleTop so advanceBoundCursor handles
+		// non-terminal Tops correctly (DESIGN.md §11.7 touching-vertex
+		// diamonds case).
+		if topsAreLocalMax(s, tops) {
+			s.handleLocalMaximum(tops[0], tops[1])
+		} else {
+			for _, e := range tops {
+				s.handleTop(e)
+				s.appendTrace(e, nil)
+			}
+		}
 	case len(tops) == 0 && len(bots) == 2:
 		s.handleLocalMinimum(bots[0], bots[1])
 	case len(tops) == 0 && len(bots) == 1:

@@ -200,3 +200,104 @@ func TestUnionPreservesOrder(t *testing.T) {
 		t.Errorf("order: b's piece not last; got=%+v", got)
 	}
 }
+
+func TestIntersectEmpty(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	got, err := Intersect(nil, a)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Intersect(empty, a) = %v want empty", got)
+	}
+	got, err = Intersect(a, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Intersect(a, empty) = %v want empty", got)
+	}
+}
+
+func TestIntersectDisjoint(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	b := MultiPolygon{diamond(100, 100, 5)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Intersect(disjoint) = %v want empty", got)
+	}
+}
+
+func TestIntersectOverlappingDiamonds(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 10)}
+	b := MultiPolygon{diamond(5, 0, 10)}
+	got, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatalf("expected non-empty intersection, got 0 pieces")
+	}
+	// Intersection of two diamonds centred (0,0) and (5,0) with r=10 is
+	// a lens-shaped region with area > 0 but less than each diamond's 200.
+	gotArea := got.Area()
+	if gotArea <= 0 || gotArea >= 200 {
+		t.Errorf("Intersect area %v not in (0, 200); got=%+v", gotArea, got)
+	}
+}
+
+func TestDifferenceEmpty(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	got, err := Difference(nil, a)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Diff(empty, a) = %v want empty", got)
+	}
+	got, err = Difference(a, nil)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Diff(a, empty) len=%d want 1", len(got))
+	}
+}
+
+func TestDifferenceDisjoint(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	b := MultiPolygon{diamond(100, 100, 5)}
+	got, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Diff(a, disjoint b) len=%d want 1", len(got))
+	}
+}
+
+func TestXorEmpty(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	got, err := Xor(nil, a)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("Xor(empty, a) len=%d want 1", len(got))
+	}
+}
+
+func TestXorDisjoint(t *testing.T) {
+	a := MultiPolygon{diamond(0, 0, 5)}
+	b := MultiPolygon{diamond(100, 100, 5)}
+	got, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("Xor(disjoint) len=%d want 2", len(got))
+	}
+}

@@ -341,19 +341,24 @@ func (s *sweep) handleLocalMin(e Event) {
 	}
 	Classify(s.ael, leftAE, s.op)
 	Classify(s.ael, rightAE, s.op)
-	if !leftAE.Contributing || !rightAE.Contributing {
-		return
-	}
-	AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
-	// Leading horizontals: if a bound's first non-horizontal segment does
-	// not start at the local-min vertex, the bound traversed one or more
-	// horizontals from the vertex to that segment's Bot. Emit the segment's
-	// Bot as a ring vertex so the horizontal endpoint isn't lost.
-	if rightAE.Seg.Bot != lm.Vertex {
-		AddOutPt(rightAE, rightAE.Seg.Bot)
-	}
-	if leftAE.Seg.Bot != lm.Vertex {
-		AddOutPt(leftAE, leftAE.Seg.Bot)
+	// AddLocalMinPoly creates the new ring only when both bounds are
+	// contributing — for ops like Intersect / Difference, the bounds may
+	// emerge non-contributing at a local min and become contributing only
+	// after a later intersection swaps in the other source. Event
+	// scheduling (EventTop, intersection checks) MUST happen regardless,
+	// or the AEs sit in the AEL with no advance and the sweep stalls.
+	if leftAE.Contributing && rightAE.Contributing {
+		AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
+		// Leading horizontals: if a bound's first non-horizontal segment
+		// doesn't start at the local-min vertex, the bound traversed one
+		// or more horizontals to get there. Emit the segment's Bot as a
+		// ring vertex so the horizontal endpoint isn't lost.
+		if rightAE.Seg.Bot != lm.Vertex {
+			AddOutPt(rightAE, rightAE.Seg.Bot)
+		}
+		if leftAE.Seg.Bot != lm.Vertex {
+			AddOutPt(leftAE, leftAE.Seg.Bot)
+		}
 	}
 	// Schedule first EventTop for each bound (lazy scheduling per §12.10.4).
 	// Subsequent EventTops are scheduled by advanceBoundCursor as the cursor

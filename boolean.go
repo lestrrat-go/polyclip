@@ -33,8 +33,8 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 //     point-in-polygon (DESIGN.md §11.9).
 //
 // Inputs containing a mid-bound horizontal (a staircase step) return
-// [ErrHorizontalNotSupported]. This is a known limitation that will be
-// lifted in a future increment.
+// [ErrHorizontalNotSupported] when the bound-model pre-pass fails on
+// shared-vertex inputs that fall back to the per-edge path.
 func Union(a, b MultiPolygon) (MultiPolygon, error) {
 	switch {
 	case len(a) == 0 && len(b) == 0:
@@ -53,6 +53,64 @@ func Union(a, b MultiPolygon) (MultiPolygon, error) {
 	}
 
 	return runBooleanOp(a, b, clip.OpUnion)
+}
+
+// Intersect returns a ∩ b.
+//
+// Empty input or disjoint bounding boxes short-circuit to the empty
+// MultiPolygon. Otherwise the Vatti engine runs with [clip.OpIntersect]
+// and the §11.4 / §12.5 classification rules emit exactly the region
+// covered by BOTH inputs.
+func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
+	if len(a) == 0 || len(b) == 0 {
+		return MultiPolygon{}, nil
+	}
+	if !a.BoundingBox().Intersects(b.BoundingBox()) {
+		return MultiPolygon{}, nil
+	}
+	return runBooleanOp(a, b, clip.OpIntersect)
+}
+
+// Difference returns a ∖ b — the region covered by a but not by b.
+//
+// Empty subject (a) short-circuits to empty; empty clip (b) returns a
+// unchanged. Disjoint bounding boxes return a unchanged. Otherwise the
+// Vatti engine runs with [clip.OpDifference].
+func Difference(a, b MultiPolygon) (MultiPolygon, error) {
+	if len(a) == 0 {
+		return MultiPolygon{}, nil
+	}
+	if len(b) == 0 {
+		return a, nil
+	}
+	if !a.BoundingBox().Intersects(b.BoundingBox()) {
+		return a, nil
+	}
+	return runBooleanOp(a, b, clip.OpDifference)
+}
+
+// Xor returns the symmetric difference (a ∪ b) ∖ (a ∩ b) — the region
+// covered by exactly one of the inputs.
+//
+// Empty operands short-circuit to the other input (or empty if both are
+// empty). Disjoint bounding boxes return the concatenation, equivalent to
+// Union. Otherwise the Vatti engine runs with [clip.OpXor].
+func Xor(a, b MultiPolygon) (MultiPolygon, error) {
+	switch {
+	case len(a) == 0 && len(b) == 0:
+		return MultiPolygon{}, nil
+	case len(a) == 0:
+		return b, nil
+	case len(b) == 0:
+		return a, nil
+	}
+	if !a.BoundingBox().Intersects(b.BoundingBox()) {
+		out := make(MultiPolygon, 0, len(a)+len(b))
+		out = append(out, a...)
+		out = append(out, b...)
+		return out, nil
+	}
+	return runBooleanOp(a, b, clip.OpXor)
 }
 
 // runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
@@ -141,36 +199,45 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		}
 	}
 
-	result := make(MultiPolygon, len(outers))
-	for i, o := range outers {
-		result[i] = ExPolygon{Outer: o.poly}
-	}
-
-	// Assign each hole to the outer with the smallest bbox that contains a
-	// sample vertex of the hole (DESIGN.md §11.9).
-	for _, h := range holes {
+	// First pass: resolve hole→outer ownership. CW rings (negative signed
+	// area) with no enclosing outer are not actually holes — they came out
+	// of the sweep in CW direction (typical of Intersect / Difference /
+	// Xor where the cycle's Front/Back assignment differs from Union's).
+	// Reverse them and promote to outers (DESIGN.md §11.9 + §12.10).
+	holeOwners := make([]int, len(holes))
+	for hi, h := range holes {
+		holeOwners[hi] = -1
 		if len(h.poly) == 0 {
 			continue
 		}
 		sample := h.poly[0]
-		owner := -1
 		var ownerArea float64
 		for i, o := range outers {
-			if !o.bbox.Contains(sample) {
-				continue
-			}
-			if !o.poly.Contains(sample) {
+			if !o.bbox.Contains(sample) || !o.poly.Contains(sample) {
 				continue
 			}
 			a := o.poly.Area()
-			if owner == -1 || a < ownerArea {
-				owner = i
+			if holeOwners[hi] == -1 || a < ownerArea {
+				holeOwners[hi] = i
 				ownerArea = a
 			}
 		}
-		if owner >= 0 {
-			result[owner].Holes = append(result[owner].Holes, h.poly)
+		if holeOwners[hi] < 0 {
+			holes[hi].poly.Reverse()
+			outers = append(outers, holes[hi])
+			holes[hi] = classified{}
 		}
+	}
+
+	result := make(MultiPolygon, len(outers))
+	for i, o := range outers {
+		result[i] = ExPolygon{Outer: o.poly}
+	}
+	for hi, owner := range holeOwners {
+		if owner < 0 || holes[hi].poly == nil {
+			continue
+		}
+		result[owner].Holes = append(result[owner].Holes, holes[hi].poly)
 	}
 
 	return result

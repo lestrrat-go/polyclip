@@ -848,3 +848,155 @@ For first cut:
 
 These omissions reduce the surface to translate by roughly half.
 
+### 12.10 ActiveEdge lifecycle protocol for the bound model
+
+When increment 4' (bound model) is wired through `handleTop`, several state machines have to coexist without trampling each other: bound-cursor advance, intersection swaps, OutRec front/back rewiring, and AEL ordering. This section captures the rules — pin them down before implementing, because a partial implementation hits subtle ordering bugs that are hard to diagnose after the fact. Reference points are `clipper.engine.cpp:1731` (`UpdateEdgeIntoAEL`) and `clipper.engine.cpp:2118-2145` (the main loop).
+
+#### 12.10.1 Clipper2's scanbeam loop
+
+```
+loop:
+  InsertLocalMinimaIntoAEL(y)         // spawn bounds at this scanline
+  while PopHorz(e): DoHorizontal(e)   // process horizontals queued at bot
+  bot_y = y
+  y = PopScanline()                   // y = next scanline (top of beam)
+  DoIntersections(y)                  // ALL intersections at bot_y < ip.y < y
+  DoTopOfScanbeam(y)                  // Tops at y: maxima close, intermediate advance
+  while PopHorz(e): DoHorizontal(e)   // horizontals queued by DoTopOfScanbeam
+```
+
+Three crucial properties:
+
+1. **Intersections are processed strictly inside the scanbeam** — `DoIntersections` operates on a Y interval `(bot_y, top_y)`. Even if the algebra puts an intersection point at the exact top, Clipper2 clamps it inside the beam (`engine.cpp:2353-2374`). No intersection event ever fires at the same Y as a Top.
+
+2. **Within `DoTopOfScanbeam`, the cursor advance is in place** — `UpdateEdgeIntoAEL` mutates the AE's `bot`, `top`, `vertex_top`, `curr_x`, `dx` fields but does NOT touch the AEL linked list. The AE stays where it is.
+
+3. **Horizontals queued at advance fire AFTER all Top events at this scanline** — they're processed in a second `PopHorz` pass at the bottom of the loop, with the AEL already updated by all per-edge advances.
+
+The protocol disciplines us against three pitfalls: scheduling intersections at Top vertices (don't — they're impossible by construction), reordering the AEL during cursor advance (don't — leave it for the next intersection pass to fix), and interleaving horizontal handling with Top advance for sibling edges (don't — finish all Top advances first).
+
+#### 12.10.2 Mapping to polyclip's event queue
+
+Polyclip's `EventQueue` is a single priority queue ordered by `(Y, X, Kind)`. To preserve the Clipper2 ordering:
+
+- **EventIntersection.Y**: must satisfy `bot_y < ip.Y < top_y` for the scanbeam it belongs to. Already true by construction (`Intersect` only returns `ProperCross` when the open segment interiors meet; endpoint-touches are `Touch` and not scheduled).
+- **EventTop.Y**: at the Top vertex's Y. Fires after every EventIntersection at smaller Y, before any event at greater Y.
+- **EventLocalMin.Y**: at the local-min vertex Y. Same Y as the corresponding bound's first EventTop only when the bound is single-segment with `Bot.Y == Top.Y` — impossible for non-horizontal bounds.
+- **EventHoriz / EventHorizMaxOpen**: legacy per-edge path. With the bound model fully wired, these are unreachable for closed-ring inputs.
+
+EventKind ties at the same `(Y, X)` go through `EventHorizMaxOpen < EventTop < EventBot < EventLocalMin < EventHoriz < EventIntersection`. EventLocalMin sits after EventBot so a bound spawned at this scanline can see existing AEL state (its claimed Bots were suppressed in `newSweep`); EventIntersection is last and only fires when the algebra coincidentally puts the intersection X at the Top vertex's X — defensively scheduled, dispatched safely by `handleIntersection`'s adjacency check.
+
+#### 12.10.3 ActiveEdge field mutations
+
+`ActiveEdge` has eight fields whose mutation must follow a strict protocol:
+
+| Field | When mutated | By |
+|---|---|---|
+| `Seg` | At cursor advance | `advanceBoundCursor` (in place) |
+| `Bound` | Set once at spawn, never reassigned | `handleLocalMin` only |
+| `EdgeIdx` | At cursor advance | `advanceBoundCursor` (in place) |
+| `CurrX` | At cursor advance + every scanline update | `advanceBoundCursor`, `AEL.UpdateForScanline` |
+| `WindSelf` | At spawn + intersection swap | `Classify`, `IntersectEdges` |
+| `WindOther` | At spawn + intersection swap | `Classify`, `IntersectEdges` |
+| `Contributing` | At spawn + intersection re-classification | `Classify` |
+| `Outrec` | At AddLocalMinPoly + SwapOutrecs + AddLocalMaxPoly close | `AddLocalMinPoly`, `SwapOutrecs`, `AddLocalMaxPoly`, `JoinOutrecPaths` |
+
+Key invariant: **`Bound` is geometric; `Outrec` is logical**. An AE's `Bound` always refers to the input ring's bound that this AE is sweeping — it never changes after `handleLocalMin` spawns it. The AE's `Outrec` (and whether it's `FrontEdge` or `BackEdge` of that OutRec) DOES change at intersections via `SwapOutrecs`/`JoinOutrecPaths`. Cursor advance only consults `Bound`/`EdgeIdx`; it never inspects or mutates `Outrec`.
+
+#### 12.10.4 Cursor advance procedure (`advanceBoundCursor`)
+
+```
+advanceBoundCursor(ae, currentTop):
+  // Emit at the current edge's Top before advancing.
+  if ae.Contributing && ae.IsHotEdge():
+    AddOutPt(ae, currentTop)
+
+  // Walk forward through any horizontals between current and next non-horizontal.
+  next = ae.EdgeIdx + 1
+  horizontals = []
+  while next < len(ae.Bound.Segs) && ae.Bound.Segs[next].Horizontal():
+    horizontals.append(ae.Bound.Segs[next])
+    next += 1
+
+  if next >= len(ae.Bound.Segs):
+    // Trailing horizontals at local max → delegate to closeBound.
+    closeBound(ae, horizontals, currentTop.Y)
+    return
+
+  // Mid-bound horizontals: emit OutPt at each far endpoint.
+  for h in horizontals:
+    if ae.Contributing && ae.IsHotEdge():
+      AddOutPt(ae, {X: boundFarX(ae.Bound, h), Y: currentTop.Y})
+
+  // IN-PLACE update — DO NOT remove/reinsert in the AEL.
+  ae.EdgeIdx = next
+  ae.Seg = ae.Bound.Segs[next]
+  ae.CurrX = ae.Seg.Bot.X
+
+  // Schedule next EventTop for the new current edge.
+  queue.Push(EventTop{P: ae.Seg.Top, SegA: ae.Seg})
+```
+
+**Critical:** no `s.ael.Remove(ae)` and no `s.ael.Insert(ae)`. The AE keeps its AEL position. The new edge's slope may differ from the old, but the AEL ordering is fixed up by the NEXT scanbeam's `DoIntersections` pass, which will fire intersection events for any crossings caused by the slope change. This mirrors Clipper2's `UpdateEdgeIntoAEL` (`engine.cpp:1731`) exactly.
+
+A previous attempted implementation in this codebase did remove/reinsert during advance — it broke `TestUnionOverlappingDiamonds` (Union area 143.75 < expected 200) because the reinsertion disrupted adjacency invariants that pending intersection events relied on. The fix is the in-place protocol above.
+
+#### 12.10.5 Close procedure (`closeBound`)
+
+Called when a bound's cursor has either reached its last segment (no trailing horizontals) or walked through its trailing horizontals. The local-max vertex is:
+
+- Last segment's `Top` if no trailing horizontals.
+- Far endpoint of the last trailing horizontal otherwise (in bound traversal direction).
+
+Pairing protocol (when the partner — the OutRec's other edge — is at its own bound's last):
+
+```
+closeBound(ae, trailingHorizontals, y):
+  maxPt = (trailingHorizontals nonempty) ? boundFarX(...) : ae.Seg.Top
+  partner = OutRec partner of ae (FrontEdge if ae==BackEdge, else BackEdge)
+
+  if partner == nil || !partner.IsBoundLast():
+    // Asymmetric case: partner not yet at its end. Leave the close to the
+    // partner's eventual closeBound call. Emit maxPt on ae's chain and
+    // remove ae from AEL — the partner still references the OutRec.
+    if ae.Contributing && ae.IsHotEdge():
+      AddOutPt(ae, maxPt)
+    ael.Remove(ae)
+    delete(bySeg, ae.Seg)
+    return
+
+  // Both at end. AddLocalMaxPoly closes; FrontEdge passed first by
+  // convention so the local-max vertex prepends to Pts.
+  front, back = (ae.IsFront() ? ae : partner), (ae.IsFront() ? partner : ae)
+  if hot(front) && hot(back):
+    AddLocalMaxPoly(ael, front, back, maxPt)
+  ael.Remove(ae)
+  ael.Remove(partner)
+  delete(bySeg, ae.Seg)
+  delete(bySeg, partner.Seg)
+```
+
+For the symmetric case (both bounds reach their end at the same Y, which holds for axial rectangles, diamonds, the W-shape, and well-formed staircases), `partner.IsBoundLast()` is always true at the moment the first bound calls `closeBound`. The asymmetric branch is defensive — it can occur with self-touching polygons or intersected-then-rejoined bounds, both of which Phase 2 first-cut does not cover (DESIGN §12.9).
+
+#### 12.10.6 What `claim-all` does (and why it's required)
+
+To activate the bound model fully, ALL segments of every bound from `BuildLocalMinima` must be "claimed" — their per-segment Bot/Top/Horiz events are NOT scheduled. `handleLocalMin` spawns the AE with `Bound` and `EdgeIdx=firstNonHorizontalIdx`. `handleTop` (called from the bound-model EventTop scheduled lazily by `handleLocalMin` / `advanceBoundCursor`) handles all subsequent transitions via the in-place advance protocol above.
+
+The previous `claim-spawn` heuristic (claim only leading horizontals + first non-horizontal) leaves mid-bound horizontals and intermediate non-horizontals on the per-segment path, where `handleHoriz` / `handleThroughVertex` handle them. This works for axial rectangles and diamonds — but breaks for any polygon with mid-bound horizontals (staircases) because `ClassifyHorizontals` returns `HorizClassMid` for them, with no per-segment handler.
+
+`claim-all` requires the in-place cursor advance from §12.10.4. Switching to `claim-all` without fixing the advance was the chain that broke `TestUnionOverlappingDiamonds`.
+
+#### 12.10.7 Implementation checklist for the next attempt
+
+In order, each as its own commit:
+
+1. **Restore `claim-all`** in `newSweep`. Claim every segment of every bound. Skip per-segment events for all claimed segments.
+2. **Re-introduce `advanceBoundCursor` with in-place update** per §12.10.4. No `Remove`/`Insert` calls on `ael`.
+3. **Re-introduce `closeBound`** per §12.10.5.
+4. **Lazy-schedule the first `EventTop`** in `handleLocalMin` after spawning each bound's AE.
+5. **Make `handleTop` bound-aware**: if `ae.Bound != nil` and `!ae.IsBoundLast()`, call `advanceBoundCursor`; if `ae.Bound != nil` and `ae.IsBoundLast()`, call `closeBound(ae, nil, e.P.Y)`; else legacy path.
+6. **Verify ring tests still pass** — diamonds (single + disjoint), axial rectangles (single + disjoint + nested), W-shape, overlapping diamonds, touching boundary (still error per byStart ambiguity).
+7. **Add a staircase test** that confirms the L-shape from §12.10.5's worked trace (6 vertices, CCW, mid-bound horizontal) produces a correct closed ring with positive signed area.
+
+Each step in isolation should keep tests green. The integration is fragile because of the cross-cutting state machines; isolating per commit makes regressions easy to bisect.
+

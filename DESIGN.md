@@ -706,13 +706,13 @@ After the sweep terminates, every released `OutRing` becomes a `Polygon`:
 
 ### 11.10 Invariants the engine must maintain
 
-Useful as runtime asserts (controlled by a build tag) or as test post-conditions:
+Invariants 1, 2, and 5 below are checked as post-conditions by `clip.CheckInvariants` (called from `clip/invariants_test.go`). Invariants 3 and 4 are aspirational under the §11.7 synth-intersect implementation and are revised:
 
-1. After each event the AEL is sorted left-to-right by `CurrX` with slope tie-break.
-2. After each event no `WindSelf` exceeds the number of input rings of that source (sanity bound).
-3. Every `ActiveEdge` with non-nil `Out` is classified contributing.
-4. No two contributing same-source edges are adjacent in the AEL (would indicate a missed classification flip).
-5. At sweep end, every `OutRing.Pt` is non-nil → every ring closes.
+1. **AEL ordering**: after each event the AEL is sorted left-to-right by `CurrX` with slope tie-break. Checked by `clip.CheckAELSorted` (runtime callable; tests on AEL snapshots).
+2. **WindSelf bounded**: no `WindSelf` exceeds the number of input rings of that source. Checked as a sanity proxy: closed-ring count ≤ input segment count.
+3. ~~Every `ActiveEdge` with non-nil `Outrec` is classified contributing.~~ **No longer holds**: §11.7's `synthIntersect` legitimately leaves a hot edge non-contributing in mid-sweep (e.g. an edge swapped into another ring whose interior classification doesn't match this edge's own boundary status). Replaced by: **every closed output ring's cycle is well-formed** (Next/Prev links round-trip, OutPt back-pointers consistent). Checked by `clip.CheckInvariants`.
+4. ~~No two contributing same-source edges are adjacent in the AEL.~~ **Transiently violated**: during synth-intersect passes at local-min and local-max, adjacency may temporarily include two same-source contributing edges before re-classification settles. Not checked.
+5. **Rings either close or retire**: at sweep end, every `OutRec.Pts` is either non-nil (closed cycle) or nil (retired via `JoinOutrecPaths`). No partially-open rings. Checked by `clip.CheckInvariants`.
 
 ### 11.11 Implementation order for the remaining Phase 2 increments
 
@@ -774,6 +774,8 @@ Algorithm:
 4. Create the ring's first `OutPt` at `pt` and set `outrec.pts = op`.
 
 `is_new` is true when the local minimum is a real input vertex; false when it's a "synthetic" minimum created by IntersectEdges' "AddLocalMaxPoly + AddLocalMinPoly" tunnel case (§12.5).
+
+**Convention note**: polyclip's `AddLocalMinPoly` and `handleLocalMin` are CALLER-SIDE INVERTED relative to Clipper2's "front = leftmost" rule above. Our callers pass `(rightAE, leftAE)` as `(e1, e2)`, which combined with the §12.3 step-3 decision produces `outrec.FrontEdge = rightAE` (= rightmost) for the common no-prior-hot, `is_new=true` case. Everything downstream stays internally consistent because the FrontEdge/BackEdge identity is what matters (not which side is geometrically left), and `Polygon.SignedArea` in postprocess (§11.9) determines orientation independently. `handleHorizMin` follows the same convention. Keep this inversion in mind when comparing engine.cpp traces side-by-side.
 
 ### 12.4 AddLocalMaxPoly (`engine.cpp:1380-1433`) and JoinOutrecPaths (1435+)
 

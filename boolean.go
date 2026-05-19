@@ -8,12 +8,13 @@ import (
 	"github.com/lestrrat-go/polyclip/fixed"
 )
 
-// ErrHorizontalNotSupported is returned by [Union] (and future boolean ops)
-// when an input contains a horizontal edge that the engine cannot classify
-// as a local-min or local-max horizontal (typically a mid-bound horizontal
-// in a staircase). Axial rectangles and other inputs whose horizontals are
-// all local-min/max are supported; mid-bound horizontals are deferred to a
-// later increment (DESIGN.md §12.6 / §12.8 increment 4').
+// ErrHorizontalNotSupported is returned by the boolean ops when the
+// bound-model pre-pass [clip.BuildLocalMinima] fails (typically because
+// shared vertices between rings broke topology reconstruction) AND the
+// legacy per-edge fallback's [clip.ClassifyHorizontals] then encounters a
+// mid-bound horizontal it can't classify. The bound model itself handles
+// mid-bound horizontals natively (DESIGN.md §12.10), so well-formed input
+// rings without shared vertices never hit this path.
 var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizontal edge that is neither a local minimum nor a local maximum of its ring")
 
 // Union returns a ∪ b.

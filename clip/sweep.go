@@ -13,11 +13,13 @@ import (
 // segs is taken by value; callers should not mutate the slice after calling
 // Sweep, because the sweep retains pointers into it.
 //
-// Horizontal-segment support: axial local-minimum and local-maximum
-// horizontals are handled per §12.6 by classifying them in a pre-pass and
-// scheduling [EventHoriz] / [EventHorizMaxOpen] events. Mid-bound
-// horizontals (staircases) are not yet supported; their presence produces
-// a SweepResult whose Err field is set.
+// Horizontal-segment support: the bound model (DESIGN.md §12.10) handles
+// all horizontals — leading, trailing, and mid-bound — natively via
+// [emitLeadingHorizOutPts], [advanceBoundCursor]'s horizontal walk, and
+// [closeBound]'s trailing-horizontal pass. The legacy per-edge fallback
+// (via [ClassifyHorizontals]) runs only when [BuildLocalMinima] fails to
+// reconstruct ring topology; that fallback strictly rejects mid-bound
+// horizontals and surfaces [ErrUnsupportedHorizontal] via SweepResult.Err.
 func Sweep(segs []Segment, op Operation) *SweepResult {
 	s := newSweep(segs, op)
 	if s.err != nil {
@@ -57,6 +59,30 @@ type TraceEvent struct {
 	Contributing bool
 }
 
+// fallbackTrace is a debug helper: when fallbackTraceEnabled, [newSweep]
+// appends the BuildLocalMinima error message every time it falls back to
+// the legacy per-edge path. Used by an audit test to enumerate which
+// inputs exercise the fallback.
+var (
+	fallbackTrace        []string
+	fallbackTraceEnabled bool
+)
+
+// SetFallbackTraceEnabled toggles the BuildLocalMinima-fallback trace.
+// For audit tests only.
+func SetFallbackTraceEnabled(b bool) { fallbackTraceEnabled = b }
+
+// FallbackTrace returns a copy of the BuildLocalMinima-failure messages
+// recorded since the last [ClearFallbackTrace]. For audit tests only.
+func FallbackTrace() []string {
+	out := make([]string, len(fallbackTrace))
+	copy(out, fallbackTrace)
+	return out
+}
+
+// ClearFallbackTrace resets the fallback trace buffer.
+func ClearFallbackTrace() { fallbackTrace = fallbackTrace[:0] }
+
 type sweep struct {
 	segs   []Segment
 	op     Operation
@@ -90,6 +116,9 @@ func newSweep(segs []Segment, op Operation) *sweep {
 	// to the legacy per-edge dispatch with strict ClassifyHorizontals.
 	claimed := make(map[*Segment]struct{})
 	mins, mErr := BuildLocalMinima(s.segs)
+	if mErr != nil && fallbackTraceEnabled {
+		fallbackTrace = append(fallbackTrace, mErr.Error())
+	}
 	if mErr == nil {
 		for i := range mins {
 			lm := &mins[i]
@@ -916,12 +945,9 @@ func boundHorizontalFarX(b *Bound, h *Segment) fixed.Coord {
 // inserted their AEL entries.
 //
 // AddLocalMinPoly is called with (rightAE, leftAE) — i.e. FrontEdge=rightAE
-// and BackEdge=leftAE. This matches the de facto orientation produced by
-// [sweep.handleLocalMinimum] for non-horizontal local minima (set by the
-// heap order of the two Bot events) and gives the resulting OutPt cycle a
-// CCW Next-direction for CCW input. The DESIGN.md §12.3 wording about
-// "front=leftmost" is inverted in our code; see [DESIGN.md §12.3] for the
-// formal statement and TODO to reconcile.
+// and BackEdge=leftAE. This is polyclip's caller-side inversion of
+// Clipper2's "front=leftmost" convention (DESIGN.md §12.3 convention note);
+// it gives the resulting OutPt cycle a CCW Next-direction for CCW input.
 func (s *sweep) handleHorizMin(e Event) {
 	h := e.SegA
 	info := s.horiz[h]

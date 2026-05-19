@@ -147,8 +147,9 @@ func DedupCoincidentEdges(segs []Segment) []Segment {
 }
 
 // applySameSrcRules processes one group of fully-coincident segments per
-// §11.7's same-source cases. Skips different-source cases (those need
-// topological-merge support not yet implemented).
+// §11.7's same-source cases. Different-source cases are handled by the
+// sweep (synth-intersect at local-min and local-max — see sweep.go's
+// processSynthIntersectsAtLocalMin / findSynthMaxPartner).
 func applySameSrcRules(segs []Segment, idxs []int, dropped map[int]struct{}) {
 	// Partition by (Src, Reversed).
 	var subjFwd, subjRev, clipFwd, clipRev []int

@@ -229,16 +229,117 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		}
 	}
 
-	result := make(MultiPolygon, len(outers))
-	for i, o := range outers {
-		result[i] = ExPolygon{Outer: o.poly}
+	// Nested-outer demotion: when the sweep emits both an outer ring and
+	// an inner ring as CCW (e.g. Difference outer-minus-inner produces
+	// both rings CCW because our FrontEdge convention doesn't naturally
+	// reverse for holes), the inner-most must be demoted to a hole of
+	// its enclosing outer. Detect by point-in-polygon containment.
+	type outerOwner struct {
+		idx  int // -1 if this outer is top-level; else index of containing outer
+		area float64
 	}
+	owners := make([]outerOwner, len(outers))
+	for i := range outers {
+		owners[i] = outerOwner{idx: -1, area: outers[i].poly.Area()}
+	}
+	for i, oi := range outers {
+		if len(oi.poly) == 0 {
+			continue
+		}
+		// Sample with the centroid (average of vertices) — avoids
+		// boundary-vertex false positives when two polygons touch at a
+		// corner (sq1's vertex coincides with sq2's; that vertex would
+		// be reported as inside sq2 by Polygon.Contains).
+		sample := polyCentroid(oi.poly)
+		for j, oj := range outers {
+			if i == j || len(oj.poly) == 0 {
+				continue
+			}
+			// Only the LARGER polygon can contain the smaller — protects
+			// against mutual-containment false positives when both rings
+			// share a centroid (concentric polygons).
+			if owners[j].area <= owners[i].area {
+				continue
+			}
+			if !oj.bbox.Contains(sample) || !oj.poly.Contains(sample) {
+				continue
+			}
+			// oj contains oi. Track the SMALLEST containing outer.
+			if owners[i].idx == -1 || owners[j].area < owners[owners[i].idx].area {
+				owners[i].idx = j
+			}
+		}
+	}
+
+	// Determine nesting depth via parent chain. Even depth = outer; odd = hole.
+	depth := func(i int) int {
+		d := 0
+		for owners[i].idx != -1 {
+			i = owners[i].idx
+			d++
+		}
+		return d
+	}
+
+	resultOuters := make([]int, 0, len(outers))
+	for i := range outers {
+		if depth(i)%2 == 0 {
+			resultOuters = append(resultOuters, i)
+		} else {
+			// Demote to a hole of its parent outer. Reverse direction.
+			outers[i].poly.Reverse()
+		}
+	}
+
+	idxMap := make(map[int]int, len(resultOuters))
+	result := make(MultiPolygon, len(resultOuters))
+	for k, i := range resultOuters {
+		idxMap[i] = k
+		result[k] = ExPolygon{Outer: outers[i].poly}
+	}
+	// Attach demoted outers as holes of their parents.
+	for i := range outers {
+		if depth(i)%2 == 0 {
+			continue
+		}
+		// Find the nearest outer ancestor (parent with even depth).
+		ancestor := owners[i].idx
+		for ancestor != -1 && depth(ancestor)%2 != 0 {
+			ancestor = owners[ancestor].idx
+		}
+		if ancestor < 0 {
+			continue
+		}
+		if k, ok := idxMap[ancestor]; ok {
+			result[k].Holes = append(result[k].Holes, outers[i].poly)
+		}
+	}
+	// Attach explicit CW holes.
 	for hi, owner := range holeOwners {
 		if owner < 0 || holes[hi].poly == nil {
 			continue
 		}
-		result[owner].Holes = append(result[owner].Holes, holes[hi].poly)
+		if k, ok := idxMap[owner]; ok {
+			result[k].Holes = append(result[k].Holes, holes[hi].poly)
+		}
 	}
 
 	return result
+}
+
+// polyCentroid returns the average of the polygon's vertices — a point
+// guaranteed strictly inside a convex polygon and almost always inside a
+// well-formed concave polygon. Used as a containment-test sample point
+// where polygon vertices themselves would give boundary false-positives.
+func polyCentroid(p Polygon) Point {
+	if len(p) == 0 {
+		return Point{}
+	}
+	var sx, sy float64
+	for _, v := range p {
+		sx += v.X
+		sy += v.Y
+	}
+	n := float64(len(p))
+	return Point{X: sx / n, Y: sy / n}
 }

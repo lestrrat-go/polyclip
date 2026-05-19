@@ -68,6 +68,16 @@ func (b BBox) Contains(p Point) bool {
 	return p.X >= b.Min.X && p.X <= b.Max.X && p.Y >= b.Min.Y && p.Y <= b.Max.Y
 }
 
+// Intersects reports whether b and other share at least one point, including
+// boundary contact. An empty box intersects nothing.
+func (b BBox) Intersects(other BBox) bool {
+	if b.Empty() || other.Empty() {
+		return false
+	}
+	return b.Min.X <= other.Max.X && b.Max.X >= other.Min.X &&
+		b.Min.Y <= other.Max.Y && b.Max.Y >= other.Min.Y
+}
+
 // Width returns b.Max.X - b.Min.X, or 0 if b is empty.
 func (b BBox) Width() float64 {
 	if b.Empty() {

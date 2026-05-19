@@ -3,3 +3,7 @@
 *.test
 *.out
 coverage.txt
+# Fuzz failure corpus: locally discovered failures. Once triaged, migrate
+# to an explicit test in *_test.go and remove the raw file. Don't commit
+# raw failures.
+testdata/fuzz/

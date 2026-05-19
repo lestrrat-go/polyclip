@@ -445,6 +445,19 @@ func (s *sweep) handleThroughVertex(top Event, bot Event) {
 	ae.CurrX = bot.P.X
 	s.bySeg[bot.SegA] = ae
 
+	// Keep bound cursor consistent: if this edge belongs to a bound, find
+	// bot.SegA in the bound's Segs and update EdgeIdx so future bound-aware
+	// dispatch (planned for handleTop / handleLocalMaximum) sees the right
+	// position.
+	if ae.Bound != nil {
+		for i, seg := range ae.Bound.Segs {
+			if seg == bot.SegA {
+				ae.EdgeIdx = i
+				break
+			}
+		}
+	}
+
 	// If this contributing edge is hot, emit an OutPt at the vertex so the
 	// ring traces the polygon corner.
 	if ae.Contributing && ae.IsHotEdge() {

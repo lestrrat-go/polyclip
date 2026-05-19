@@ -65,7 +65,11 @@ func (q *EventQueue) Push(e Event) {
 // Pop removes and returns the next event in (Y, X, Kind) order. Calling Pop
 // on an empty queue panics; check [EventQueue.Len] first.
 func (q *EventQueue) Pop() Event {
-	return heap.Pop(&q.heap).(Event)
+	e, ok := heap.Pop(&q.heap).(Event)
+	if !ok {
+		panic("clip: event queue corrupted: non-Event in heap")
+	}
+	return e
 }
 
 // Peek returns the next event without removing it. The zero [Event] is
@@ -87,7 +91,11 @@ func (h eventHeap) Less(i, j int) bool { return h[i].Less(h[j]) }
 func (h eventHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *eventHeap) Push(x any) {
-	*h = append(*h, x.(Event))
+	e, ok := x.(Event)
+	if !ok {
+		panic("clip: pushed non-Event onto eventHeap")
+	}
+	*h = append(*h, e)
 }
 
 func (h *eventHeap) Pop() any {

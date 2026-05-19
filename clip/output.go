@@ -89,6 +89,7 @@ func AddOutPt(ae *ActiveEdge, pt fixed.Point) *OutPt {
 // Per DESIGN.md §12.3 / clipper.engine.cpp:1332.
 func AddLocalMinPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point, isNew bool) *OutPt {
 	outrec := &OutRec{Idx: ael.NextOutRecIdx()}
+	ael.RegisterRing(outrec)
 	e1.Outrec = outrec
 	e2.Outrec = outrec
 

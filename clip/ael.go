@@ -73,6 +73,7 @@ func slope(seg *Segment) float64 {
 // adequate; Phase 5 (DESIGN §7) replaces it with a balanced structure.
 type AEL struct {
 	edges         []*ActiveEdge
+	rings         []*OutRec
 	nextOutRecIdx int
 }
 
@@ -86,6 +87,17 @@ func (a *AEL) NextOutRecIdx() int {
 	a.nextOutRecIdx++
 	return idx
 }
+
+// RegisterRing records r in the AEL's ring registry so [AEL.Rings] returns
+// it after the sweep finishes. Called by [AddLocalMinPoly].
+func (a *AEL) RegisterRing(r *OutRec) {
+	a.rings = append(a.rings, r)
+}
+
+// Rings returns every [OutRec] created during the sweep. Closed rings have
+// non-nil Pts; merged-and-discarded rings have nil Pts and should be skipped
+// by postprocess.
+func (a *AEL) Rings() []*OutRec { return a.rings }
 
 // Len returns the number of active edges.
 func (a *AEL) Len() int { return len(a.edges) }

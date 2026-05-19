@@ -13,6 +13,12 @@ const (
 	// EventTop closes a segment: its top endpoint is reached and the
 	// segment should be removed from the active edge list.
 	EventTop EventKind = iota
+	// EventHoriz fires for a horizontal segment at its scanline Y; the
+	// segment is processed by walking the AEL between its endpoints and
+	// emitting contributions for every crossed active edge (see
+	// DESIGN.md §11.8). EventHoriz is ordered after EventTop and before
+	// EventBot at the same (Y, X) so closing edges leave the AEL first.
+	EventHoriz
 	// EventBot opens a segment: its bottom endpoint is reached and the
 	// segment should be inserted into the active edge list.
 	EventBot

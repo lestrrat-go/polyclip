@@ -31,6 +31,10 @@ type ActiveEdge struct {
 	// boolean operation's output, as determined by the classification
 	// rule in DESIGN.md §11.4. Set by [Classify].
 	Contributing bool
+
+	// Outrec is non-nil iff this edge is currently a "hot" edge contributing
+	// to an output ring. See DESIGN.md §12.2 and [ActiveEdge.IsHotEdge].
+	Outrec *OutRec
 }
 
 // XAtY returns the X coordinate where seg crosses scanline y, rounded to the
@@ -68,11 +72,20 @@ func slope(seg *Segment) float64 {
 // SwapAt at a known index is O(1). For Phase 2 correctness work this is
 // adequate; Phase 5 (DESIGN §7) replaces it with a balanced structure.
 type AEL struct {
-	edges []*ActiveEdge
+	edges         []*ActiveEdge
+	nextOutRecIdx int
 }
 
 // NewAEL returns an empty AEL.
 func NewAEL() *AEL { return &AEL{} }
+
+// NextOutRecIdx returns a fresh sequential index for a new [OutRec]. Used by
+// [AddLocalMinPoly] for deterministic ring-merge tie-breaking.
+func (a *AEL) NextOutRecIdx() int {
+	idx := a.nextOutRecIdx
+	a.nextOutRecIdx++
+	return idx
+}
 
 // Len returns the number of active edges.
 func (a *AEL) Len() int { return len(a.edges) }

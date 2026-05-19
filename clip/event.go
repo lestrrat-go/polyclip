@@ -18,19 +18,28 @@ const (
 	// the two adjacent verticals are still in the AEL when the horizontal
 	// closes the ring. See DESIGN.md §12.6.
 	EventHorizMaxOpen EventKind = iota
-	// EventTop closes a segment: its top endpoint is reached and the
-	// segment should be removed from the active edge list.
+	// EventTop closes a segment: its top endpoint is reached. In the
+	// bound model (DESIGN.md §12.1) this triggers a cursor advance on
+	// the bound (if the segment is not the bound's last) or ring closure
+	// at a local maximum (if it is).
 	EventTop
-	// EventBot opens a segment: its bottom endpoint is reached and the
-	// segment should be inserted into the active edge list.
+	// EventBot opens a segment: its bottom endpoint is reached.
+	//
+	// Deprecated by the bound model in favour of [EventLocalMin]. Kept
+	// in the constant set so its enum position pins EventLocalMin's
+	// ordering relative to EventTop. New schedulers should emit
+	// EventLocalMin instead.
 	EventBot
+	// EventLocalMin fires at a local-minimum vertex of an input ring.
+	// The handler reads the [LocalMin] payload, spawns two [ActiveEdge]s
+	// for the two ascending bounds, and inserts them into the AEL. Per
+	// DESIGN.md §12.1 / §12.7.
+	EventLocalMin
 	// EventHoriz fires for a local-minimum horizontal segment after every
-	// Top and Bot at the same Y. It is scheduled at the horizontal's
-	// (rightmost) Top so that the two adjacent verticals have both been
-	// inserted via EventBot before the horizontal spawns the ring. See
-	// DESIGN.md §11.8 / §12.6 for the rationale of the
-	// EventHorizMaxOpen < EventTop < EventBot < EventHoriz < EventIntersection
-	// ordering.
+	// Top and Bot at the same Y. See DESIGN.md §11.8 / §12.6.
+	//
+	// Deprecated by the bound model. Kept until the per-edge horizontal
+	// handlers are removed.
 	EventHoriz
 	// EventIntersection records that two segments cross at this point;
 	// their relative order in the active edge list must be swapped.
@@ -39,17 +48,21 @@ const (
 
 // Event is a single scanline event. The sweep processes events in
 // non-decreasing (P.Y, P.X) order; for ties at the same point, [EventKind]
-// breaks the tie via its declared constant order (Top < Bot < Intersection).
+// breaks the tie via its declared constant order.
 //
-// SegA always points at the segment most directly responsible for the event:
+// Payload by kind:
 //
-//   - For EventBot/EventTop, SegA is that segment.
-//   - For EventIntersection, SegA and SegB are the two crossing segments.
+//   - EventBot, EventTop, EventHoriz, EventHorizMaxOpen: SegA is the
+//     segment most directly responsible for the event.
+//   - EventIntersection: SegA and SegB are the two crossing segments.
+//   - EventLocalMin: LocalMin is the local-minimum descriptor with its
+//     two ascending bounds. SegA/SegB are nil.
 type Event struct {
-	Kind EventKind
-	P    fixed.Point
-	SegA *Segment
-	SegB *Segment // only for EventIntersection
+	Kind     EventKind
+	P        fixed.Point
+	SegA     *Segment
+	SegB     *Segment  // only for EventIntersection
+	LocalMin *LocalMin // only for EventLocalMin
 }
 
 // Less reports whether e should be processed before f.

@@ -8,8 +8,22 @@ import (
 )
 
 // ActiveEdge tracks a single segment as it crosses the active scanline.
+// In the bound model (DESIGN.md §12.1), each ActiveEdge represents one of
+// two ascending bounds emerging from a local minimum; Bound/EdgeIdx
+// identify the current segment within that bound, and Seg caches
+// Bound.Segs[EdgeIdx].
 type ActiveEdge struct {
 	Seg *Segment
+
+	// Bound is the bound this edge belongs to. nil for ActiveEdges that
+	// were not created via the bound-model spawn path (legacy direct-Seg
+	// callers in tests and the older per-edge sweep skeleton).
+	Bound *Bound
+
+	// EdgeIdx is the cursor position into Bound.Segs. Advances via
+	// [ActiveEdge.AdvanceEdge] when the current edge reaches its Top
+	// without ending the bound (intermediate vertex).
+	EdgeIdx int
 
 	// CurrX is the X coordinate where Seg crosses the current scanline Y.
 	// It is updated whenever the scanline advances and at intersection
@@ -35,6 +49,32 @@ type ActiveEdge struct {
 	// Outrec is non-nil iff this edge is currently a "hot" edge contributing
 	// to an output ring. See DESIGN.md §12.2 and [ActiveEdge.IsHotEdge].
 	Outrec *OutRec
+}
+
+// AdvanceEdge moves the bound cursor to the next segment in the bound and
+// returns true if there is a next segment, false if the bound is exhausted
+// (i.e. the current edge was the local-max edge). Updates ae.Seg and
+// ae.EdgeIdx; does NOT touch CurrX (the caller must reposition the AEL
+// entry to the new edge's Bot.X if needed).
+//
+// Returns false (without modifying ae) when ae.Bound is nil or already at
+// the last edge.
+func (ae *ActiveEdge) AdvanceEdge() bool {
+	if ae.Bound == nil {
+		return false
+	}
+	if ae.EdgeIdx+1 >= len(ae.Bound.Segs) {
+		return false
+	}
+	ae.EdgeIdx++
+	ae.Seg = ae.Bound.Segs[ae.EdgeIdx]
+	return true
+}
+
+// IsBoundLast reports whether ae's cursor is on the last segment of its
+// bound (the local-max edge). False when ae has no bound.
+func (ae *ActiveEdge) IsBoundLast() bool {
+	return ae.Bound != nil && ae.EdgeIdx == len(ae.Bound.Segs)-1
 }
 
 // XAtY returns the X coordinate where seg crosses scanline y, rounded to the

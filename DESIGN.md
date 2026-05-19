@@ -663,7 +663,7 @@ A horizontal segment `h` has `Bot.Y == Top.Y` and lives at a single scanline `Y_
 Event-queue contract for horizontals (changes to §11.5):
 
 - A horizontal segment generates a single `EventHoriz` event at `(Y_h, Bot.X)` carrying the full segment.
-- `EventKind` ordering at the same `(Y, X)` is: `Top < Horiz < Bot < Intersection`. Closing edges leave the AEL before horizontals walk through it; horizontals finish before new edges enter and before intersection swaps.
+- `EventKind` ordering at the same `(Y, X)` is: `Top < Bot < Horiz < Intersection`. Closing edges leave the AEL first; new edges enter next; horizontals walk through the resulting AEL last (so a horizontal local minimum can see the two ascending bounds it bridges). See §12.6 for the rationale — this ordering is what Clipper2's `PushHorz`/`PopHorz` pair implements, and it supersedes an earlier draft of this section that placed `Horiz` between `Top` and `Bot`. The current `clip/event.go` `EventKind` enum still reflects the older ordering and must be corrected as part of the increment that wires `DoHorizontal`.
 
 Horizontal pass procedure (executed when `EventHoriz` fires):
 
@@ -713,4 +713,138 @@ Recommended commit boundaries from here:
 - **Increment 8:** rest of the adversarial suite (concentric rings, coincident edges, self-touching 8s, T-junctions), fuzz seed corpus.
 
 Each increment ships with its own tests; each is its own commit on the feature branch. Phase 2 fast-forwards to main when increment 8's adversarial suite passes.
+
+---
+
+## 12. Algorithm reference notes (from Clipper2)
+
+Clipper2 is BSL-1.0; we use it as algorithmic reference only and write Go from scratch under MIT. This section distills the parts of `CPP/Clipper2Lib/src/clipper.engine.cpp` that the Phase 2 implementer needs to translate behavior from. It assumes Clipper2 is checked out at `../../AngusJohnson/Clipper2/`; file:line references in this section point into that tree.
+
+### 12.1 "Bound" terminology and the local-minima preprocessing
+
+Clipper2 reframes each input polygon as a sequence of alternating **ascending** and **descending bounds** (`engine.cpp:28-32`). A bound is a chain of input edges traversed monotonically in Y. A **local minimum** is the vertex where a descending bound meets an ascending bound — the polygon "turns from going down to going up." A **local maximum** is the inverse — both bounds going up meet at a top vertex.
+
+This reframing is significant because the §11 model treats every input edge as its own scanline event, while Clipper2 treats each *bound* as a single AEL entry that updates through multiple input edges via `UpdateEdgeIntoAEL`. For polyclip we have a choice:
+
+- **Stay with per-edge events** (§11): simpler events; redundantly emits Bot/Top at every non-extremum vertex, which the engine must handle as "edge continues into next edge" rather than "ring closes."
+- **Move to bounds**: pre-pass identifies local minima; each minimum spawns two AEL entries that each represent an entire ascending or descending bound; Top events fire only at local maxima.
+
+**Recommendation:** Move to bounds before increment 7. The §11 per-edge model is workable but adds complexity at every non-extremum vertex that the bound model eliminates. The pre-pass is small: walk each input ring, identify each Y-direction reversal, and emit a `LocalMinima` record carrying pointers to the two emerging bounds.
+
+Bound representation in Clipper2 (`engine.h:104-127`): an `Active` carries a pointer to its current input edge and a pointer to `LocalMinima` for the bound's origin. `UpdateEdgeIntoAEL` (`engine.cpp` near 1772) advances the pointer to the next edge in the bound when a sub-edge's Top is reached without ending the bound.
+
+### 12.2 AEL entry — required fields
+
+Clipper2's `Active` (`engine.h:104-127`) and `OutRec` (`engine.h:79-100`) imply the per-edge state we need:
+
+- `Seg *Segment` (or in the bound model, `LocalMin *LocalMinima` plus a current-edge cursor).
+- `WindCount int` — winding count of this edge's source up to and including this edge (Clipper2's `wind_cnt`).
+- `WindCount2 int` — winding count of the *other* source (Clipper2's `wind_cnt2`).
+- `WindDx int` — signed input direction of the edge, ±1. Used to update `WindCount` of neighbours when this edge crosses theirs. Same idea as our `signedContribution`.
+- `Outrec *OutRec` — non-nil iff this edge is currently a "hot" edge contributing to a ring (Clipper2's `IsHotEdge` ≡ `outrec != nullptr`).
+
+`OutRec` carries `front_edge` and `back_edge` — the two AEL edges currently building this ring. An edge is the **front** of its OutRec iff it's the leftmost contributor; the **back** iff rightmost. New points emitted on the front side prepend to `OutRec.pts`; new points on the back side append. This is the part §11.6 missed.
+
+`Active.IsFront()` is then a derived predicate: true iff `outrec.front_edge == this`. Many decisions in `IntersectEdges` and `AddLocalMaxPoly` branch on `IsFront`.
+
+### 12.3 AddLocalMinPoly (`engine.cpp:1332-1377`)
+
+Called when two AEL edges become the two sides of a brand-new contributing ring. Inputs: `e1, e2 *Active`, the local minimum point `pt`, and an `is_new` flag.
+
+Algorithm:
+
+1. Allocate a new `OutRec`.
+2. Assign `e1.outrec = e2.outrec = outrec`.
+3. Decide which edge is `outrec.front_edge` (left side) and which is `back_edge` (right side). The choice depends on the nearest prior "hot" edge in the AEL and on `is_new`:
+   - If no prior hot edge: `is_new ? (front=e1, back=e2) : (front=e2, back=e1)`.
+   - If prior hot edge with `OutrecIsAscending(prev) == is_new`: swap (front=e2, back=e1).
+   - Else: (front=e1, back=e2).
+4. Create the ring's first `OutPt` at `pt` and set `outrec.pts = op`.
+
+`is_new` is true when the local minimum is a real input vertex; false when it's a "synthetic" minimum created by IntersectEdges' "AddLocalMaxPoly + AddLocalMinPoly" tunnel case (§12.5).
+
+### 12.4 AddLocalMaxPoly (`engine.cpp:1380-1433`) and JoinOutrecPaths (1435+)
+
+Called when two AEL edges meeting at a local maximum together close (or merge) their ring(s).
+
+Algorithm:
+
+1. If either edge has `IsJoined` set, call `Split` first (handles certain mid-sweep ring splits — not load-bearing for first cut).
+2. Sanity check: `e1.IsFront() != e2.IsFront()`. If equal, the sides have crossed — error or open-end fix. For first cut: assert and bail.
+3. Add an OutPt at `pt` on `e1`'s chain.
+4. **If `e1.outrec == e2.outrec`** (both edges belong to the same ring): the ring closes. Uncouple both edges from the OutRec; the ring is now a complete cycle. This is the normal case.
+5. **Else** (two different rings meeting): the two rings merge into one via `JoinOutrecPaths(e1, e2)` (with a chosen order based on `e1.outrec.idx < e2.outrec.idx`).
+
+`JoinOutrecPaths` splices the two doubly-linked OutPt chains into one cyclic chain and discards the second OutRec.
+
+### 12.5 IntersectEdges decision tree — closed paths (`engine.cpp:1772+`, closed-path branch starts ~1866)
+
+This is the heart of the engine. After updating winding counts for the swap (the swap re-orders the two edges; their `wind_cnt`s exchange roles), the function dispatches based on the *prior* winding counts and the contributing/hot status of each edge.
+
+Let `e1Hot`, `e2Hot` = `IsHotEdge` of each edge before the intersection.
+Let `w1`, `w2` = old `wind_cnt` of each edge (signed for NonZero/Positive/Negative rules; abs'd for EvenOdd).
+Let `w1c2`, `w2c2` = old `wind_cnt2` of each edge.
+
+**Branch A — both hot** (lines 1941-1985):
+- If `(w1 ∉ {0,1}) || (w2 ∉ {0,1}) || (different polytype && op != Xor)`: call **AddLocalMaxPoly(e1, e2, pt)** — close both rings together. This is the "two rings end at the intersection" case.
+- Else if `e1.IsFront() || e1.outrec == e2.outrec`: call **AddLocalMaxPoly + AddLocalMinPoly** — tunnel case where two rings touch at this point and split into two new ones. `AddLocalMinPoly` here uses `is_new=false` because the minimum is synthetic.
+- Else: call **AddOutPt** on each edge and `SwapOutrecs(e1, e2)` — the two rings interleave (each contribute a vertex here and swap which OutRec they're associated with going forward).
+
+**Branch B — exactly one hot** (lines 1986-2005):
+- Call **AddOutPt** on the hot edge, then `SwapOutrecs(e1, e2)` — the cold edge effectively inherits the hot edge's OutRec going forward (and vice versa).
+
+**Branch C — neither hot** (lines 2006-2085):
+- If different polytype: call **AddLocalMinPoly(e1, e2, pt, false)** — the intersection creates a new ring.
+- Else (same polytype) and `w1 == 1 && w2 == 1`: dispatch by op:
+  - `Union`: if `w1c2 <= 0 && w2c2 <= 0`: **AddLocalMinPoly**.
+  - `Difference`: if (clip and both `wc2 > 0`) or (subject and both `wc2 <= 0`): **AddLocalMinPoly**.
+  - `Xor`: always **AddLocalMinPoly**.
+  - `Intersect` (default): if `w1c2 > 0 && w2c2 > 0`: **AddLocalMinPoly**.
+
+For our Phase 2 implementation, Branch C is the most common case for the first intersection of two non-overlapping shapes; Branch A is needed for nested or touching cases.
+
+### 12.6 DoHorizontal (`engine.cpp:2526+`)
+
+Horizontal edges are not part of the AEL; they are processed via a dedicated pass after Bot events at a given Y. The pass walks the AEL from the horizontal's left X to its right X, handling each AEL edge it crosses:
+
+- If the AEL edge is at the horizontal's leading endpoint AND is a local maximum of the same OutRec: **AddLocalMaxPoly(horz, e, horz.top)** — close the ring through the horizontal's endpoint.
+- Else if both horizontal and AEL edge are contributing at this point: **IntersectEdges(horz, e, pt)** — treat the horizontal-meets-AEL-edge as an intersection and dispatch through §12.5's table.
+- Else: just advance.
+
+Crucial phasing detail Clipper2 handles: a horizontal segment is *itself* a bound, with its own `local_min`. `PushHorz` queues it during Bot processing for execution after the rest of the Bot events at this Y are done (lines around 2131-2141). The two-phase ordering — Bots first, then horizontals — is the reverse of §11.8's prose. **Revise §11.8** to match: `Top < Bot < Horiz < Intersection` at the same scanline Y.
+
+For a horizontal local minimum (the bottom of a polygon is a horizontal edge), the two vertical bounds emerging from its endpoints are Bot events at the same Y. They enter the AEL first; then the horizontal pass runs, sees both verticals as `AEL` entries, and calls `AddLocalMinPoly` on them with the horizontal's leftmost point. The horizontal itself contributes the bottom segment of the ring.
+
+### 12.7 Pre-pass: identifying local minima
+
+Before the sweep, walk each input ring once:
+
+1. Find every vertex `v` where the Y-direction of incoming and outgoing edges *reverses* (descending then ascending → local minimum; ascending then descending → local maximum). Horizontal edges count toward the direction of their non-horizontal neighbours; a horizontal sandwiched between two ascending edges is part of an ascending bound, etc.
+2. For each local minimum, emit a `LocalMinima` record with pointers to the two emerging bounds.
+
+`LocMinSorter` (`engine.cpp:49`) then sorts local minima by Y ascending (X ascending for ties), which is the event queue's processing order.
+
+### 12.8 Implementation order for future sessions
+
+Suggested re-sequencing of the §11.11 increments now that we have Clipper2 as reference:
+
+- **Increment 4'**: replace the current per-edge sweep with a bound-based one. Walk each input ring, identify local minima/maxima, build `LocalMinima` records, and reshape the event queue to fire on minima (not on every Segment's Bot/Top). Keep the existing `Segment` and `clip/intersect.go` machinery — they still apply to the individual edges within each bound. *Estimated: ~300 LoC change concentrated in clip/sweep.go and a new clip/bounds.go.*
+- **Increment 5'**: `OutPt` / `OutRec` with `front_edge` / `back_edge` and the AddLocalMinPoly / AddLocalMaxPoly / JoinOutrecPaths trio. Use §12.3–§12.4 as the spec.
+- **Increment 6'**: extend `IntersectEdges` (or `handleIntersection` in our code) with the §12.5 decision tree. Update §11.4's classification machinery to feed `IsHotEdge`.
+- **Increment 7'**: `DoHorizontal` per §12.6, including the revised `Top < Bot < Horiz < Intersection` phasing.
+- **Increment 8'**: postprocess (§11.9) and public `Union` in `boolean.go`.
+- **Increment 9'**: adversarial suite (§6.2). Each adversarial case becomes its own test in `clip/` or top-level integration tests.
+
+Each of these is one or more session's work; do not attempt to fold them.
+
+### 12.9 What Clipper2 does that we deliberately omit
+
+For first cut:
+
+- `using_polytree_` and the hierarchical owner relationships among nested rings. Our hole-assignment (§11.9) is bbox-prefilter + point-in-polygon, which is simpler and sufficient for slicer use.
+- Open paths (`is_open`). Polyclip's public API is closed-region only (DESIGN.md §3.6).
+- `FixSelfIntersects` / `DoSplitOp`. Our preprocess (§11.2 step 5) splits overlaps up front; the sweep should never produce self-intersecting output rings. If it does we treat that as a bug and fix it in the sweep, not by a post-pass.
+- `FillRule` other than NonZero. Polyclip standardises on the non-zero winding rule.
+
+These omissions reduce the surface to translate by roughly half.
 

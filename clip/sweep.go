@@ -82,20 +82,35 @@ func newSweep(segs []Segment, op Operation) *sweep {
 	s.horiz = hinfo
 
 	// Compute local minima via the bound-model pre-pass (DESIGN.md §12.7).
-	// The minima map gives dispatchers deterministic Left/Right bound
-	// orientation at each local-min vertex — replacing the heap-order luck
-	// that the per-segment 2-Bot batching relied on. Tolerated failure
+	// On success, schedule EventLocalMin per minimum and mark "claimed"
+	// segments (leading horizontals + first non-horizontal of each bound)
+	// so their per-segment Bot/Horiz events are skipped — the bound-model
+	// spawn in handleLocalMin subsumes them. Tolerated failure
 	// (ErrOpenRing for non-ring inputs like single-segment unit tests):
-	// leave the map empty, the per-edge dispatch keeps working.
+	// leave the map empty and let the per-edge dispatch keep working.
+	claimed := make(map[*Segment]struct{})
 	if mins, mErr := BuildLocalMinima(s.segs); mErr == nil {
 		for i := range mins {
-			s.minima[mins[i].Vertex] = &mins[i]
+			lm := &mins[i]
+			s.minima[lm.Vertex] = lm
+			s.queue.Push(Event{Kind: EventLocalMin, P: lm.Vertex, LocalMin: lm})
+			claimSpawnSegments(claimed, lm.Left)
+			claimSpawnSegments(claimed, lm.Right)
 		}
 	}
 
 	for i := range segs {
 		seg := &s.segs[i]
 		if seg.Degenerate() {
+			continue
+		}
+		if _, isClaimed := claimed[seg]; isClaimed {
+			// Bound-model spawn handles the local-min side; Top still
+			// fires for non-horizontals so handleThroughVertex /
+			// handleLocalMaximum can close or advance.
+			if !seg.Horizontal() {
+				s.queue.Push(Event{Kind: EventTop, P: seg.Top, SegA: seg})
+			}
 			continue
 		}
 		if seg.Horizontal() {
@@ -112,6 +127,23 @@ func newSweep(segs []Segment, op Operation) *sweep {
 		s.queue.Push(Event{Kind: EventTop, P: seg.Top, SegA: seg})
 	}
 	return s
+}
+
+// claimSpawnSegments marks every segment of b up to and including the first
+// non-horizontal as "claimed" by the bound-model spawn. Subsequent per-
+// segment Bot/Horiz events for these segments are skipped — handleLocalMin
+// does the equivalent work via [sweep.spawnBoundActive] plus inline OutPt
+// emission for any leading horizontals.
+func claimSpawnSegments(claimed map[*Segment]struct{}, b *Bound) {
+	if b == nil {
+		return
+	}
+	for _, seg := range b.Segs {
+		claimed[seg] = struct{}{}
+		if !seg.Horizontal() {
+			return
+		}
+	}
 }
 
 func (s *sweep) run() {
@@ -148,7 +180,7 @@ func (s *sweep) run() {
 // be wrong in those cases. They are explicitly addressed by a later
 // increment.
 func (s *sweep) handleBatch(batch []Event) {
-	var horizMaxOpens, tops, bots, horizMins, intersects []Event
+	var horizMaxOpens, tops, bots, localMins, horizMins, intersects []Event
 	for _, e := range batch {
 		switch e.Kind {
 		case EventHorizMaxOpen:
@@ -157,6 +189,8 @@ func (s *sweep) handleBatch(batch []Event) {
 			tops = append(tops, e)
 		case EventBot:
 			bots = append(bots, e)
+		case EventLocalMin:
+			localMins = append(localMins, e)
 		case EventHoriz:
 			horizMins = append(horizMins, e)
 		case EventIntersection:
@@ -198,14 +232,24 @@ func (s *sweep) handleBatch(batch []Event) {
 		}
 	}
 
-	// Phase 3: local-min horizontals spawn rings after both endpoint Bots
-	// have populated the AEL.
+	// Phase 3: local minima spawn bounds via the bound-model handler.
+	// Runs after any per-segment Bots at the same point so the AEL is
+	// fully populated (no double-insert: claimed segments' Bots were
+	// skipped in newSweep).
+	for _, e := range localMins {
+		s.handleLocalMin(e)
+		s.appendTrace(e, nil)
+	}
+
+	// Phase 4: local-min horizontals spawn rings (legacy non-bound path —
+	// fires only for HorizClassMin/Unknown horizontals not claimed by a
+	// bound, i.e. when BuildLocalMinima failed).
 	for _, e := range horizMins {
 		s.handleHorizMin(e)
 		s.appendTrace(e, nil)
 	}
 
-	// Phase 4: intersections last.
+	// Phase 5: intersections last.
 	for _, e := range intersects {
 		s.handleIntersection(e)
 		s.appendTrace(e, nil)
@@ -277,6 +321,86 @@ func firstNonHorizontal(b *Bound) *Segment {
 		}
 	}
 	return nil
+}
+
+// handleLocalMin spawns the two ascending bounds of a local minimum into
+// the AEL. Replaces the per-segment 2-Bot batched [sweep.handleLocalMinimum]
+// for inputs that form closed rings (where [BuildLocalMinima] succeeds).
+// Per DESIGN.md §12.1 / §12.7.
+//
+// Sequence: insert both bound entries, re-classify (fixes stale winding
+// counts from the first-inserted edge), call [AddLocalMinPoly] with
+// (right, left) ordering so FrontEdge = Right bound (matching the existing
+// orientation convention), then emit OutPts for the far ends of any leading
+// horizontals — these are vertices the ring must touch on its way up from
+// the local-min vertex to the first non-horizontal AEL position.
+func (s *sweep) handleLocalMin(e Event) {
+	lm := e.LocalMin
+	if lm == nil {
+		return
+	}
+	leftAE := s.spawnBoundActive(lm.Left)
+	rightAE := s.spawnBoundActive(lm.Right)
+	if leftAE == nil || rightAE == nil {
+		return
+	}
+	Classify(s.ael, leftAE, s.op)
+	Classify(s.ael, rightAE, s.op)
+	if !leftAE.Contributing || !rightAE.Contributing {
+		return
+	}
+	AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
+	// Leading horizontals: if a bound's first non-horizontal segment does
+	// not start at the local-min vertex, the bound traversed one or more
+	// horizontals from the vertex to that segment's Bot. Emit the segment's
+	// Bot as a ring vertex so the horizontal endpoint isn't lost.
+	if rightAE.Seg.Bot != lm.Vertex {
+		AddOutPt(rightAE, rightAE.Seg.Bot)
+	}
+	if leftAE.Seg.Bot != lm.Vertex {
+		AddOutPt(leftAE, leftAE.Seg.Bot)
+	}
+	// Schedule intersection checks with new AEL neighbours.
+	iL := s.ael.IndexOf(leftAE)
+	if iL >= 0 {
+		if left := s.ael.LeftOf(iL); left != nil {
+			s.maybeScheduleIntersect(left, leftAE, lm.Vertex.Y)
+		}
+	}
+	iR := s.ael.IndexOf(rightAE)
+	if iR >= 0 {
+		if right := s.ael.RightOf(iR); right != nil {
+			s.maybeScheduleIntersect(rightAE, right, lm.Vertex.Y)
+		}
+	}
+}
+
+// spawnBoundActive creates an [ActiveEdge] for bound b at the local-min
+// scanline. Advances past any leading horizontals to the first non-
+// horizontal segment, inserts into the AEL at that segment's Bot.X, and
+// returns the active edge. Returns nil if b is all-horizontal (shouldn't
+// happen for a valid ring).
+func (s *sweep) spawnBoundActive(b *Bound) *ActiveEdge {
+	if b == nil {
+		return nil
+	}
+	edgeIdx := 0
+	for edgeIdx < len(b.Segs) && b.Segs[edgeIdx].Horizontal() {
+		edgeIdx++
+	}
+	if edgeIdx >= len(b.Segs) {
+		return nil
+	}
+	seg := b.Segs[edgeIdx]
+	ae := &ActiveEdge{
+		Seg:     seg,
+		Bound:   b,
+		EdgeIdx: edgeIdx,
+		CurrX:   seg.Bot.X,
+	}
+	s.ael.Insert(ae)
+	s.bySeg[seg] = ae
+	return ae
 }
 
 // handleLocalMaximum closes the two AEL edges meeting at a top vertex,

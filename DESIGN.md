@@ -416,10 +416,10 @@ The phases are designed so each one produces a usable, testable artifact even if
 - [x] `LICENSE` (MIT), `README.md` (one-paragraph stub pointing to DESIGN.md).
 - [x] CI scaffold (`.github/workflows/ci.yml`) running `go test ./...` and `go vet`.
 
-### Phase 1 — Fixed-point core (≤ 500 LoC)
-- [ ] `fixed/coord.go` — scaled `int64` coordinate type, scale-from-bbox helper.
-- [ ] `fixed/mul.go` — `int128` multiply for orientation predicates.
-- [ ] Tests for predicates against hand-computed integer expectations.
+### Phase 1 — Fixed-point core (≤ 500 LoC) — **DONE**
+- [x] `fixed/coord.go` — scaled `int64` coordinate type, scale-from-bbox helper.
+- [x] `fixed/mul.go` — `int128` multiply for orientation predicates.
+- [x] Tests for predicates against hand-computed integer expectations.
 
 ### Phase 2 — Boolean engine: union only (≤ 1500 LoC)
 - [ ] `clip/segment.go`, `clip/sweep.go`, `clip/intersect.go`, `clip/classify.go` (union table only), `clip/build.go`.

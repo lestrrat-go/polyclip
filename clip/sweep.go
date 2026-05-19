@@ -2,17 +2,16 @@ package clip
 
 import "github.com/lestrrat-go/polyclip/fixed"
 
-// Sweep runs the scanline sweep over segs and records the sequence of events
-// it processed. This Phase 2 skeleton wires the event queue, active edge
-// list, and intersection scheduling together; it does NOT yet compute
-// classification or emit any output. The trace is the unit of testability
-// for now — see DESIGN.md §11.5 for the event-handler procedures the next
-// increments will fill in.
+// Sweep runs the scanline sweep over segs for the given boolean operation
+// and records the sequence of events processed. As of this increment the
+// sweep computes winding counts and per-edge classification but does NOT
+// yet emit output rings — see DESIGN.md §11.5 for the event-handler
+// procedures and §11.4 for the classification rule.
 //
 // segs is taken by value; callers should not mutate the slice after calling
 // Sweep, because the sweep retains pointers into it.
-func Sweep(segs []Segment) *SweepResult {
-	s := newSweep(segs)
+func Sweep(segs []Segment, op Operation) *SweepResult {
+	s := newSweep(segs, op)
 	s.run()
 	return &SweepResult{Trace: s.trace}
 }
@@ -24,25 +23,33 @@ type SweepResult struct {
 	Trace []TraceEvent
 }
 
-// TraceEvent is one entry in [SweepResult.Trace].
+// TraceEvent is one entry in [SweepResult.Trace]. The WindSelf, WindOther
+// and Contributing fields capture the classification snapshot of SegA at the
+// moment its event was processed (zero for events that don't classify, such
+// as Top events removing edges from the AEL).
 type TraceEvent struct {
-	Kind EventKind
-	P    fixed.Point
-	SegA *Segment
-	SegB *Segment // populated only for EventIntersection
+	Kind         EventKind
+	P            fixed.Point
+	SegA         *Segment
+	SegB         *Segment // populated only for EventIntersection
+	WindSelf     int
+	WindOther    int
+	Contributing bool
 }
 
 type sweep struct {
 	segs  []Segment
+	op    Operation
 	queue *EventQueue
 	ael   *AEL
 	bySeg map[*Segment]*ActiveEdge
 	trace []TraceEvent
 }
 
-func newSweep(segs []Segment) *sweep {
+func newSweep(segs []Segment, op Operation) *sweep {
 	s := &sweep{
 		segs:  segs,
+		op:    op,
 		queue: NewEventQueue(),
 		ael:   NewAEL(),
 		bySeg: make(map[*Segment]*ActiveEdge, len(segs)),
@@ -65,30 +72,37 @@ func newSweep(segs []Segment) *sweep {
 func (s *sweep) run() {
 	for s.queue.Len() > 0 {
 		e := s.queue.Pop()
-		s.trace = append(s.trace, TraceEvent(e))
+		te := TraceEvent{Kind: e.Kind, P: e.P, SegA: e.SegA, SegB: e.SegB}
 		switch e.Kind {
 		case EventBot:
-			s.handleBot(e)
+			ae := s.handleBot(e)
+			te.WindSelf, te.WindOther, te.Contributing = ae.WindSelf, ae.WindOther, ae.Contributing
 		case EventTop:
 			s.handleTop(e)
 		case EventIntersection:
-			s.handleIntersection(e)
+			aeA := s.handleIntersection(e)
+			if aeA != nil {
+				te.WindSelf, te.WindOther, te.Contributing = aeA.WindSelf, aeA.WindOther, aeA.Contributing
+			}
 		case EventHoriz:
 			s.handleHoriz(e)
 		}
+		s.trace = append(s.trace, te)
 	}
 }
 
-func (s *sweep) handleBot(e Event) {
+func (s *sweep) handleBot(e Event) *ActiveEdge {
 	ae := &ActiveEdge{Seg: e.SegA, CurrX: e.SegA.Bot.X}
 	i := s.ael.Insert(ae)
 	s.bySeg[e.SegA] = ae
+	Classify(s.ael, ae, s.op)
 	if left := s.ael.LeftOf(i); left != nil {
 		s.maybeScheduleIntersect(left, ae, e.P.Y)
 	}
 	if right := s.ael.RightOf(i); right != nil {
 		s.maybeScheduleIntersect(ae, right, e.P.Y)
 	}
+	return ae
 }
 
 func (s *sweep) handleTop(e Event) {
@@ -107,17 +121,17 @@ func (s *sweep) handleTop(e Event) {
 	}
 }
 
-func (s *sweep) handleIntersection(e Event) {
+func (s *sweep) handleIntersection(e Event) *ActiveEdge {
 	aeA, okA := s.bySeg[e.SegA]
 	aeB, okB := s.bySeg[e.SegB]
 	if !okA || !okB {
 		// One of the segments has already left the AEL: stale event.
-		return
+		return nil
 	}
 	iA := s.ael.IndexOf(aeA)
 	iB := s.ael.IndexOf(aeB)
 	if iA < 0 || iB < 0 {
-		return
+		return nil
 	}
 	if iA > iB {
 		iA, iB = iB, iA
@@ -126,20 +140,25 @@ func (s *sweep) handleIntersection(e Event) {
 	if iB != iA+1 {
 		// No longer adjacent — configuration changed since the event was
 		// scheduled. Drop.
-		return
+		return nil
 	}
 	// Update both edges' CurrX to the intersection X before the swap so
 	// neighbour-checks below see the correct ordering.
 	aeA.CurrX = e.P.X
 	aeB.CurrX = e.P.X
 	s.ael.SwapAt(iA)
-	// After SwapAt(iA): aeB is at iA, aeA is at iA+1.
+	// After SwapAt(iA): aeB is at iA, aeA is at iA+1. Re-classify both —
+	// their predecessors have changed (in particular, aeA now sees aeB as
+	// a predecessor).
+	Classify(s.ael, s.ael.At(iA), s.op)
+	Classify(s.ael, s.ael.At(iA+1), s.op)
 	if left := s.ael.LeftOf(iA); left != nil {
 		s.maybeScheduleIntersect(left, s.ael.At(iA), e.P.Y)
 	}
 	if right := s.ael.RightOf(iA + 1); right != nil {
 		s.maybeScheduleIntersect(s.ael.At(iA+1), right, e.P.Y)
 	}
+	return aeA
 }
 
 func (s *sweep) handleHoriz(_ Event) {

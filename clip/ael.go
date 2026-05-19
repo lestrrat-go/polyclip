@@ -7,10 +7,7 @@ import (
 	"github.com/lestrrat-go/polyclip/fixed"
 )
 
-// ActiveEdge tracks a single segment as it crosses the active scanline. The
-// engine uses ActiveEdge as the cell type of its active edge list and hangs
-// extra per-edge state off it (winding contribution, output-ring linkage)
-// in later phases.
+// ActiveEdge tracks a single segment as it crosses the active scanline.
 type ActiveEdge struct {
 	Seg *Segment
 
@@ -18,6 +15,22 @@ type ActiveEdge struct {
 	// It is updated whenever the scanline advances and at intersection
 	// events that reorder neighbours.
 	CurrX fixed.Coord
+
+	// WindSelf is the signed winding count of Seg.Src up to and including
+	// this edge — i.e. the count of edges of the same source that a
+	// left-to-right ray has crossed at this scanline, with sign tracking
+	// the input direction. See DESIGN.md §11.3.
+	WindSelf int
+
+	// WindOther is the signed winding count of the OTHER source (not
+	// Seg.Src) up to but not including this edge. It is not affected by
+	// crossing this edge itself.
+	WindOther int
+
+	// Contributing records whether this edge participates in the current
+	// boolean operation's output, as determined by the classification
+	// rule in DESIGN.md §11.4. Set by [Classify].
+	Contributing bool
 }
 
 // XAtY returns the X coordinate where seg crosses scanline y, rounded to the

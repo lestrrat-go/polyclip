@@ -7,7 +7,7 @@ import (
 )
 
 func TestSweepEmpty(t *testing.T) {
-	r := Sweep(nil)
+	r := Sweep(nil, OpUnion)
 	if len(r.Trace) != 0 {
 		t.Errorf("empty input produced trace: %+v", r.Trace)
 	}
@@ -15,7 +15,7 @@ func TestSweepEmpty(t *testing.T) {
 
 func TestSweepSingleSegment(t *testing.T) {
 	segs := []Segment{segSrc(0, 0, 10, 5, Subject)}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	if len(r.Trace) != 2 {
 		t.Fatalf("trace length: %d want 2", len(r.Trace))
 	}
@@ -30,7 +30,7 @@ func TestSweepTwoNonCrossing(t *testing.T) {
 		segSrc(0, 0, 10, 10, Subject),
 		segSrc(20, 0, 30, 10, Clip),
 	}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	if got := countKind(r.Trace, EventIntersection); got != 0 {
 		t.Errorf("intersection events: %d want 0", got)
 	}
@@ -48,7 +48,7 @@ func TestSweepTwoCrossing(t *testing.T) {
 		segSrc(0, 0, 10, 10, Subject),
 		segSrc(0, 10, 10, 0, Clip),
 	}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	if got := countKind(r.Trace, EventIntersection); got != 1 {
 		t.Errorf("intersection events: %d want 1", got)
 	}
@@ -72,7 +72,7 @@ func TestSweepEventOrdering(t *testing.T) {
 		segSrc(0, 0, 1, 1, Subject), // Y in [0, 1]
 		segSrc(5, 10, 6, 11, Clip),  // Y in [10, 11]
 	}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	// Trace should be (Bot at Y=0, Top at Y=1, Bot at Y=10, Top at Y=11).
 	if len(r.Trace) != 4 {
 		t.Fatalf("trace length: %d", len(r.Trace))
@@ -88,7 +88,7 @@ func TestSweepEventOrdering(t *testing.T) {
 func TestSweepHorizontalRecorded(t *testing.T) {
 	// A horizontal segment generates a single EventHoriz, not Bot+Top.
 	segs := []Segment{segSrc(0, 5, 10, 5, Subject)}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	if len(r.Trace) != 1 {
 		t.Fatalf("trace length: %d want 1", len(r.Trace))
 	}
@@ -100,7 +100,7 @@ func TestSweepHorizontalRecorded(t *testing.T) {
 func TestSweepDegenerateDropped(t *testing.T) {
 	p := fixed.Point{X: 1, Y: 1}
 	segs := []Segment{{Bot: p, Top: p, Src: Subject}}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	if len(r.Trace) != 0 {
 		t.Errorf("degenerate produced trace: %+v", r.Trace)
 	}
@@ -114,7 +114,7 @@ func TestSweepThreeCrossings(t *testing.T) {
 		segSrc(0, 10, 10, 0, Subject),
 		segSrc(-5, 5, 15, 5, Clip), // horizontal — will be EventHoriz
 	}
-	r := Sweep(segs)
+	r := Sweep(segs, OpUnion)
 	// The two diagonals cross at (5, 5). The horizontal is not added to
 	// the AEL in this skeleton, so it does not produce intersection events.
 	if got := countKind(r.Trace, EventIntersection); got != 1 {

@@ -69,8 +69,9 @@ var ErrUnsupportedHorizontal = fmt.Errorf("clip: horizontal segment is neither a
 // Returns [ErrUnsupportedHorizontal] if any horizontal cannot be classified
 // as HorizClassMin or HorizClassMax.
 func ClassifyHorizontals(segs []Segment) (map[*Segment]*HorizInfo, error) {
+	result := make(map[*Segment]*HorizInfo)
 	if len(segs) == 0 {
-		return nil, nil
+		return result, nil
 	}
 	byStart := make(map[fixed.Point]*Segment, len(segs))
 	byEnd := make(map[fixed.Point]*Segment, len(segs))
@@ -83,7 +84,6 @@ func ClassifyHorizontals(segs []Segment) (map[*Segment]*HorizInfo, error) {
 		byEnd[s.End()] = s
 	}
 
-	result := make(map[*Segment]*HorizInfo)
 	for i := range segs {
 		s := &segs[i]
 		if !s.Horizontal() || s.Degenerate() {

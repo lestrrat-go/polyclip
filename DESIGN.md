@@ -509,3 +509,193 @@ Otherwise, follow the design. If a deviation feels necessary, write it up in thi
 Living document. The implementing agent is expected to update it as decisions are made. Each phase's PR should include a sentence in §7 marking the phase done, plus any deviations or refinements.
 
 Next action: an agent reads this doc end to end, confirms understanding (or asks clarifying questions), and starts on Phase 0.
+
+---
+
+## 11. Phase 2 implementation notes
+
+This section nails down the design decisions that §4.2 left implicit, so the sweep / classify / build pieces can be implemented without rediscovering them. Read after §4.2 and §5 — those still hold.
+
+Phase 0, Phase 1, and Phase 2 increments 1–3 are already in place (`fixed/`, `clip/segment.go`, `clip/intersect.go`, `clip/event.go`, `clip/ael.go`). What remains is the sweep loop itself, the classification, the ring assembly, and the public `Union`.
+
+### 11.1 What "the engine" consumes and produces
+
+```
+MultiPolygon (subject, float64)
+MultiPolygon (clip, float64)
+        │
+        ▼  preprocess
+[]Segment (fixed-point, source-tagged, deduped, with overlapping pairs split at overlap endpoints)
+        │
+        ▼  sweep
+sequence of "output contributions" — per contributing AEL edge a polyline of (point, dir) records
+        │
+        ▼  build
+[]OutputRing (doubly-linked, closed)
+        │
+        ▼  postprocess
+MultiPolygon (fixed-point) → MultiPolygon (float64)
+```
+
+Each stage has its own file; no stage knows the next stage's internals.
+
+### 11.2 Preprocess
+
+1. Compute the union bbox of subject and clip in user space.
+2. Build a single `fixed.Scale` from that bbox.
+3. For each ring (subject outer/holes, clip outer/holes) iterate edges; call `clip.NewSegment(snap(a), snap(b), src)` per edge.
+4. Drop degenerate segments (`Segment.Degenerate()`).
+5. **Overlap split.** Run `clip.Intersect` on every pair where the segments are exactly collinear (cheap pre-pass: sort by line equation hash). For any `CollinearOverlap` result, replace both segments with three pieces each so afterwards the only collinear pairs are *fully* coincident, not partially overlapping. This means the main sweep never sees `CollinearOverlap`.
+6. Push `EventBot{seg}` and `EventTop{seg}` for each surviving segment.
+
+Coincident-edge handling proper is in §11.7.
+
+### 11.3 Sweep state — what an ActiveEdge tracks
+
+```go
+type ActiveEdge struct {
+    Seg   *Segment
+    CurrX fixed.Coord
+
+    // Vatti winding bookkeeping. Computed at insertion and updated on
+    // every intersection swap.
+    WindSelf  int  // signed winding count for Seg.Src up to and INCLUDING this edge
+    WindOther int  // signed winding count for the OTHER source up to this edge (exclusive)
+
+    // Output linkage. Non-nil only for edges classified as contributing.
+    Out *OutPt
+}
+```
+
+Signed counts: an edge contributes `+1` if traversing it left-to-right takes you from outside to inside its source ring, `-1` otherwise. `Reversed` segments contribute the opposite sign of non-reversed segments.
+
+Computation at insertion:
+- Find the left neighbour `L` in the AEL.
+- `WindSelf = L.WindSelf (if L.Src == this.Src else L's same-source predecessor's WindSelf) + this edge's signed contribution`.
+- `WindOther = L.WindSelf (if L.Src != this.Src else L's other-source predecessor's WindSelf, or 0 if none)`.
+
+There's room to be cleverer but the above is the correct fallback.
+
+### 11.4 Classification table
+
+The boundary-flip rule: define `inside(side) = inside_subject(side) OP inside_clip(side)` where `OP` is the boolean op. An ActiveEdge contributes to output iff `inside(left of edge) != inside(right of edge)`.
+
+For an AEL edge of source `S` we have winding counts on both sides:
+
+- Left side: `wS = WindSelf - delta`, `wO = WindOther`, where `delta` is the edge's signed contribution (±1).
+- Right side: `wS' = WindSelf`, `wO' = WindOther`.
+
+The other source's count is identical on both sides (only S's edges flip it). So the contribution rule reduces to:
+
+| Op         | Contributes iff                                                                 |
+|------------|---------------------------------------------------------------------------------|
+| Union      | `wO == 0` AND `(WindSelf == 0) != (WindSelf-delta == 0)`                        |
+| Intersect  | `wO != 0` AND `(WindSelf == 0) != (WindSelf-delta == 0)`                        |
+| Difference | (S subject) `wO == 0` AND `(WindSelf == 0) != (WindSelf-delta == 0)`; (S clip) `wO != 0` AND same flip on subject side |
+| Xor        | `(WindSelf == 0) != (WindSelf-delta == 0)` (every flip contributes)             |
+
+For **non-self-intersecting** input, `WindSelf` only ever toggles between 0 and ±1, so the flip predicate is always true and the rule simplifies to just the `wO` clause. Phase 2 first cut may assume this; Phase 5 lifts the simplification for self-intersecting input.
+
+Only the Union row is needed for Phase 2. Phase 3 fills in the rest.
+
+### 11.5 Event-handler procedures
+
+**EventBot(seg)** — segment starts:
+1. Build `ae` with `CurrX = seg.Bot.X`.
+2. `i := AEL.Insert(ae)`.
+3. Compute `ae.WindSelf`, `ae.WindOther` from `AEL.LeftOf(i)`.
+4. Run classification → set `ae.Contributing`.
+5. If contributing: emit a new `OutPt` linked to `ae.Out`.
+6. Schedule intersection checks: `(AEL.LeftOf(i), ae)` and `(ae, AEL.RightOf(i))`.
+
+**EventTop(seg)** — segment ends:
+1. Find `ae` for `seg` in AEL (engine keeps a map from `*Segment` to `*ActiveEdge`).
+2. If contributing: emit a final `OutPt` at `seg.Top`, close out the output ring (or hand it to the next adjacent contributor for stitching, see §11.6).
+3. `i := AEL.IndexOf(ae); AEL.Remove(ae)`.
+4. The two edges that just became adjacent (left + right of `i`) may now cross — schedule a check.
+
+**EventIntersection(segA, segB, p)** — neighbours cross:
+1. Locate both in the AEL. They must currently be adjacent (otherwise this event was scheduled but the configuration changed; discard).
+2. For each contributing edge, emit an `OutPt` at `p`. The two contributing rings (if any) may need to be **stitched** here — this is the only place two distinct rings merge into one.
+3. `AEL.SwapAt(i)`. Update `WindSelf` and `WindOther` for both (they swap their relative positions, so each one's predecessor changed).
+4. Re-classify both. A non-contributing edge can become contributing or vice versa across a crossing.
+5. Schedule fresh intersection checks for the new neighbours.
+
+### 11.6 Output ring data structure
+
+```go
+type OutPt struct {
+    P     fixed.Point
+    Next  *OutPt
+    Prev  *OutPt
+}
+
+type OutRing struct {
+    // Doubly-linked cycle of points. nil only for closed-and-released rings
+    // that have been moved into the result.
+    Pt  *OutPt
+    IsHole bool   // determined after sweep by signed area
+}
+```
+
+Stitching at intersection events is the operation most likely to be wrong:
+- Two contributing edges may belong to the **same** OutRing (they're the two sides of a feature) → no stitch, just emit one new OutPt at `p` on each side's chain.
+- Two contributing edges may belong to **different** OutRings (two features just met) → stitch: splice the two chains into one cycle, retain one OutRing, mark the other absorbed.
+- A contributing edge meeting a non-contributing edge → emit the new OutPt on the contributing side only.
+
+Implementation: every ActiveEdge holds `Out *OutPt` pointing at the most recently emitted vertex on that edge's chain. Stitch by relinking `Prev`/`Next` between the two chain tails.
+
+### 11.7 Coincident edges (fully overlapping after preprocess split)
+
+After §11.2 step 5, the only collinear pairs the sweep sees are pairs that share `Bot` AND `Top`. These behave as follows in Union:
+
+- Same source, same direction (duplicate input edge) — dedup in preprocess.
+- Same source, opposite direction — they cancel; drop both.
+- Different sources, same direction — they double-count. Output emits **one** edge with the union of their winding contributions.
+- Different sources, opposite direction — they cancel; output emits zero contribution at this position.
+
+The simplest implementation: during preprocess, after the overlap split, scan the segment list and merge / drop coincident pairs *before* building the event queue.
+
+### 11.8 Horizontal segments
+
+Horizontal segments share `Bot.Y == Top.Y` and contribute zero to `WindSelf` (they don't cross any horizontal scanline). They are handled as a single combined event at their Y:
+
+1. At the scanline event for `Bot.Y`, before processing any non-horizontal events at this Y, gather all horizontal segments at this scanline.
+2. For each, walk the AEL from `Bot.X` to `Top.X`. Every AEL edge it passes "between" contributes a stitch point at the appropriate vertex.
+3. After this pass, continue with EventTop / EventBot / EventIntersection at this Y as normal.
+
+For Phase 2 first cut: **assume no horizontal input edges** and reject them in preprocess with `ErrUnsupportedHorizontal`. Lift that restriction in Phase 5.
+
+### 11.9 Postprocess (clip/build.go)
+
+After the sweep terminates, every released `OutRing` becomes a `Polygon`:
+
+1. Walk the cycle starting from `OutRing.Pt`, dedup consecutive equal points, output a `Polygon`.
+2. Sign of `Polygon.SignedArea` determines `IsHole`: positive → outer (CCW), negative → hole (CW), then `Polygon.Reverse()` so all outputs follow the convention (CCW outer, CW holes).
+3. **Hole assignment**: for each hole, find the smallest outer that contains a sampled vertex of the hole. Use bbox prefilter then `Polygon.Contains` (already implemented in §3.4).
+4. Build `[]ExPolygon` grouping each outer with its assigned holes.
+5. Wrap as `MultiPolygon`.
+6. Unsnap fixed-point coordinates back to float64.
+
+### 11.10 Invariants the engine must maintain
+
+Useful as runtime asserts (controlled by a build tag) or as test post-conditions:
+
+1. After each event the AEL is sorted left-to-right by `CurrX` with slope tie-break.
+2. After each event no `WindSelf` exceeds the number of input rings of that source (sanity bound).
+3. Every `ActiveEdge` with non-nil `Out` is classified contributing.
+4. No two contributing same-source edges are adjacent in the AEL (would indicate a missed classification flip).
+5. At sweep end, every `OutRing.Pt` is non-nil → every ring closes.
+
+### 11.11 Implementation order for the remaining Phase 2 increments
+
+Recommended commit boundaries from here:
+
+- **Increment 4:** preprocess pipeline (`clip/preprocess.go`): scale, snap, drop degenerates, overlap split, coincident-edge dedup. Tests cover each transformation in isolation. No sweep yet — the function returns `[]Segment`.
+- **Increment 5:** sweep loop skeleton (`clip/sweep.go`): event loop that processes Bot/Top/Intersection without yet computing classification or emitting output. Logs/records the sequence of events as an internal trace. Test asserts the trace for a couple of hand-built inputs.
+- **Increment 6:** winding bookkeeping + classification table for Union (`clip/classify.go`). At this point `Contributing` is set correctly on every AEL edge; still no output emission. Test the trace including contribution flags.
+- **Increment 7:** output ring assembly (`clip/build.go`) plus public `Union` (`boolean.go`). End-to-end works for the simplest adversarial cases.
+- **Increment 8:** rest of the adversarial suite (concentric rings, coincident edges, self-touching 8s, T-junctions), fuzz seed corpus.
+
+Each increment ships with its own tests; each is its own commit on the feature branch. Phase 2 fast-forwards to main when increment 8's adversarial suite passes.
+

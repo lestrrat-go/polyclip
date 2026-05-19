@@ -54,23 +54,25 @@ type TraceEvent struct {
 }
 
 type sweep struct {
-	segs  []Segment
-	op    Operation
-	queue *EventQueue
-	ael   *AEL
-	bySeg map[*Segment]*ActiveEdge
-	horiz map[*Segment]*HorizInfo
-	trace []TraceEvent
-	err   error
+	segs   []Segment
+	op     Operation
+	queue  *EventQueue
+	ael    *AEL
+	bySeg  map[*Segment]*ActiveEdge
+	horiz  map[*Segment]*HorizInfo
+	minima map[fixed.Point]*LocalMin
+	trace  []TraceEvent
+	err    error
 }
 
 func newSweep(segs []Segment, op Operation) *sweep {
 	s := &sweep{
-		segs:  segs,
-		op:    op,
-		queue: NewEventQueue(),
-		ael:   NewAEL(),
-		bySeg: make(map[*Segment]*ActiveEdge, len(segs)),
+		segs:   segs,
+		op:     op,
+		queue:  NewEventQueue(),
+		ael:    NewAEL(),
+		bySeg:  make(map[*Segment]*ActiveEdge, len(segs)),
+		minima: make(map[fixed.Point]*LocalMin),
 	}
 	hinfo, err := ClassifyHorizontals(s.segs)
 	if err != nil {
@@ -78,6 +80,19 @@ func newSweep(segs []Segment, op Operation) *sweep {
 		return s
 	}
 	s.horiz = hinfo
+
+	// Compute local minima via the bound-model pre-pass (DESIGN.md §12.7).
+	// The minima map gives dispatchers deterministic Left/Right bound
+	// orientation at each local-min vertex — replacing the heap-order luck
+	// that the per-segment 2-Bot batching relied on. Tolerated failure
+	// (ErrOpenRing for non-ring inputs like single-segment unit tests):
+	// leave the map empty, the per-edge dispatch keeps working.
+	if mins, mErr := BuildLocalMinima(s.segs); mErr == nil {
+		for i := range mins {
+			s.minima[mins[i].Vertex] = &mins[i]
+		}
+	}
+
 	for i := range segs {
 		seg := &s.segs[i]
 		if seg.Degenerate() {
@@ -208,14 +223,52 @@ func (s *sweep) appendTrace(e Event, ae *ActiveEdge) {
 // handleLocalMinimum is the standard Vatti local-min handler: two new edges
 // emerging upward from the same vertex form the two sides of a new
 // contributing ring (if the classification says so).
+//
+// When the bound-model pre-pass identified this vertex as a local minimum
+// (s.minima lookup hit), AddLocalMinPoly is called with arguments oriented
+// so the Right bound becomes the FrontEdge — matching the established
+// convention in [handleHorizMin] and the existing diamond ring-direction.
+// Without the pre-pass info the call falls back to heap-order (ae1, ae2),
+// which is what the original code did.
 func (s *sweep) handleLocalMinimum(b1, b2 Event) {
 	ae1 := s.handleBot(b1)
 	ae2 := s.handleBot(b2)
 	s.appendTrace(b1, ae1)
 	s.appendTrace(b2, ae2)
-	if ae1.Contributing && ae2.Contributing {
-		AddLocalMinPoly(s.ael, ae1, ae2, b1.P, true)
+	if !ae1.Contributing || !ae2.Contributing {
+		return
 	}
+	if lm := s.minima[b1.P]; lm != nil {
+		// Orient so the Right bound's ActiveEdge becomes the FrontEdge of
+		// the new OutRec (matching [handleHorizMin]). The Right bound's
+		// first non-horizontal segment is the one that sits to the RIGHT
+		// in the AEL at the local-min scanline.
+		rightSeg := firstNonHorizontal(lm.Right)
+		leftSeg := firstNonHorizontal(lm.Left)
+		switch {
+		case ae1.Seg == rightSeg && ae2.Seg == leftSeg:
+			AddLocalMinPoly(s.ael, ae1, ae2, b1.P, true)
+			return
+		case ae2.Seg == rightSeg && ae1.Seg == leftSeg:
+			AddLocalMinPoly(s.ael, ae2, ae1, b1.P, true)
+			return
+		}
+	}
+	// Fallback: heap-order — existing behavior for cases the pre-pass
+	// doesn't cover (open chains, segments not in any reconstructed ring).
+	AddLocalMinPoly(s.ael, ae1, ae2, b1.P, true)
+}
+
+func firstNonHorizontal(b *Bound) *Segment {
+	if b == nil {
+		return nil
+	}
+	for _, s := range b.Segs {
+		if !s.Horizontal() {
+			return s
+		}
+	}
+	return nil
 }
 
 // handleLocalMaximum closes the two AEL edges meeting at a top vertex,

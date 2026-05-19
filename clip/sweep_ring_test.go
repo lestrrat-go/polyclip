@@ -25,7 +25,10 @@ func diamond(cx, cy, r int64, src Source) []Segment {
 }
 
 func TestSweepDiamondSubject(t *testing.T) {
-	// One diamond as subject only — should produce one closed ring.
+	// One diamond as subject only — should produce one closed ring in
+	// CCW Next-direction (positive signed area). With the bound-model
+	// pre-pass providing deterministic orientation, the result is no
+	// longer heap-dependent.
 	segs := diamond(0, 0, 10, Subject)
 	r := Sweep(segs, OpUnion)
 
@@ -36,6 +39,9 @@ func TestSweepDiamondSubject(t *testing.T) {
 	pts := closed[0].Points()
 	if len(pts) != 4 {
 		t.Errorf("ring vertex count: %d want 4; pts=%v", len(pts), pts)
+	}
+	if a := signedArea(pts); a <= 0 {
+		t.Errorf("ring traverses CW (signed area %d, want positive — CCW); pts=%v", a, pts)
 	}
 	// All four diamond vertices should appear.
 	want := map[fixed.Point]bool{

@@ -97,7 +97,7 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 	return Segment{Bot: bot, Top: top, Src: src, Reversed: reversed}
 }
 
-// DedupCoincidentEdges implements the simplest §11.7 cases:
+// DedupCoincidentEdges handles the same-source §11.7 cases:
 //
 //   - Same source, same direction (duplicate input edge): keep one, drop
 //     the rest.
@@ -105,10 +105,9 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 //
 // These transformations preserve ring topology (they only remove edges
 // that were already redundant or cancelling). Different-source coincident
-// pairs (the harder §11.7 cases) are NOT handled here — they require
-// topological merging of two rings into one, which the bound model
-// doesn't yet support. They're worked around at the boolean.go level
-// via input-equality short-circuits.
+// pairs are handled by the sweep via synthetic intersections at local-min
+// spawn and local-max close (see `sweep.processSynthIntersectsAtLocalMin`
+// and `sweep.findSynthMaxPartner`).
 //
 // Complexity O(n) per coincident group, O(n²) worst case via grouping.
 func DedupCoincidentEdges(segs []Segment) []Segment {

@@ -1,6 +1,10 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import (
+	"slices"
+
+	"github.com/lestrrat-go/polyclip/fixed"
+)
 
 // Sweep runs the scanline sweep over segs for the given boolean operation
 // and returns both a trace of processed events and the constructed output
@@ -329,6 +333,14 @@ func firstNonHorizontal(b *Bound) *Segment {
 // orientation convention), then emit OutPts for the far ends of any leading
 // horizontals — these are vertices the ring must touch on its way up from
 // the local-min vertex to the first non-horizontal AEL position.
+//
+// §11.7 synthetic intersections: when the new bounds emerge inside existing
+// AEs (e.g. a second axial square overlapping the first), any AE between
+// leftAE and rightAE in the AEL whose Seg.Bot lies on the new bound's
+// leading horizontals represents a topological "intersection" that the
+// bound model's sorted-insert path skips. Process each as a synthetic
+// IntersectEdges so ring-surgery (SwapOutrecs / JoinOutrecPaths) runs.
+// This is the analog of Clipper2's bubble loop after InsertRightEdge.
 func (s *sweep) handleLocalMin(e Event) {
 	lm := e.LocalMin
 	if lm == nil {
@@ -357,6 +369,12 @@ func (s *sweep) handleLocalMin(e Event) {
 		emitLeadingHorizOutPts(rightAE, lm.Vertex)
 		emitLeadingHorizOutPts(leftAE, lm.Vertex)
 	}
+	// §11.7: synthetic intersections for AEs trapped between the new bounds
+	// whose Seg.Bot lies on one of the new bounds' leading horizontals. This
+	// catches the diff-src coincident-horizontal case where a second polygon
+	// overlapping the first emerges with its right bound's leading horizontals
+	// passing through the first polygon's right-side AE.
+	s.processSynthIntersectsAtLocalMin(leftAE, rightAE, lm.Vertex)
 	// Schedule first EventTop for each bound (lazy scheduling per §12.10.4).
 	// Subsequent EventTops are scheduled by advanceBoundCursor as the cursor
 	// walks the bound's Segs.
@@ -611,6 +629,23 @@ func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fix
 		maxPt = ae.Seg.Top
 	}
 
+	// §11.7: symmetric synth-intersect at local-max. If maxPt is an
+	// INTERIOR vertex of some other AE's bound (a coincident vertex
+	// shared with another bound from a diff-src overlap), perform a
+	// synth-intersect to swap ring ownership before retiring ae. This
+	// is the symmetric counterpart to processSynthIntersectsAtLocalMin.
+	if ae.IsHotEdge() {
+		if synthPartner := s.findSynthMaxPartner(ae, maxPt); synthPartner != nil {
+			s.synthIntersect(ae, synthPartner, maxPt)
+			// emit any trailing horizontal points the partner needs to
+			// catch up with on the now-shared ring (none for current
+			// axial test case — partner is at its leftVert.Top moment).
+			s.ael.Remove(ae)
+			delete(s.bySeg, ae.Seg)
+			return
+		}
+	}
+
 	// Find partner via OutRec.
 	var partner *ActiveEdge
 	if ae.Outrec != nil {
@@ -626,7 +661,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fix
 	// remove ae but leave Outrec.FrontEdge / BackEdge intact so the
 	// partner's eventual closeBound can detect "ae already finished."
 	if partner == nil || !partner.IsBoundLast() {
-		if ae.Contributing && ae.IsHotEdge() {
+		if ae.IsHotEdge() {
 			AddOutPt(ae, maxPt)
 		}
 		s.ael.Remove(ae)
@@ -657,7 +692,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fix
 	if ae.IsFront() {
 		front, back = ae, partner
 	}
-	if front.Contributing && front.IsHotEdge() && back.Contributing && back.IsHotEdge() {
+	if front.IsHotEdge() && back.IsHotEdge() {
 		AddLocalMaxPoly(s.ael, front, back, maxPt)
 	}
 	s.ael.Remove(ae)
@@ -685,6 +720,170 @@ func emitLeadingHorizOutPts(ae *ActiveEdge, lmVertex fixed.Point) {
 			AddOutPt(ae, pt)
 		}
 	}
+}
+
+// findSynthMaxPartner searches AEL neighbours of ae for an AE whose Bound
+// has maxPt as an INTERIOR vertex (not local-min or local-max). Such an AE
+// is a candidate for symmetric synth-intersect at a local-max where two
+// bounds share an interior vertex (the §11.7 diff-src coincident case at
+// the top of overlapping axial rectangles).
+//
+// Returns nil if no neighbour qualifies. Only checks immediate AEL
+// neighbours (the synth-intersect dispatcher requires adjacency).
+func (s *sweep) findSynthMaxPartner(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
+	pos := s.ael.IndexOf(ae)
+	if pos < 0 {
+		return nil
+	}
+	for _, cand := range []*ActiveEdge{s.ael.LeftOf(pos), s.ael.RightOf(pos)} {
+		if cand == nil || cand.Bound == nil {
+			continue
+		}
+		if boundHasInteriorVertex(cand.Bound, maxPt) {
+			return cand
+		}
+	}
+	return nil
+}
+
+// boundHasInteriorVertex reports whether bound b has pt as an INTERIOR
+// vertex — an endpoint of some segment that is neither the bound's
+// local-min (Segs[0].Bot or Start of leading horizontals) nor its
+// local-max (Segs[last].Top or far end of trailing horizontals).
+func boundHasInteriorVertex(b *Bound, pt fixed.Point) bool {
+	if b == nil || len(b.Segs) < 2 {
+		return false
+	}
+	// Interior vertices are the Top of every segment except the last AND
+	// the Bot of every segment except the first. Since adjacent segments
+	// share endpoints, checking Top of segs[0..len-2] covers the interior
+	// vertices.
+	for i := range len(b.Segs) - 1 {
+		s := b.Segs[i]
+		// Top is interior unless this is the first segment AND it's a
+		// leading horizontal whose Top is at the local-min Y (still part
+		// of the leading-horizontal chain, not the local-max plateau).
+		if s.Top == pt {
+			return true
+		}
+	}
+	return false
+}
+
+// processSynthIntersectsAtLocalMin walks AEs trapped between leftAE and
+// rightAE (exclusive) after a local-min spawn and synth-intersects each
+// with rightAE (if its Seg.Bot lies on rightAE's leading horizontals at the
+// local-min Y) or leftAE (symmetric for leftAE's leading horizontals). The
+// synth-intersect runs IntersectEdges' dispatch logic WITHOUT physically
+// swapping the AEL — our sorted-insert path already places the new bounds
+// in their final positions; the swap is logical (ring-surgery only).
+//
+// Per DESIGN.md §11.7 — the diff-src coincident-horizontal case where two
+// overlapping axial rectangles share a horizontal edge segment after
+// [SplitOverlaps]. Without this synthetic step the second rectangle's right
+// bound never becomes hot and the union's right side is lost.
+func (s *sweep) processSynthIntersectsAtLocalMin(leftAE, rightAE *ActiveEdge, lmVertex fixed.Point) {
+	if leftAE == nil || rightAE == nil {
+		return
+	}
+	// Right-bound side: leading horizontals span from lmVertex.X to the
+	// first non-horizontal's Bot.X. Any AE between leftAE and rightAE in
+	// the AEL whose Seg.Bot equals an interior endpoint of one of those
+	// horizontals at lmVertex.Y is a synthetic intersection.
+	rightHorizX := boundLeadingHorizFarXs(rightAE)
+	leftHorizX := boundLeadingHorizFarXs(leftAE)
+	if len(rightHorizX) == 0 && len(leftHorizX) == 0 {
+		return
+	}
+	iL := s.ael.IndexOf(leftAE)
+	iR := s.ael.IndexOf(rightAE)
+	if iL < 0 || iR < 0 {
+		return
+	}
+	if iL > iR {
+		iL, iR = iR, iL
+	}
+	// Iterate trapped AEs from left to right. Use indices into a snapshot
+	// because synth-intersect may modify Outrec pointers (but not AEL order).
+	trapped := make([]*ActiveEdge, 0, iR-iL-1)
+	for i := iL + 1; i < iR; i++ {
+		trapped = append(trapped, s.ael.At(i))
+	}
+	for _, ae := range trapped {
+		if ae.Seg.Bot.Y != lmVertex.Y {
+			continue
+		}
+		botX := ae.Seg.Bot.X
+		// Match against right bound's leading horizontal far-Xs.
+		if containsCoord(rightHorizX, botX) {
+			s.synthIntersect(ae, rightAE, ae.Seg.Bot)
+			// After synth-intersect rightAE may have become hot; emit its
+			// leading horizontals onto the now-shared ring.
+			if rightAE.IsHotEdge() {
+				emitLeadingHorizOutPts(rightAE, lmVertex)
+			}
+			continue
+		}
+		if containsCoord(leftHorizX, botX) {
+			s.synthIntersect(leftAE, ae, ae.Seg.Bot)
+			if leftAE.IsHotEdge() {
+				emitLeadingHorizOutPts(leftAE, lmVertex)
+			}
+		}
+	}
+}
+
+// boundLeadingHorizFarXs returns the far-X of each leading horizontal in
+// ae's bound. Empty if ae has no leading horizontals (EdgeIdx == 0).
+func boundLeadingHorizFarXs(ae *ActiveEdge) []fixed.Coord {
+	if ae == nil || ae.Bound == nil || ae.EdgeIdx == 0 {
+		return nil
+	}
+	out := make([]fixed.Coord, 0, ae.EdgeIdx)
+	for i := range ae.EdgeIdx {
+		h := ae.Bound.Segs[i]
+		if !h.Horizontal() {
+			continue
+		}
+		out = append(out, boundHorizontalFarX(ae.Bound, h))
+	}
+	return out
+}
+
+func containsCoord(xs []fixed.Coord, x fixed.Coord) bool {
+	return slices.Contains(xs, x)
+}
+
+// synthIntersect runs IntersectEdges' dispatch logic for two adjacent AEL
+// edges WITHOUT physically swapping them in the AEL. Used by
+// [processSynthIntersectsAtLocalMin] where the new bounds are already at
+// their final sorted positions but ring-surgery (SwapOutrecs etc.) still
+// needs to happen at conceptual intersection points along leading
+// horizontals.
+func (s *sweep) synthIntersect(e1, e2 *ActiveEdge, pt fixed.Point) {
+	i1 := s.ael.IndexOf(e1)
+	i2 := s.ael.IndexOf(e2)
+	if i1 < 0 || i2 < 0 {
+		return
+	}
+	if i1 > i2 {
+		e1, e2 = e2, e1
+		i1, i2 = i2, i1
+	}
+	if i2 != i1+1 {
+		return
+	}
+	e1Hot := e1.IsHotEdge()
+	e2Hot := e2.IsHotEdge()
+	oldW1 := e1.WindSelf
+	oldW2 := e2.WindSelf
+	oldW1c2 := e1.WindOther
+	oldW2c2 := e2.WindOther
+	samePolyType := e1.Seg.Src == e2.Seg.Src
+	_ = dispatchIntersect(s.ael, s.op, e1, e2, pt, e1Hot, e2Hot, oldW1, oldW2, oldW1c2, oldW2c2, samePolyType)
+	// No AEL swap. Re-classify both at their (unchanged) positions.
+	Classify(s.ael, e1, s.op)
+	Classify(s.ael, e2, s.op)
 }
 
 // boundHorizontalFarX returns the X of horizontal h's "far" endpoint as

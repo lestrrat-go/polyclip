@@ -654,7 +654,19 @@ After §11.2 step 5, the only collinear pairs the sweep sees are pairs that shar
 - Different sources, same direction — they double-count. Output emits **one** edge with the union of their winding contributions.
 - Different sources, opposite direction — they cancel; output emits zero contribution at this position.
 
-The simplest implementation: during preprocess, after the overlap split, scan the segment list and merge / drop coincident pairs *before* building the event queue.
+**Implementation**:
+
+- Same-source cases are handled in preprocess by `DedupCoincidentEdges` in `clip/preprocess.go`: same-direction duplicates dropped, opposite-direction pairs cancelled.
+
+- Different-source cases occur most naturally with axis-aligned overlapping inputs (e.g. two overlapping axial rectangles where the top and bottom edges' middle pieces share `Bot`/`Top` after `SplitOverlaps`). The bound model places each source's leading horizontal in a separate bound, so a sorted-insert of the AEs misses the topological intersection that should occur where the two bounds' horizontals cross another bound's endpoint. Two synthetic-intersection passes recover the correct ring topology:
+
+  1. **At local-min spawn** (`sweep.processSynthIntersectsAtLocalMin`): after spawning both new bounds, walk AEs trapped between leftAE and rightAE in the AEL. For each whose `Seg.Bot.Y == lm.Vertex.Y` AND whose `Seg.Bot.X` matches one of the new bound's leading-horizontal endpoints, run `synthIntersect` — `IntersectEdges`' dispatch logic without an AEL swap (our sorted-insert path already has the bounds at their final positions; only the ring-surgery side effects are needed). For diff-src same-dir at the bottom of two overlapping axial squares, this swaps the existing ring's FrontEdge from the first square's right side to the second square's right side.
+
+  2. **At local-max** (`sweep.findSynthMaxPartner` in `closeBound`): symmetric. If `maxPt` is an INTERIOR vertex (not a local-min or local-max) of an AEL neighbour's bound, that neighbour is a synth-partner — perform `synthIntersect` to swap ring ownership before retiring the closing edge. This catches the top-of-overlap coincident pair, swapping the ring's BackEdge so the ring continues through the other source's bound to its actual local max.
+
+  3. `closeBound`'s Case C is also relaxed from `Contributing && IsHotEdge` to just `IsHotEdge`. After a synth-intersect, the new owner of a chain may be classified non-contributing at the local-max scanline but is still hot — its closure must run so the ring closes cleanly.
+
+  Identical inputs (`Union(A, A)` and analogues) remain a degenerate case — every edge becomes a diff-src coincident pair at the SAME local-min vertex, which the bound model's BuildLocalMinima can't disambiguate. These are short-circuited at the API level in `boolean.go` (`mpolyEqual` check).
 
 ### 11.8 Horizontal segments
 

@@ -45,10 +45,12 @@ func Union(a, b MultiPolygon) (MultiPolygon, error) {
 		return a, nil
 	}
 
-	// Idempotency short-circuit: Union(A, A) = A. Otherwise the sweep
-	// would feed every Subject edge alongside a coincident Clip edge of
-	// the same direction — a §11.7 case the current engine doesn't yet
-	// handle by emitting one merged edge.
+	// Idempotency short-circuit: Union(A, A) = A. Identical inputs are a
+	// degenerate case where every edge becomes a diff-src coincident pair
+	// at the SAME vertex; the bound model's local-min disambiguation isn't
+	// designed for that. Other diff-src coincident cases (overlapping but
+	// not identical, e.g. TestUnionOverlappingAxisAligned) are handled by
+	// §11.7's synth-intersect mechanism in clip/sweep.go.
 	if mpolyEqual(a, b) {
 		return a, nil
 	}
@@ -137,8 +139,10 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 // piece count, same outer ring vertices in the same order, same holes.
 // Used by the idempotency short-circuits in [Union] / [Intersect] /
 // [Difference] / [Xor] to bypass the engine when inputs are identical.
-// The engine doesn't yet handle the §11.7 same-direction-different-source
-// coincident edges that arise from identical inputs.
+// Non-identical diff-src coincident inputs are handled by the sweep's
+// synth-intersect mechanism (see DESIGN.md §11.7); identical inputs are
+// a degenerate case where every edge collapses to a same-vertex local
+// minimum, which the bound-model pre-pass can't disambiguate.
 func mpolyEqual(a, b MultiPolygon) bool {
 	if len(a) != len(b) {
 		return false

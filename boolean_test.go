@@ -103,18 +103,8 @@ func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
 func TestUnionOverlappingAxisAligned(t *testing.T) {
 	// Two axial squares that OVERLAP. After SplitOverlaps the bottom and
 	// top edges are split into coincident-pair fragments (different-source
-	// same-direction). Per DESIGN.md §11.7 these pairs should emit ONE
-	// edge with combined winding, which requires topological merging of
-	// two rings into one in the bound model — not yet supported.
-	//
-	// The output is currently under-area: sq1's outline is produced (with
-	// intermediate split vertices), but sq2's exterior segments are missed
-	// because sq2's local-min classification is non-contributing (the bound
-	// emerges INSIDE sq1). A proper fix requires either (a) topological
-	// ring merging at the coincident edges, or (b) a Clipper2-style
-	// classification that handles diff-src same-dir coincident pairs at
-	// the AEL level.
-	t.Skip("§11.7 different-source same-direction coincident-edge merging not yet implemented (topological merge needed)")
+	// same-direction). §11.7 handles these via synthetic intersections at
+	// local-min spawn time (sweep.go's processSynthIntersectsAtLocalMin).
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Union(a, b)
@@ -122,8 +112,54 @@ func TestUnionOverlappingAxisAligned(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	gotArea := got.Area()
-	if gotArea <= a.Area() || gotArea >= a.Area()+b.Area() {
-		t.Errorf("Union area %v not in (%v, %v); got=%+v", gotArea, a.Area(), a.Area()+b.Area(), got)
+	// True union area: 100 + 100 - 70 (overlap [-2,5]×[-5,5]) = 130.
+	wantArea := 130.0
+	if gotArea < wantArea*0.99 || gotArea > wantArea*1.01 {
+		t.Errorf("Union area %v want ≈%v; got=%+v", gotArea, wantArea, got)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 merged piece, got %d: %+v", len(got), got)
+	}
+}
+
+func TestUnionVerticallyStackedAxialSquares(t *testing.T) {
+	// Stacked vertically with shared horizontal edge at Y=5. The shared
+	// edge is diff-src opposite-direction (sq1 top goes R→L, sq2 bot goes
+	// L→R) so SplitOverlaps doesn't split, BuildLocalMinima succeeds, and
+	// the shared boundary is naturally elided by the sweep. Sanity check.
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(0, 10, 5)}
+	got, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArea := a.Area() + b.Area()
+	if got.Area() < wantArea*0.99 || got.Area() > wantArea*1.01 {
+		t.Errorf("Union area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
+	}
+}
+
+func TestUnionThreeOverlappingAxialSquares(t *testing.T) {
+	// Three axial squares overlapping in a row: a (x∈[-5,5]), b (x∈[-2,8]),
+	// c (x∈[1,11]). After SplitOverlaps the bottom and top edges of a∪b are
+	// split into many coincident-pair fragments. §11.7 must handle a chain
+	// of synth-intersects along the bottom (and at the top).
+	//
+	// Union of all three: x∈[-5,11], y∈[-5,5]. Area = 16*10 = 160.
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(3, 0, 5)}
+	c := MultiPolygon{sq(6, 0, 5)}
+	ab, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("Union(a,b): %v", err)
+	}
+	got, err := Union(ab, c)
+	if err != nil {
+		t.Fatalf("Union(ab,c): %v", err)
+	}
+	wantArea := 160.0
+	if got.Area() < wantArea*0.99 || got.Area() > wantArea*1.01 {
+		t.Errorf("Union(a,b,c) area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
 	}
 }
 

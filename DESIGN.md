@@ -422,25 +422,24 @@ The phases are designed so each one produces a usable, testable artifact even if
 - [x] `fixed/mul.go` — `int128` multiply for orientation predicates.
 - [x] Tests for predicates against hand-computed integer expectations.
 
-### Phase 2 — Boolean engine: union only (≤ 1500 LoC)
-- [ ] `clip/segment.go`, `clip/sweep.go`, `clip/intersect.go`, `clip/classify.go` (union table only), `clip/build.go`.
-- [ ] Public `Union(a, b MultiPolygon)`. `UnionAll` defined naively as repeated `Union` for now.
-- [ ] All adversarial-case tests for union pass.
-- [ ] Fuzz seed corpus committed.
-- **Exit criterion**: `Union` is robust enough to feed into the slicer's skin-detection prototype.
+### Phase 2 — Boolean engine: union only (≤ 1500 LoC) — **DONE**
+- [x] `clip/segment.go`, `clip/sweep.go`, `clip/intersect.go`, `clip/classify.go` (union table only), `clip/build.go`.
+- [x] Public `Union(a, b MultiPolygon)`.
+- [x] All adversarial-case tests for union pass.
+- [x] Fuzz seed corpus committed.
 
-### Phase 3 — Other boolean ops (≤ 200 LoC delta)
-- [ ] Extend the classification table in `clip/classify.go` for intersect, difference, xor.
-- [ ] Public `Intersect`, `Difference`, `Xor`.
-- [ ] Invariant tests from §6.2 pass.
+### Phase 3 — Other boolean ops (≤ 200 LoC delta) — **DONE**
+- [x] Extend the classification table in `clip/classify.go` for intersect, difference, xor.
+- [x] Public `Intersect`, `Difference`, `Xor`.
+- [x] Invariant tests from §6.2 pass.
 
-### Phase 4 — Offset (≤ 800 LoC)
-- [ ] `offset.go` — direct per-ring construction, no boolean self-union (topology-change cases deferred).
-- [ ] Miter and round joins. Square is trivial; add at the end.
-- [ ] Round-trip property tests.
+### Phase 4 — Offset (≤ 800 LoC) — **DONE**
+- [x] `offset.go` — direct per-ring construction, no boolean self-union (topology-change cases deferred).
+- [x] Miter and round joins (plus square).
+- [x] Round-trip property tests.
 
 ### Phase 5 — Quality & speed
-- [ ] `UnionAll` tournament reduction for `O(n log n)` instead of repeated pairwise.
+- [x] `UnionAll` tournament reduction for `O(n log n)` Union calls instead of repeated pairwise.
 - [ ] `Clean()` implementation.
 - [ ] `Validate()` implementation.
 - [ ] Benchmarks; profile and optimise hot paths in the sweep.

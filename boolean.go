@@ -66,6 +66,46 @@ func Union(a, b MultiPolygon) (MultiPolygon, error) {
 	return runBooleanOp(a, b, clip.OpUnion)
 }
 
+// UnionAll returns the union of all inputs. It is functionally equivalent
+// to repeated [Union], but pairs inputs in a tournament so the total work
+// is O(n) Union calls of roughly balanced size rather than the O(n²)
+// cumulative reduction `Union(Union(Union(p0, p1), p2), p3)…`.
+//
+// Empty input slice returns an empty [MultiPolygon]; a single-element
+// slice returns that element unchanged.
+func UnionAll(polys ...MultiPolygon) (MultiPolygon, error) {
+	if len(polys) == 0 {
+		return MultiPolygon{}, nil
+	}
+	if len(polys) == 1 {
+		return polys[0], nil
+	}
+	// Work on a local copy so the caller's slice isn't mutated when we
+	// overwrite entries between rounds.
+	current := make([]MultiPolygon, len(polys))
+	copy(current, polys)
+	for len(current) > 1 {
+		n := len(current)
+		// Pair-merge in place: result of i and i+1 goes into slot i/2.
+		// An unpaired trailing element survives to the next round.
+		write := 0
+		for i := 0; i+1 < n; i += 2 {
+			merged, err := Union(current[i], current[i+1])
+			if err != nil {
+				return nil, err
+			}
+			current[write] = merged
+			write++
+		}
+		if n%2 == 1 {
+			current[write] = current[n-1]
+			write++
+		}
+		current = current[:write]
+	}
+	return current[0], nil
+}
+
 // Intersect returns a ∩ b.
 //
 // Empty input or disjoint bounding boxes short-circuit to the empty

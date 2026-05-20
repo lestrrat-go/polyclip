@@ -355,3 +355,115 @@ func TestXorDisjoint(t *testing.T) {
 		t.Errorf("Xor(disjoint) len=%d want 2", len(got))
 	}
 }
+
+func TestUnionAllEmpty(t *testing.T) {
+	got, err := UnionAll()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("UnionAll() len=%d want 0", len(got))
+	}
+}
+
+func TestUnionAllSingle(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 5)}
+	got, err := UnionAll(a)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 || got.Area() != a.Area() {
+		t.Errorf("UnionAll(a) = %+v, want a", got)
+	}
+}
+
+func TestUnionAllPairMatchesUnion(t *testing.T) {
+	a := MultiPolygon{sq(0, 0, 5)}
+	b := MultiPolygon{sq(3, 0, 5)} // overlaps a
+	gotAll, err := UnionAll(a, b)
+	if err != nil {
+		t.Fatalf("UnionAll: %v", err)
+	}
+	gotPair, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("Union: %v", err)
+	}
+	if gotAll.Area() != gotPair.Area() {
+		t.Errorf("areas differ: UnionAll=%v Union=%v", gotAll.Area(), gotPair.Area())
+	}
+}
+
+func TestUnionAllManyDisjoint(t *testing.T) {
+	polys := []MultiPolygon{
+		{sq(0, 0, 1)},
+		{sq(10, 0, 1)},
+		{sq(20, 0, 1)},
+		{sq(30, 0, 1)},
+		{sq(40, 0, 1)},
+	}
+	got, err := UnionAll(polys...)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 5 {
+		t.Errorf("len=%d want 5", len(got))
+	}
+	// Each square is 2x2 → 4 area; 5 disjoint → 20.
+	if got.Area() != 20 {
+		t.Errorf("Area=%v want 20", got.Area())
+	}
+}
+
+func TestUnionAllManyOverlapping(t *testing.T) {
+	// Five horizontally-shifted diamonds. Diamonds have no horizontal
+	// edges so the bound model handles them cleanly even when shifted
+	// to share x-extents. UnionAll's tournament reduction must produce
+	// the same single connected region as a cumulative Union.
+	polys := []MultiPolygon{
+		{diamond(0, 0, 10)}, {diamond(5, 0, 10)},
+		{diamond(10, 0, 10)}, {diamond(15, 0, 10)},
+		{diamond(20, 0, 10)},
+	}
+	got, err := UnionAll(polys...)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	// Cross-check against cumulative Union.
+	var want MultiPolygon
+	for i, p := range polys {
+		if i == 0 {
+			want = p
+			continue
+		}
+		w, err := Union(want, p)
+		if err != nil {
+			t.Fatalf("cumulative Union: %v", err)
+		}
+		want = w
+	}
+	const tol = 1e-9
+	if diff := got.Area() - want.Area(); diff > tol || diff < -tol {
+		t.Errorf("area diverges from cumulative: UnionAll=%v cumulative=%v", got.Area(), want.Area())
+	}
+}
+
+func TestUnionAllDoesNotMutateInput(t *testing.T) {
+	// Tournament reduction overwrites entries between rounds; ensure the
+	// caller's slice is untouched.
+	polys := []MultiPolygon{
+		{sq(0, 0, 1)}, {sq(10, 0, 1)}, {sq(20, 0, 1)},
+	}
+	snapshot := make([]MultiPolygon, len(polys))
+	copy(snapshot, polys)
+	if _, err := UnionAll(polys...); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	for i := range polys {
+		if &polys[i][0] != &snapshot[i][0] {
+			t.Errorf("polys[%d] underlying ExPolygon array changed", i)
+		}
+	}
+}

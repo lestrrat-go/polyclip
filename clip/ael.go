@@ -20,15 +20,23 @@ type ActiveEdge struct {
 	// callers in tests and the older per-edge sweep skeleton).
 	Bound *Bound
 
-	// EdgeIdx is the cursor position into Bound.Segs. Advances via
-	// [ActiveEdge.AdvanceEdge] when the current edge reaches its Top
-	// without ending the bound (intermediate vertex).
+	// EdgeIdx is the cursor position into Bound.Segs. The sweep advances it
+	// (in place) when the current edge reaches its Top without ending the
+	// bound — see sweep.advanceBoundCursor and sweep.doHorizontal.
 	EdgeIdx int
 
 	// CurrX is the X coordinate where Seg crosses the current scanline Y.
 	// It is updated whenever the scanline advances and at intersection
 	// events that reorder neighbours.
 	CurrX fixed.Coord
+
+	// WindDx is the signed input-traversal direction of this edge's bound,
+	// ±1 (Clipper2's wind_dx). It is set once when the ActiveEdge is spawned
+	// and never changes — every segment of a bound shares the same WindDx,
+	// including leading/trailing horizontals. [Classify] uses WindDx as the
+	// edge's winding contribution; this is what lets a horizontal carry its
+	// bound's contribution while it sits in the AEL (DESIGN.md §12.6.1).
+	WindDx int
 
 	// WindSelf is the signed winding count of Seg.Src up to and including
 	// this edge — i.e. the count of edges of the same source that a
@@ -49,26 +57,6 @@ type ActiveEdge struct {
 	// Outrec is non-nil iff this edge is currently a "hot" edge contributing
 	// to an output ring. See DESIGN.md §12.2 and [ActiveEdge.IsHotEdge].
 	Outrec *OutRec
-}
-
-// AdvanceEdge moves the bound cursor to the next segment in the bound and
-// returns true if there is a next segment, false if the bound is exhausted
-// (i.e. the current edge was the local-max edge). Updates ae.Seg and
-// ae.EdgeIdx; does NOT touch CurrX (the caller must reposition the AEL
-// entry to the new edge's Bot.X if needed).
-//
-// Returns false (without modifying ae) when ae.Bound is nil or already at
-// the last edge.
-func (ae *ActiveEdge) AdvanceEdge() bool {
-	if ae.Bound == nil {
-		return false
-	}
-	if ae.EdgeIdx+1 >= len(ae.Bound.Segs) {
-		return false
-	}
-	ae.EdgeIdx++
-	ae.Seg = ae.Bound.Segs[ae.EdgeIdx]
-	return true
 }
 
 // IsBoundLast reports whether ae's cursor is on the last segment of its

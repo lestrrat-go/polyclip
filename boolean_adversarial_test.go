@@ -258,7 +258,6 @@ func TestDifferenceTouchingAtVertex(t *testing.T) {
 // below are skipped pending engine work; remove the t.Skip when fixed.
 
 func TestIntersectOverlappingAxisAligned(t *testing.T) {
-	t.Skip("§11.7 synth-intersect is Union-only — Intersect on axial overlap produces wrong rings (tracked in roadmap)")
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Intersect(a, b)
@@ -272,7 +271,6 @@ func TestIntersectOverlappingAxisAligned(t *testing.T) {
 }
 
 func TestDifferenceOverlappingAxisAligned(t *testing.T) {
-	t.Skip("§11.7 synth-intersect is Union-only — Difference on axial overlap produces wrong rings (tracked in roadmap)")
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Difference(a, b)
@@ -286,7 +284,6 @@ func TestDifferenceOverlappingAxisAligned(t *testing.T) {
 }
 
 func TestXorOverlappingAxisAligned(t *testing.T) {
-	t.Skip("§11.7 synth-intersect is Union-only — Xor on axial overlap produces wrong rings (tracked in roadmap)")
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Xor(a, b)
@@ -300,26 +297,14 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 	}
 }
 
-// TestUnionOverlappingSquaresVertexInsideOther documents a Union failure on
-// two axis-aligned squares that overlap such that each square has a vertex
-// strictly INSIDE the other (and edges that cross interior-to-interior,
-// not at endpoints). Distinct from TestUnionOverlappingAxisAligned where
-// the squares share horizontal y-values: there §11.7's synth-intersect
-// handles diff-src coincident edges. Here there are no coincident edges
-// at all, just proper edge-edge crossings that should produce a single
+// TestUnionOverlappingSquaresVertexInsideOther covers two axis-aligned squares
+// that overlap such that each square has a vertex strictly INSIDE the other.
+// The two crossings (10,6) and (6,10) are each a vertical edge passing through
+// the INTERIOR of a horizontal edge — exactly the case the DoHorizontal rework
+// (DESIGN.md §12.6.1) targets: horizontals are first-class AEL edges, so the
+// crossing flows through the normal IntersectEdges path. Expected single
 // merged piece of area 184 (100 + 100 − 16 overlap).
-//
-// Root cause (investigated 2026-05-20): the two crossings (10,6) and
-// (6,10) are each a vertical edge passing through the INTERIOR of a
-// horizontal edge. Horizontals are excluded from the AEL, so
-// maybeScheduleIntersect never sees these crossings, and the §11.7
-// synth-intersect workaround only matches horizontal ENDPOINTS, not
-// interior crossings. The fix is the DoHorizontal rework (horizontals as
-// first-class AEL edges) planned in DESIGN.md §12.6.1; a synth-intersect
-// shortcut was tried and proven insufficient (front/back polarity wall —
-// AddLocalMaxPoly bails when both crossing edges are the same ring side).
 func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
-	t.Skip("engine bug: vertical-through-horizontal-interior crossing dropped; fix = DoHorizontal rework, DESIGN.md §12.6.1")
 	a := MultiPolygon{ExPolygon{Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{6, 6}, {16, 6}, {16, 16}, {6, 16}}}}
 	got, err := Union(a, b)
@@ -332,5 +317,37 @@ func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Errorf("expected 1 merged piece, got %d", len(got))
+	}
+}
+
+// TestUnionCoincidentHorizConfluence is a KNOWN-FAILING regression captured
+// from FuzzUnion after the §12.6.1 DoHorizontal rework. Subject `a` and clip
+// `b` share a coincident bottom horizontal at y=-5 (diff-source, same
+// direction), AND `a`'s local-maximum apex (-2,5) coincides exactly with `b`'s
+// top-left boundary vertex (-2,5) — a multi-edge confluence where four edges
+// meet at one point.
+//
+// At that confluence `b`'s left bound is correctly cold (interior to `a`) but
+// its trailing top horizontal stays cold even though it is the union's top
+// boundary: closeBound does not process the edges BETWEEN the maxima pair the
+// way Clipper2's DoMaxima (engine.cpp:2729) does, so the hot/contributing
+// status is never transferred across the confluence. Expected area 130
+// (pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5)); the engine currently drops
+// `b` and returns ~65.
+//
+// Fix path: port DoMaxima's between-maxima IntersectEdges loop into closeBound.
+// Tracked as a follow-up to the DoHorizontal rework. The pre-rework engine
+// produced 130 here via the (now-deleted) §11.7 synth-intersect mechanism.
+func TestUnionCoincidentHorizConfluence(t *testing.T) {
+	t.Skip("known regression: multi-edge confluence + coincident horizontal; fix = port DoMaxima between-maxima processing into closeBound (DESIGN.md §12.6.1 follow-up)")
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{-5, -5}, {5, -5}, {-2, 5}, {-5, 5}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{-2, -5}, {8, -5}, {8, 5}, {-2, 5}}}}
+	got, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 130.0
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Union area %v want %v", got.Area(), wantArea)
 	}
 }

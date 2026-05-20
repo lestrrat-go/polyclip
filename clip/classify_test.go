@@ -19,7 +19,7 @@ func TestClassifyLeftmostEdge(t *testing.T) {
 	// One subject edge, no neighbors.
 	s := vert(0, Subject, true) // Reversed → delta = +1
 	ael := NewAEL()
-	ae := &ActiveEdge{Seg: &s, CurrX: 0}
+	ae := &ActiveEdge{Seg: &s, CurrX: 0, WindDx: signedContribution(&s)}
 	ael.Insert(ae)
 	Classify(ael, ae, OpUnion)
 	if ae.WindSelf != 1 {
@@ -39,8 +39,8 @@ func TestClassifyTwoSameSource(t *testing.T) {
 	left := vert(0, Subject, true)    // delta = +1
 	right := vert(10, Subject, false) // delta = -1
 	ael := NewAEL()
-	aeL := &ActiveEdge{Seg: &left, CurrX: 0}
-	aeR := &ActiveEdge{Seg: &right, CurrX: 10}
+	aeL := &ActiveEdge{Seg: &left, CurrX: 0, WindDx: signedContribution(&left)}
+	aeR := &ActiveEdge{Seg: &right, CurrX: 10, WindDx: signedContribution(&right)}
 	ael.Insert(aeL)
 	ael.Insert(aeR)
 	Classify(ael, aeL, OpUnion)
@@ -67,10 +67,10 @@ func TestClassifyTwoOverlappingSquares(t *testing.T) {
 	cR := vert(15, Clip, false)
 
 	ael := NewAEL()
-	aeSL := &ActiveEdge{Seg: &sL, CurrX: 0}
-	aeCL := &ActiveEdge{Seg: &cL, CurrX: 5}
-	aeSR := &ActiveEdge{Seg: &sR, CurrX: 10}
-	aeCR := &ActiveEdge{Seg: &cR, CurrX: 15}
+	aeSL := &ActiveEdge{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)}
+	aeCL := &ActiveEdge{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)}
+	aeSR := &ActiveEdge{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)}
+	aeCR := &ActiveEdge{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)}
 	ael.Insert(aeSL)
 	ael.Insert(aeCL)
 	ael.Insert(aeSR)
@@ -117,10 +117,10 @@ func TestClassifyOpIntersect(t *testing.T) {
 
 	ael := NewAEL()
 	aes := []*ActiveEdge{
-		{Seg: &sL, CurrX: 0},
-		{Seg: &cL, CurrX: 5},
-		{Seg: &sR, CurrX: 10},
-		{Seg: &cR, CurrX: 15},
+		{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)},
+		{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)},
+		{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)},
+		{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)},
 	}
 	for _, ae := range aes {
 		ael.Insert(ae)
@@ -147,10 +147,10 @@ func TestClassifyOpXor(t *testing.T) {
 
 	ael := NewAEL()
 	aes := []*ActiveEdge{
-		{Seg: &sL, CurrX: 0},
-		{Seg: &cL, CurrX: 5},
-		{Seg: &sR, CurrX: 10},
-		{Seg: &cR, CurrX: 15},
+		{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)},
+		{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)},
+		{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)},
+		{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)},
 	}
 	for _, ae := range aes {
 		ael.Insert(ae)

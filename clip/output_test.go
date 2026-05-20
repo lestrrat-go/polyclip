@@ -11,9 +11,11 @@ import (
 func makeEdge(currX int64, src Source, reversed bool) *ActiveEdge {
 	bot := fixed.Point{X: fixed.Coord(currX), Y: 0}
 	top := fixed.Point{X: fixed.Coord(currX), Y: 10}
+	seg := &Segment{Bot: bot, Top: top, Src: src, Reversed: reversed}
 	return &ActiveEdge{
-		Seg:   &Segment{Bot: bot, Top: top, Src: src, Reversed: reversed},
-		CurrX: fixed.Coord(currX),
+		Seg:    seg,
+		CurrX:  fixed.Coord(currX),
+		WindDx: signedContribution(seg),
 	}
 }
 

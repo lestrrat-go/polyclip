@@ -10,13 +10,13 @@ import "fmt"
 // post-conditions"; this function realises the post-condition flavour —
 // it inspects the AEL and ring list AFTER [Sweep] returns. Invariants 3
 // and 4 ("hot⇒contributing" and "no adjacent same-source contributing
-// edges") are NOT checked because §11.7's synth-intersect mechanism
-// legitimately leaves a hot edge non-contributing in mid-sweep (an edge
-// swapped into a ring whose interior classification doesn't match), and
-// adjacency may transiently violate the rule during synth-intersect
-// passes. Those invariants are aspirational per-event guarantees that the
-// current implementation doesn't uphold strictly — see DESIGN.md §11.10
-// for the revised statement.
+// edges") are NOT checked because [IntersectEdges]' SwapOutrecs legitimately
+// leaves a hot edge non-contributing in mid-sweep (an edge swapped into a
+// ring whose interior classification doesn't match its own boundary status),
+// and adjacency may transiently violate the rule between an intersection and
+// the following re-classification. Those invariants are aspirational
+// per-event guarantees that the current implementation doesn't uphold
+// strictly — see DESIGN.md §11.10 for the revised statement.
 //
 // The function is called from tests; production callers should not invoke
 // it (it walks every OutPt of every ring).

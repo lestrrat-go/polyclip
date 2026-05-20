@@ -134,9 +134,16 @@ func AddLocalMinPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point, isNew bool) *
 // open-end recovery path.
 func AddLocalMaxPoly(_ *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 	if e1.IsFront() == e2.IsFront() {
-		// The two edges are on the same side of their ring(s). This shouldn't
-		// happen for valid input; treat as a soft error and bail.
-		return nil
+		if e1.Outrec == e2.Outrec {
+			// Same ring, same side — a genuine inconsistency; bail.
+			return nil
+		}
+		// Two different rings meeting same-side at a maximum. This arises when
+		// one ring was created at an "inverted" local minimum (a downward notch
+		// in a concave union boundary) whose front/back orientation is opposite
+		// to the ring it now joins. Reverse e2's ring sides so the polarities
+		// oppose, then join (analogous to Clipper2's SwapFrontBackSides).
+		e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
 	}
 	result := AddOutPt(e1, pt)
 	if e1.Outrec == e2.Outrec {

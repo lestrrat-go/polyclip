@@ -28,7 +28,7 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	if pos < 0 {
 		return
 	}
-	delta := signedContribution(ae.Seg)
+	delta := ae.WindDx
 
 	prevSelf, prevOther := 0, 0
 	foundSelf, foundOther := false, false

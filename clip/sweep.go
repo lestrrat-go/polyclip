@@ -1,8 +1,6 @@
 package clip
 
 import (
-	"slices"
-
 	"github.com/lestrrat-go/polyclip/fixed"
 )
 
@@ -13,11 +11,12 @@ import (
 // segs is taken by value; callers should not mutate the slice after calling
 // Sweep, because the sweep retains pointers into it.
 //
-// Horizontal-segment support: the bound model (DESIGN.md §12.10) handles
-// all horizontals — leading, trailing, and mid-bound — natively via
-// [emitLeadingHorizOutPts], [advanceBoundCursor]'s horizontal walk, and
-// [closeBound]'s trailing-horizontal pass. The legacy per-edge fallback
-// (via [ClassifyHorizontals]) runs only when [BuildLocalMinima] fails to
+// Horizontal-segment support: in the bound model (DESIGN.md §12.6.1)
+// horizontals are first-class AEL edges. A bound cursor that lands on a
+// horizontal is queued and processed by [sweep.doHorizontal], which walks the
+// AEL crossing every edge inside the horizontal's span (one IntersectEdges
+// path, no special-case synth-intersect). The legacy per-edge fallback (via
+// [ClassifyHorizontals]) runs only when [BuildLocalMinima] fails to
 // reconstruct ring topology; that fallback strictly rejects mid-bound
 // horizontals and surfaces [ErrUnsupportedHorizontal] via SweepResult.Err.
 func Sweep(segs []Segment, op Operation) *SweepResult {
@@ -93,6 +92,20 @@ type sweep struct {
 	minima map[fixed.Point]*LocalMin
 	trace  []TraceEvent
 	err    error
+
+	// pendingHoriz holds bound-model ActiveEdges whose cursor currently sits
+	// on a horizontal segment, awaiting the horizontal pass ([doHorizontal]).
+	// They are flushed at the end of each scanline Y, AFTER every Top/LocalMin
+	// at that Y has settled the AEL (the Top < Bot < Horiz phasing of
+	// DESIGN.md §12.6 / §12.10). Cleared by [flushPendingHoriz].
+	pendingHoriz []*ActiveEdge
+
+	// boundModel is true when [BuildLocalMinima] succeeded and every segment
+	// is claimed by a bound — the scanline is then processed in Clipper2's
+	// beam phases (intersections, then ALL tops, then ALL local minima, then
+	// horizontals). False for the legacy per-edge fallback, which dispatches
+	// per (Y, X) point via [handleBatch].
+	boundModel bool
 }
 
 func newSweep(segs []Segment, op Operation) *sweep {
@@ -120,6 +133,7 @@ func newSweep(segs []Segment, op Operation) *sweep {
 		fallbackTrace = append(fallbackTrace, mErr.Error())
 	}
 	if mErr == nil {
+		s.boundModel = true
 		for i := range mins {
 			lm := &mins[i]
 			s.minima[lm.Vertex] = lm
@@ -176,16 +190,95 @@ func claimAllSegments(claimed map[*Segment]struct{}, b *Bound) {
 
 func (s *sweep) run() {
 	for s.queue.Len() > 0 {
-		first := s.queue.Pop()
-		batch := []Event{first}
-		// Collect every event sharing this point. Within a batch the
-		// EventKind ordering (HorizMaxOpen < Top < Bot < Horiz <
-		// Intersection) is already preserved by the heap.
-		for s.queue.Len() > 0 && s.queue.Peek().P == first.P {
-			batch = append(batch, s.queue.Pop())
+		y := s.queue.Peek().P.Y
+		// Collect every event at this scanline Y.
+		var evs []Event
+		for s.queue.Len() > 0 && s.queue.Peek().P.Y == y {
+			evs = append(evs, s.queue.Pop())
 		}
-		s.handleBatch(batch)
+		if s.boundModel {
+			// Refresh every active edge's CurrX to this scanline so that
+			// sorted inserts (local-min spawns) and Classify's left-walk see
+			// the true left-to-right order at Y. Without this, a new edge
+			// spawning at a high-Y local minimum is placed using neighbours'
+			// stale CurrX (from their lower-Y events), corrupting the winding
+			// classification (DESIGN.md §11.10 invariant 1). Mirrors Clipper2's
+			// per-scanbeam curr_x update in DoTopOfScanbeam.
+			s.ael.UpdateForScanline(y)
+			s.handleScanlineBound(evs)
+		} else {
+			s.handleScanlineLegacy(evs)
+		}
+		// Horizontal pass: every bound whose cursor reached a horizontal at
+		// this Y is processed now, with the AEL fully settled by the
+		// Top/LocalMin events above. doHorizontal may promote a cursor onto a
+		// further horizontal at the same Y; it appends to pendingHoriz, so the
+		// loop drains until none remain. Per DESIGN.md §12.6 / §12.10.
+		s.flushPendingHoriz(y)
 	}
+}
+
+// handleScanlineBound processes all events at one scanline in Clipper2's beam
+// phase order (DESIGN.md §12.10.1): intersections (crossings resolve before
+// tops), then ALL tops (maxima close / intermediate advance), then ALL local
+// minima (spawn). Processing every top before any local minimum is essential:
+// at a shared horizontal edge (e.g. vertically stacked squares) the upper
+// ring's local minimum must classify against an AEL from which the lower
+// ring's maxima edges have already been removed, or it is misclassified as
+// interior and never created. Horizontals are flushed afterwards by [run].
+func (s *sweep) handleScanlineBound(evs []Event) {
+	var tops, localMins, intersects []Event
+	for _, e := range evs {
+		switch e.Kind {
+		case EventTop:
+			tops = append(tops, e)
+		case EventLocalMin:
+			localMins = append(localMins, e)
+		case EventIntersection:
+			intersects = append(intersects, e)
+		}
+	}
+	for _, e := range tops {
+		s.handleTop(e)
+		s.appendTrace(e, nil)
+	}
+	for _, e := range localMins {
+		s.handleLocalMin(e)
+		s.appendTrace(e, nil)
+	}
+	for _, e := range intersects {
+		s.handleIntersection(e)
+		s.appendTrace(e, nil)
+	}
+}
+
+// handleScanlineLegacy processes a scanline in the per-edge fallback path
+// (used when [BuildLocalMinima] fails). Events are grouped per (Y, X) point
+// and dispatched by [handleBatch], preserving the configuration detection
+// (2-tops = local max, 1-top-1-bot = through-vertex) that the fallback relies
+// on.
+func (s *sweep) handleScanlineLegacy(evs []Event) {
+	for i := 0; i < len(evs); {
+		j := i + 1
+		for j < len(evs) && evs[j].P == evs[i].P {
+			j++
+		}
+		s.handleBatch(evs[i:j])
+		i = j
+	}
+}
+
+// flushPendingHoriz runs [doHorizontal] for every bound-model ActiveEdge whose
+// cursor reached a horizontal at scanline y. doHorizontal may append more
+// entries (a promoted cursor landing on another horizontal at the same y), so
+// the queue is drained to empty.
+func (s *sweep) flushPendingHoriz(y fixed.Coord) {
+	for len(s.pendingHoriz) > 0 {
+		horz := s.pendingHoriz[0]
+		s.pendingHoriz = s.pendingHoriz[1:]
+		s.doHorizontal(horz, y)
+	}
+	s.pendingHoriz = nil
 }
 
 // handleBatch dispatches based on the composition of simultaneous events at
@@ -385,32 +478,37 @@ func firstNonHorizontal(b *Bound) *Segment {
 	return nil
 }
 
+// boundWindDx returns the ±1 winding contribution of bound b: the
+// [signedContribution] of its first non-horizontal segment. Every segment of
+// a bound (including its leading/trailing horizontals) shares this value; an
+// [ActiveEdge] caches it in WindDx at spawn so [Classify] can treat the
+// horizontal as carrying its bound's winding contribution (DESIGN.md
+// §12.6.1). Returns 0 for a degenerate all-horizontal bound.
+func boundWindDx(b *Bound) int {
+	if seg := firstNonHorizontal(b); seg != nil {
+		return signedContribution(seg)
+	}
+	return 0
+}
+
 // handleLocalMin spawns the two ascending bounds of a local minimum into
 // the AEL. Replaces the per-segment 2-Bot batched [sweep.handleLocalMinimum]
 // for inputs that form closed rings (where [BuildLocalMinima] succeeds).
 // Per DESIGN.md §12.1 / §12.7.
 //
-// Sequence: insert both bound entries, re-classify (fixes stale winding
-// counts from the first-inserted edge), call [AddLocalMinPoly] with
-// (right, left) ordering so FrontEdge = Right bound (matching the existing
-// orientation convention), then emit OutPts for the far ends of any leading
-// horizontals — these are vertices the ring must touch on its way up from
-// the local-min vertex to the first non-horizontal AEL position.
-//
-// §11.7 synthetic intersections: when the new bounds emerge inside existing
-// AEs (e.g. a second axial square overlapping the first), any AE between
-// leftAE and rightAE in the AEL whose Seg.Bot lies on the new bound's
-// leading horizontals represents a topological "intersection" that the
-// bound model's sorted-insert path skips. Process each as a synthetic
-// IntersectEdges so ring-surgery (SwapOutrecs / JoinOutrecPaths) runs.
-// This is the analog of Clipper2's bubble loop after InsertRightEdge.
+// Sequence: insert both bound entries (each cursor on its first segment, even
+// if horizontal), re-classify (fixes stale winding counts from the
+// first-inserted edge), call [AddLocalMinPoly] with (right, left) ordering so
+// FrontEdge = Right bound (matching the orientation convention), then activate
+// each bound — a horizontal first segment is queued for [sweep.doHorizontal];
+// a non-horizontal one schedules its EventTop and intersection checks.
 func (s *sweep) handleLocalMin(e Event) {
 	lm := e.LocalMin
 	if lm == nil {
 		return
 	}
-	leftAE := s.spawnBoundActive(lm.Left)
-	rightAE := s.spawnBoundActive(lm.Right)
+	leftAE := s.spawnBoundActive(lm.Left, lm.Vertex)
+	rightAE := s.spawnBoundActive(lm.Right, lm.Vertex)
 	if leftAE == nil || rightAE == nil {
 		return
 	}
@@ -419,67 +517,63 @@ func (s *sweep) handleLocalMin(e Event) {
 	// AddLocalMinPoly creates the new ring only when both bounds are
 	// contributing — for ops like Intersect / Difference, the bounds may
 	// emerge non-contributing at a local min and become contributing only
-	// after a later intersection swaps in the other source. Event
-	// scheduling (EventTop, intersection checks) MUST happen regardless,
-	// or the AEs sit in the AEL with no advance and the sweep stalls.
+	// after a later intersection swaps in the other source. Activation
+	// (EventTop scheduling, horizontal registration, intersection checks)
+	// MUST happen regardless, or the AEs sit in the AEL with no advance and
+	// the sweep stalls. The ring is created with FrontEdge = Right bound
+	// (rightAE passed first) per the orientation convention (DESIGN.md §12.3).
 	if leftAE.Contributing && rightAE.Contributing {
 		AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
-		// Leading horizontals: emit an OutPt at each horizontal's far
-		// endpoint (in bound traversal direction). Missing intermediate
-		// vertices was a bug — for a bound with leading horizontals split
-		// by an overlap (e.g. two axial squares' bottom edges meeting at
-		// X=-2), the cycle needs every intermediate vertex.
-		emitLeadingHorizOutPts(rightAE, lm.Vertex)
-		emitLeadingHorizOutPts(leftAE, lm.Vertex)
 	}
-	// §11.7: synthetic intersections for AEs trapped between the new bounds
-	// whose Seg.Bot lies on one of the new bounds' leading horizontals. This
-	// catches the diff-src coincident-horizontal case where a second polygon
-	// overlapping the first emerges with its right bound's leading horizontals
-	// passing through the first polygon's right-side AE.
-	s.processSynthIntersectsAtLocalMin(leftAE, rightAE, lm.Vertex)
-	// Schedule first EventTop for each bound (lazy scheduling per §12.10.4).
-	// Subsequent EventTops are scheduled by advanceBoundCursor as the cursor
-	// walks the bound's Segs.
-	s.queue.Push(Event{Kind: EventTop, P: leftAE.Seg.Top, SegA: leftAE.Seg})
-	s.queue.Push(Event{Kind: EventTop, P: rightAE.Seg.Top, SegA: rightAE.Seg})
-	// Schedule intersection checks with new AEL neighbours.
-	iL := s.ael.IndexOf(leftAE)
-	if iL >= 0 {
-		if left := s.ael.LeftOf(iL); left != nil {
-			s.maybeScheduleIntersect(left, leftAE, lm.Vertex.Y)
-		}
+	// Activate both bounds. A bound whose first segment is horizontal (an
+	// axial polygon's bottom edge is a local-min horizontal) is queued for
+	// the horizontal pass instead of scheduling a Top; doHorizontal walks it
+	// and promotes the cursor. Per DESIGN.md §12.6.1 (horizontals are
+	// first-class AEL edges).
+	s.activateBound(leftAE, lm.Vertex.Y)
+	s.activateBound(rightAE, lm.Vertex.Y)
+}
+
+// activateBound schedules the future processing of a freshly-positioned bound
+// cursor ae at scanline y. If ae sits on a horizontal segment it is appended
+// to pendingHoriz for the end-of-scanline horizontal pass; otherwise its
+// EventTop is scheduled and intersection checks against its new AEL neighbours
+// are queued.
+func (s *sweep) activateBound(ae *ActiveEdge, y fixed.Coord) {
+	if ae.Seg.Horizontal() {
+		s.pendingHoriz = append(s.pendingHoriz, ae)
+		return
 	}
-	iR := s.ael.IndexOf(rightAE)
-	if iR >= 0 {
-		if right := s.ael.RightOf(iR); right != nil {
-			s.maybeScheduleIntersect(rightAE, right, lm.Vertex.Y)
-		}
+	s.queue.Push(Event{Kind: EventTop, P: ae.Seg.Top, SegA: ae.Seg})
+	i := s.ael.IndexOf(ae)
+	if i < 0 {
+		return
+	}
+	if left := s.ael.LeftOf(i); left != nil {
+		s.maybeScheduleIntersect(left, ae, y)
+	}
+	if right := s.ael.RightOf(i); right != nil {
+		s.maybeScheduleIntersect(ae, right, y)
 	}
 }
 
-// spawnBoundActive creates an [ActiveEdge] for bound b at the local-min
-// scanline. Advances past any leading horizontals to the first non-
-// horizontal segment, inserts into the AEL at that segment's Bot.X, and
-// returns the active edge. Returns nil if b is all-horizontal (shouldn't
-// happen for a valid ring).
-func (s *sweep) spawnBoundActive(b *Bound) *ActiveEdge {
-	if b == nil {
+// spawnBoundActive creates an [ActiveEdge] for bound b emerging from the
+// local-min vertex. The cursor sits on the bound's FIRST segment even when
+// that segment is horizontal (DESIGN.md §12.6.1, Stage 2): a leading
+// horizontal is a first-class AEL member that [doHorizontal] later walks. The
+// edge enters the AEL at vertex.X (the near, local-min end of the first
+// segment) with a sweeping CurrX. Returns nil if b is empty.
+func (s *sweep) spawnBoundActive(b *Bound, vertex fixed.Point) *ActiveEdge {
+	if b == nil || len(b.Segs) == 0 {
 		return nil
 	}
-	edgeIdx := 0
-	for edgeIdx < len(b.Segs) && b.Segs[edgeIdx].Horizontal() {
-		edgeIdx++
-	}
-	if edgeIdx >= len(b.Segs) {
-		return nil
-	}
-	seg := b.Segs[edgeIdx]
+	seg := b.Segs[0]
 	ae := &ActiveEdge{
 		Seg:     seg,
 		Bound:   b,
-		EdgeIdx: edgeIdx,
-		CurrX:   seg.Bot.X,
+		EdgeIdx: 0,
+		CurrX:   vertex.X,
+		WindDx:  boundWindDx(b),
 	}
 	s.ael.Insert(ae)
 	s.bySeg[seg] = ae
@@ -564,7 +658,7 @@ func (s *sweep) handleThroughVertex(top Event, bot Event) {
 }
 
 func (s *sweep) handleBot(e Event) *ActiveEdge {
-	ae := &ActiveEdge{Seg: e.SegA, CurrX: e.SegA.Bot.X}
+	ae := &ActiveEdge{Seg: e.SegA, CurrX: e.SegA.Bot.X, WindDx: signedContribution(e.SegA)}
 	i := s.ael.Insert(ae)
 	s.bySeg[e.SegA] = ae
 	Classify(s.ael, ae, s.op)
@@ -583,10 +677,13 @@ func (s *sweep) handleTop(e Event) {
 		return
 	}
 
-	// Bound-model path (§12.10.4 / §12.10.5).
+	// Bound-model path (§12.10.4 / §12.10.5). EventTop fires only for
+	// non-horizontal segments (horizontals are processed by doHorizontal),
+	// so a bound-last edge here is non-horizontal and its local-max vertex
+	// is ae.Seg.Top.
 	if ae.Bound != nil {
 		if ae.IsBoundLast() {
-			s.closeBound(ae, nil, e.P.Y, true)
+			s.closeBound(ae, ae.Seg.Top)
 			return
 		}
 		s.advanceBoundCursor(ae, e.P)
@@ -606,347 +703,289 @@ func (s *sweep) handleTop(e Event) {
 	}
 }
 
-// advanceBoundCursor advances ae's bound cursor past one or more horizontals
-// to the next non-horizontal segment, emitting OutPts at horizontal endpoints
-// along the way. Per DESIGN.md §12.10.4 the update is IN PLACE — the AE
-// keeps its AEL position (mirroring Clipper2's UpdateEdgeIntoAEL at
-// engine.cpp:1731). Schedules the next EventTop for the new current edge.
+// advanceBoundCursor promotes ae's bound cursor by ONE segment when the
+// current (non-horizontal) edge reaches its Top without ending the bound.
+// Per DESIGN.md §12.10.4 the update is IN PLACE — the AE keeps its AEL
+// position (mirroring Clipper2's UpdateEdgeIntoAEL at engine.cpp:1731).
 //
-// If the run of horizontals reaches the end of the bound (trailing
-// horizontals at a local max), delegates to closeBound.
+// The local-max vertex (= currentTop) is emitted onto the ring if ae is hot.
+// If the promoted segment is horizontal, ae is queued for the horizontal
+// pass ([doHorizontal]); otherwise the next EventTop and fresh intersection
+// checks are scheduled.
 func (s *sweep) advanceBoundCursor(ae *ActiveEdge, currentTop fixed.Point) {
-	if ae.Contributing && ae.IsHotEdge() {
+	if ae.IsHotEdge() {
 		AddOutPt(ae, currentTop)
-	}
-	b := ae.Bound
-	next := ae.EdgeIdx + 1
-	var horizontals []*Segment
-	for next < len(b.Segs) && b.Segs[next].Horizontal() {
-		horizontals = append(horizontals, b.Segs[next])
-		next++
-	}
-	if next >= len(b.Segs) {
-		// advanceBoundCursor already emitted ae.Seg.Top — closeBound
-		// should not re-emit.
-		s.closeBound(ae, horizontals, currentTop.Y, false)
-		return
-	}
-	// Mid-bound: emit at each horizontal's far endpoint in bound traversal
-	// direction.
-	for _, h := range horizontals {
-		if ae.Contributing && ae.IsHotEdge() {
-			AddOutPt(ae, fixed.Point{X: boundHorizontalFarX(b, h), Y: currentTop.Y})
-		}
 	}
 	// IN-PLACE update: do NOT remove/reinsert in the AEL. The slope may
 	// change but AEL ordering is fixed by the next scanbeam's intersection
 	// pass (§12.10.1).
 	delete(s.bySeg, ae.Seg)
-	ae.EdgeIdx = next
-	ae.Seg = b.Segs[next]
-	ae.CurrX = ae.Seg.Bot.X
+	ae.EdgeIdx++
+	ae.Seg = ae.Bound.Segs[ae.EdgeIdx]
 	s.bySeg[ae.Seg] = ae
+	if ae.Seg.Horizontal() {
+		// The new horizontal joins at currentTop; that endpoint is the near
+		// (sweep) end. doHorizontal walks from here to the far end.
+		ae.CurrX = currentTop.X
+		s.pendingHoriz = append(s.pendingHoriz, ae)
+		return
+	}
+	ae.CurrX = ae.Seg.Bot.X
 	s.queue.Push(Event{Kind: EventTop, P: ae.Seg.Top, SegA: ae.Seg})
 	// Schedule intersection checks against the new segment's slope: the
 	// previous segment's crossings have been processed but the new edge
 	// may cross neighbours that the old one didn't.
 	i := s.ael.IndexOf(ae)
-	if i >= 0 {
-		if left := s.ael.LeftOf(i); left != nil {
-			s.maybeScheduleIntersect(left, ae, currentTop.Y)
-		}
-		if right := s.ael.RightOf(i); right != nil {
-			s.maybeScheduleIntersect(ae, right, currentTop.Y)
-		}
+	if i < 0 {
+		return
+	}
+	if left := s.ael.LeftOf(i); left != nil {
+		s.maybeScheduleIntersect(left, ae, currentTop.Y)
+	}
+	if right := s.ael.RightOf(i); right != nil {
+		s.maybeScheduleIntersect(ae, right, currentTop.Y)
 	}
 }
 
-// closeBound closes the ring at a local maximum. Per DESIGN.md §12.10.5.
-// trailingHorizontals is the list of trailing horizontals advanced through
-// (nil for the no-trailing case where ae's last bound segment is non-
-// horizontal).
+// closeBound closes (or merges) the ring at a local maximum, where ae's bound
+// cursor has reached its last segment. maxPt is the local-max vertex. This is
+// the analog of Clipper2's DoMaxima (engine.cpp:2729). Both callers (handleTop
+// for a non-horizontal last segment, doHorizontal for a trailing horizontal)
+// pass the resolved maxPt.
 //
-// emitTopFirst controls whether to emit ae.Seg.Top before the rest of the
-// trailing-horizontal walk. handleTop callers pass true (no prior emit);
-// advanceBoundCursor passes false (it already emitted the Top).
-func (s *sweep) closeBound(ae *ActiveEdge, trailingHorizontals []*Segment, y fixed.Coord, emitTopFirst bool) {
-	if emitTopFirst && ae.Contributing && ae.IsHotEdge() {
-		AddOutPt(ae, ae.Seg.Top)
-	}
-	// Emit far ends of intermediate trailing horizontals (all but the
-	// last — the last's far end is the local-max vertex and is emitted
-	// once via AddLocalMaxPoly or by the symmetric partner).
-	if len(trailingHorizontals) > 1 {
-		for _, hh := range trailingHorizontals[:len(trailingHorizontals)-1] {
-			if ae.Contributing && ae.IsHotEdge() {
-				AddOutPt(ae, fixed.Point{X: boundHorizontalFarX(ae.Bound, hh), Y: y})
-			}
+// The maxima partner is the AEL-ADJACENT edge whose bound also ends at maxPt —
+// NOT necessarily ae's own OutRec partner. When two bounds from DIFFERENT
+// local minima meet at a shared local maximum (e.g. the central peak of a
+// W-shape), they belong to different OutRecs that must be JOINED;
+// AddLocalMaxPoly handles both the same-ring close and the two-ring join.
+func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
+	// Case C (simultaneous maxima): the partner bound is adjacent in the AEL
+	// and reaches maxPt at the same scanline event. AddLocalMaxPoly closes the
+	// ring (same OutRec) or joins two rings (different OutRecs — e.g. the
+	// central peak of a W-shape). FRONT edge passed first by convention so the
+	// local-max vertex prepends to Pts. Gated on IsHotEdge (not Contributing):
+	// a post-swap reclassification can leave an edge non-contributing yet still
+	// hot, and its ring must still close/join (DESIGN.md §12.10.8 Rule 1).
+	if partner := s.maximaPartner(ae, maxPt); partner != nil {
+		if ae.IsHotEdge() && partner.IsHotEdge() {
+			AddLocalMaxPoly(s.ael, ae, partner, maxPt)
 		}
-	}
-	// Resolve local-max vertex.
-	var maxPt fixed.Point
-	if len(trailingHorizontals) > 0 {
-		h := trailingHorizontals[len(trailingHorizontals)-1]
-		maxPt = fixed.Point{X: boundHorizontalFarX(ae.Bound, h), Y: y}
-	} else {
-		maxPt = ae.Seg.Top
-	}
-
-	// §11.7: symmetric synth-intersect at local-max. If maxPt is an
-	// INTERIOR vertex of some other AE's bound (a coincident vertex
-	// shared with another bound from a diff-src overlap), perform a
-	// synth-intersect to swap ring ownership before retiring ae. This
-	// is the symmetric counterpart to processSynthIntersectsAtLocalMin.
-	if ae.IsHotEdge() {
-		if synthPartner := s.findSynthMaxPartner(ae, maxPt); synthPartner != nil {
-			s.synthIntersect(ae, synthPartner, maxPt)
-			// emit any trailing horizontal points the partner needs to
-			// catch up with on the now-shared ring (none for current
-			// axial test case — partner is at its leftVert.Top moment).
-			s.ael.Remove(ae)
-			delete(s.bySeg, ae.Seg)
-			return
-		}
-	}
-
-	// Find partner via OutRec.
-	var partner *ActiveEdge
-	if ae.Outrec != nil {
-		if ae.Outrec.FrontEdge != nil && ae.Outrec.FrontEdge != ae {
-			partner = ae.Outrec.FrontEdge
-		} else if ae.Outrec.BackEdge != nil && ae.Outrec.BackEdge != ae {
-			partner = ae.Outrec.BackEdge
-		}
-	}
-
-	// Case A: partner doesn't exist or isn't at its bound's last. Emit
-	// maxPt on ae's chain to capture the local-max vertex in the ring;
-	// remove ae but leave Outrec.FrontEdge / BackEdge intact so the
-	// partner's eventual closeBound can detect "ae already finished."
-	if partner == nil || !partner.IsBoundLast() {
-		if ae.IsHotEdge() {
-			AddOutPt(ae, maxPt)
-		}
+		// Capture the edges flanking the removed pair: once both maxima edges
+		// leave, the edge to their left and the edge to their right become
+		// adjacent and may cross higher up. Schedule that check, or the
+		// crossing is silently missed and the AEL order corrupts later
+		// classifications (the cause of lost teeth in unions of concave shapes).
+		left, right := s.maximaFlanks(ae, partner)
 		s.ael.Remove(ae)
+		s.ael.Remove(partner)
 		delete(s.bySeg, ae.Seg)
+		delete(s.bySeg, partner.Seg)
+		if left != nil && right != nil {
+			s.maybeScheduleIntersect(left, right, maxPt.Y)
+		}
 		return
 	}
 
-	// Case B: partner at end but already removed (Case A on partner's
-	// earlier closeBound). The local-max vertex was emitted by partner;
-	// just close the ring without re-emitting.
-	if s.ael.IndexOf(partner) < 0 {
-		outrec := ae.Outrec
-		if outrec != nil {
+	// No simultaneous partner. The two bounds of this maximum arrive at
+	// different events — e.g. a flat top (local-max plateau) whose two
+	// ascending bounds reach the plateau ends as separate Top/horizontal
+	// events. Use the OutRec coupling (which persists after AEL removal) to
+	// hand off between them (DESIGN.md §12.10.5 Cases A/B).
+	coupled := outrecOther(ae)
+
+	// Case B: the coupled partner already ran Case A (it emitted maxPt and was
+	// removed from the AEL but left the coupling intact). Close the ring
+	// without re-emitting the vertex.
+	if coupled != nil && s.ael.IndexOf(coupled) < 0 {
+		if outrec := ae.Outrec; outrec != nil {
 			outrec.FrontEdge = nil
 			outrec.BackEdge = nil
 		}
 		ae.Outrec = nil
-		partner.Outrec = nil
+		coupled.Outrec = nil
+		left, right := s.maximaFlanks(ae)
 		s.ael.Remove(ae)
 		delete(s.bySeg, ae.Seg)
+		if left != nil && right != nil {
+			s.maybeScheduleIntersect(left, right, maxPt.Y)
+		}
 		return
 	}
 
-	// Case C: symmetric — both at end, both in AEL. AddLocalMaxPoly closes
-	// with FrontEdge passed first by convention so the local-max vertex
-	// prepends to Pts.
-	front, back := partner, ae
-	if ae.IsFront() {
-		front, back = ae, partner
+	// Case A: emit maxPt and remove ae from the AEL, but LEAVE the OutRec
+	// coupling intact so the partner's eventual close (Case B) finds it.
+	if ae.IsHotEdge() {
+		AddOutPt(ae, maxPt)
 	}
-	if front.IsHotEdge() && back.IsHotEdge() {
-		AddLocalMaxPoly(s.ael, front, back, maxPt)
-	}
+	left, right := s.maximaFlanks(ae)
 	s.ael.Remove(ae)
-	s.ael.Remove(partner)
 	delete(s.bySeg, ae.Seg)
-	delete(s.bySeg, partner.Seg)
+	if left != nil && right != nil {
+		s.maybeScheduleIntersect(left, right, maxPt.Y)
+	}
 }
 
-// emitLeadingHorizOutPts walks ae's bound from its start (the local-min
-// vertex) through any leading horizontals and emits an OutPt at each
-// horizontal's far endpoint. Skips when ae has no leading horizontals
-// (first segment is already non-horizontal at the local-min vertex).
-func emitLeadingHorizOutPts(ae *ActiveEdge, lmVertex fixed.Point) {
-	if ae == nil || ae.Bound == nil {
-		return
-	}
-	for i := range ae.EdgeIdx {
-		h := ae.Bound.Segs[i]
-		if !h.Horizontal() {
+// maximaFlanks returns the edges immediately outside the span occupied by the
+// given edges (one or two adjacent maxima edges): the edge to the left of the
+// leftmost and the edge to the right of the rightmost. After the maxima edges
+// are removed these two become adjacent, so a fresh crossing check is needed.
+func (s *sweep) maximaFlanks(edges ...*ActiveEdge) (left, right *ActiveEdge) {
+	lo, hi := -1, -1
+	for _, e := range edges {
+		i := s.ael.IndexOf(e)
+		if i < 0 {
 			continue
 		}
-		farX := boundHorizontalFarX(ae.Bound, h)
-		pt := fixed.Point{X: farX, Y: lmVertex.Y}
-		if ae.Contributing && ae.IsHotEdge() {
-			AddOutPt(ae, pt)
+		if lo < 0 || i < lo {
+			lo = i
+		}
+		if hi < 0 || i > hi {
+			hi = i
 		}
 	}
+	if lo < 0 {
+		return nil, nil
+	}
+	return s.ael.LeftOf(lo), s.ael.RightOf(hi)
 }
 
-// findSynthMaxPartner searches AEL neighbours of ae for an AE whose Bound
-// has maxPt as an INTERIOR vertex (not local-min or local-max). Such an AE
-// is a candidate for symmetric synth-intersect at a local-max where two
-// bounds share an interior vertex (the §11.7 diff-src coincident case at
-// the top of overlapping axial rectangles).
-//
-// Returns nil if no neighbour qualifies. Only checks immediate AEL
-// neighbours (the synth-intersect dispatcher requires adjacency).
-func (s *sweep) findSynthMaxPartner(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
-	pos := s.ael.IndexOf(ae)
-	if pos < 0 {
+// outrecOther returns the other active edge (FrontEdge/BackEdge) coupled to
+// ae's OutRec, or nil if ae is not hot or has no coupled partner.
+func outrecOther(ae *ActiveEdge) *ActiveEdge {
+	if ae.Outrec == nil {
 		return nil
 	}
-	for _, cand := range []*ActiveEdge{s.ael.LeftOf(pos), s.ael.RightOf(pos)} {
-		if cand == nil || cand.Bound == nil {
-			continue
-		}
-		if boundHasInteriorVertex(cand.Bound, maxPt) {
+	if ae.Outrec.FrontEdge != nil && ae.Outrec.FrontEdge != ae {
+		return ae.Outrec.FrontEdge
+	}
+	if ae.Outrec.BackEdge != nil && ae.Outrec.BackEdge != ae {
+		return ae.Outrec.BackEdge
+	}
+	return nil
+}
+
+// maximaPartner returns ae's local-maximum partner: an immediate AEL neighbour
+// whose bound also reaches its last segment at maxPt. Returns nil if neither
+// neighbour qualifies. Mirrors Clipper2's GetMaximaPair (the partner is
+// adjacent once all crossings below the maxima scanline have been resolved).
+func (s *sweep) maximaPartner(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
+	i := s.ael.IndexOf(ae)
+	if i < 0 {
+		return nil
+	}
+	for _, cand := range []*ActiveEdge{s.ael.LeftOf(i), s.ael.RightOf(i)} {
+		if cand != nil && cand.Bound != nil && cand.IsBoundLast() && boundMaxPt(cand) == maxPt {
 			return cand
 		}
 	}
 	return nil
 }
 
-// boundHasInteriorVertex reports whether bound b has pt as an INTERIOR
-// vertex — an endpoint of some segment that is neither the bound's
-// local-min (Segs[0].Bot or Start of leading horizontals) nor its
-// local-max (Segs[last].Top or far end of trailing horizontals).
-func boundHasInteriorVertex(b *Bound, pt fixed.Point) bool {
-	if b == nil || len(b.Segs) < 2 {
-		return false
+// boundMaxPt returns the local-maximum vertex of ae's bound, assuming ae's
+// cursor is on the bound's last segment. For a trailing horizontal it is the
+// horizontal's far endpoint; otherwise the segment's Top.
+func boundMaxPt(ae *ActiveEdge) fixed.Point {
+	if ae.Seg.Horizontal() {
+		return fixed.Point{X: boundHorizontalFarX(ae.Bound, ae.Seg), Y: ae.Seg.Bot.Y}
 	}
-	// Interior vertices are the Top of every segment except the last AND
-	// the Bot of every segment except the first. Since adjacent segments
-	// share endpoints, checking Top of segs[0..len-2] covers the interior
-	// vertices.
-	for i := range len(b.Segs) - 1 {
-		s := b.Segs[i]
-		// Top is interior unless this is the first segment AND it's a
-		// leading horizontal whose Top is at the local-min Y (still part
-		// of the leading-horizontal chain, not the local-max plateau).
-		if s.Top == pt {
-			return true
-		}
-	}
-	return false
+	return ae.Seg.Top
 }
 
-// processSynthIntersectsAtLocalMin walks AEs trapped between leftAE and
-// rightAE (exclusive) after a local-min spawn and synth-intersects each
-// with rightAE (if its Seg.Bot lies on rightAE's leading horizontals at the
-// local-min Y) or leftAE (symmetric for leftAE's leading horizontals). The
-// synth-intersect runs IntersectEdges' dispatch logic WITHOUT physically
-// swapping the AEL — our sorted-insert path already places the new bounds
-// in their final positions; the swap is logical (ring-surgery only).
+// doHorizontal processes a bound whose cursor sits on a horizontal segment at
+// scanline y. It is a port of Clipper2's DoHorizontal (engine.cpp:2526) into
+// the bound-cursor model (DESIGN.md §12.6 / §12.6.1).
 //
-// Per DESIGN.md §11.7 — the diff-src coincident-horizontal case where two
-// overlapping axial rectangles share a horizontal edge segment after
-// [SplitOverlaps]. Without this synthetic step the second rectangle's right
-// bound never becomes hot and the union's right side is lost.
-func (s *sweep) processSynthIntersectsAtLocalMin(leftAE, rightAE *ActiveEdge, lmVertex fixed.Point) {
-	if leftAE == nil || rightAE == nil {
-		return
-	}
-	// Right-bound side: leading horizontals span from lmVertex.X to the
-	// first non-horizontal's Bot.X. Any AE between leftAE and rightAE in
-	// the AEL whose Seg.Bot equals an interior endpoint of one of those
-	// horizontals at lmVertex.Y is a synthetic intersection.
-	rightHorizX := boundLeadingHorizFarXs(rightAE)
-	leftHorizX := boundLeadingHorizFarXs(leftAE)
-	if len(rightHorizX) == 0 && len(leftHorizX) == 0 {
-		return
-	}
-	iL := s.ael.IndexOf(leftAE)
-	iR := s.ael.IndexOf(rightAE)
-	if iL < 0 || iR < 0 {
-		return
-	}
-	if iL > iR {
-		iL, iR = iR, iL
-	}
-	// Iterate trapped AEs from left to right. Use indices into a snapshot
-	// because synth-intersect may modify Outrec pointers (but not AEL order).
-	trapped := make([]*ActiveEdge, 0, iR-iL-1)
-	for i := iL + 1; i < iR; i++ {
-		trapped = append(trapped, s.ael.At(i))
-	}
-	for _, ae := range trapped {
-		if ae.Seg.Bot.Y != lmVertex.Y {
-			continue
-		}
-		botX := ae.Seg.Bot.X
-		// Match against right bound's leading horizontal far-Xs.
-		if containsCoord(rightHorizX, botX) {
-			s.synthIntersect(ae, rightAE, ae.Seg.Bot)
-			// After synth-intersect rightAE may have become hot; emit its
-			// leading horizontals onto the now-shared ring.
-			if rightAE.IsHotEdge() {
-				emitLeadingHorizOutPts(rightAE, lmVertex)
+// The horizontal sweeps from its near end (horz.CurrX, where the bound
+// arrived) to its far end (the bound's continuation vertex). Every AEL edge
+// strictly inside that X-span is crossed: [IntersectEdges] dispatches the
+// crossing through the §12.5 table and swaps the two edges, so after each
+// crossing horz has advanced one position in the walk direction. On reaching
+// the far end the cursor is promoted to the bound's next segment (in place,
+// like UpdateEdgeIntoAEL); if the horizontal is the bound's last segment the
+// ring closes via [closeBound].
+func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
+	for {
+		nearX := horz.CurrX
+		farX := boundHorizontalFarX(horz.Bound, horz.Seg)
+		leftToRight := farX >= nearX
+
+		// The near endpoint is already on the ring — emitted as the first
+		// OutPt by AddLocalMinPoly (leading horizontal) or by advanceBoundCursor
+		// at the vertex it promoted through (mid/trailing horizontal). Emitting
+		// it again here can duplicate the vertex when an intervening ring-join
+		// (a shared local maximum) has moved the chain head, so doHorizontal
+		// only emits crossings and the far endpoint.
+
+		// Walk and intersect every edge strictly inside the span.
+		for {
+			i := s.ael.IndexOf(horz)
+			if i < 0 {
+				break
 			}
+			var e *ActiveEdge
+			if leftToRight {
+				e = s.ael.RightOf(i)
+			} else {
+				e = s.ael.LeftOf(i)
+			}
+			if e == nil {
+				break
+			}
+			eX := XAtY(e.Seg, y)
+			if leftToRight && eX > farX {
+				break
+			}
+			if !leftToRight && eX < farX {
+				break
+			}
+			// An edge exactly at the far endpoint is the bound's own
+			// continuation vertex or another bound touching there — handled
+			// as a local min/max/through-vertex elsewhere, not crossed here.
+			if eX == farX {
+				break
+			}
+			pt := fixed.Point{X: eX, Y: y}
+			IntersectEdges(s.ael, s.op, horz, e, pt)
+			horz.CurrX = eX
+		}
+
+		// Reached the far end. If this horizontal is the bound's last
+		// segment, the bound ends at a local max.
+		if horz.IsBoundLast() {
+			s.closeBound(horz, fixed.Point{X: farX, Y: y})
+			return
+		}
+
+		// Emit the far endpoint, then promote the cursor in place.
+		if horz.IsHotEdge() {
+			AddOutPt(horz, fixed.Point{X: farX, Y: y})
+		}
+		delete(s.bySeg, horz.Seg)
+		horz.EdgeIdx++
+		horz.Seg = horz.Bound.Segs[horz.EdgeIdx]
+		horz.CurrX = farX
+		s.bySeg[horz.Seg] = horz
+
+		// Consecutive horizontal at the same scanline: keep walking. (Rare;
+		// preprocess normally leaves at most one horizontal per scanline per
+		// bound, but loop defensively to mirror Clipper2.)
+		if horz.Seg.Horizontal() && horz.Seg.Bot.Y == y {
 			continue
 		}
-		if containsCoord(leftHorizX, botX) {
-			s.synthIntersect(leftAE, ae, ae.Seg.Bot)
-			if leftAE.IsHotEdge() {
-				emitLeadingHorizOutPts(leftAE, lmVertex)
+
+		// Promoted onto a non-horizontal: schedule its Top and fresh
+		// intersection checks, then return.
+		s.queue.Push(Event{Kind: EventTop, P: horz.Seg.Top, SegA: horz.Seg})
+		if i := s.ael.IndexOf(horz); i >= 0 {
+			if left := s.ael.LeftOf(i); left != nil {
+				s.maybeScheduleIntersect(left, horz, y)
+			}
+			if right := s.ael.RightOf(i); right != nil {
+				s.maybeScheduleIntersect(horz, right, y)
 			}
 		}
-	}
-}
-
-// boundLeadingHorizFarXs returns the far-X of each leading horizontal in
-// ae's bound. Empty if ae has no leading horizontals (EdgeIdx == 0).
-func boundLeadingHorizFarXs(ae *ActiveEdge) []fixed.Coord {
-	if ae == nil || ae.Bound == nil || ae.EdgeIdx == 0 {
-		return nil
-	}
-	out := make([]fixed.Coord, 0, ae.EdgeIdx)
-	for i := range ae.EdgeIdx {
-		h := ae.Bound.Segs[i]
-		if !h.Horizontal() {
-			continue
-		}
-		out = append(out, boundHorizontalFarX(ae.Bound, h))
-	}
-	return out
-}
-
-func containsCoord(xs []fixed.Coord, x fixed.Coord) bool {
-	return slices.Contains(xs, x)
-}
-
-// synthIntersect runs IntersectEdges' dispatch logic for two adjacent AEL
-// edges WITHOUT physically swapping them in the AEL. Used by
-// [processSynthIntersectsAtLocalMin] where the new bounds are already at
-// their final sorted positions but ring-surgery (SwapOutrecs etc.) still
-// needs to happen at conceptual intersection points along leading
-// horizontals.
-func (s *sweep) synthIntersect(e1, e2 *ActiveEdge, pt fixed.Point) {
-	i1 := s.ael.IndexOf(e1)
-	i2 := s.ael.IndexOf(e2)
-	if i1 < 0 || i2 < 0 {
 		return
 	}
-	if i1 > i2 {
-		e1, e2 = e2, e1
-		i1, i2 = i2, i1
-	}
-	if i2 != i1+1 {
-		return
-	}
-	e1Hot := e1.IsHotEdge()
-	e2Hot := e2.IsHotEdge()
-	oldW1 := e1.WindSelf
-	oldW2 := e2.WindSelf
-	oldW1c2 := e1.WindOther
-	oldW2c2 := e2.WindOther
-	samePolyType := e1.Seg.Src == e2.Seg.Src
-	_ = dispatchIntersect(s.ael, s.op, e1, e2, pt, e1Hot, e2Hot, oldW1, oldW2, oldW1c2, oldW2c2, samePolyType)
-	// No AEL swap. Re-classify both at their (unchanged) positions.
-	Classify(s.ael, e1, s.op)
-	Classify(s.ael, e2, s.op)
 }
 
 // boundHorizontalFarX returns the X of horizontal h's "far" endpoint as

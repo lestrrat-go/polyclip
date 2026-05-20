@@ -12,9 +12,11 @@ import (
 func makeClassifiedEdge(currX int64, src Source, windSelf, windOther int) *ActiveEdge {
 	bot := fixed.Point{X: fixed.Coord(currX), Y: 0}
 	top := fixed.Point{X: fixed.Coord(currX), Y: 100}
+	seg := &Segment{Bot: bot, Top: top, Src: src, Reversed: src == Subject}
 	return &ActiveEdge{
-		Seg:       &Segment{Bot: bot, Top: top, Src: src, Reversed: src == Subject},
+		Seg:       seg,
 		CurrX:     fixed.Coord(currX),
+		WindDx:    signedContribution(seg),
 		WindSelf:  windSelf,
 		WindOther: windOther,
 	}

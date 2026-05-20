@@ -105,9 +105,9 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 //
 // These transformations preserve ring topology (they only remove edges
 // that were already redundant or cancelling). Different-source coincident
-// pairs are handled by the sweep via synthetic intersections at local-min
-// spawn and local-max close (see `sweep.processSynthIntersectsAtLocalMin`
-// and `sweep.findSynthMaxPartner`).
+// pairs are left for the sweep: with horizontals as first-class AEL edges
+// (DESIGN.md §12.6.1), a coincident pair is resolved by the standard winding
+// classification as the edges are processed, no special handling required.
 //
 // Complexity O(n) per coincident group, O(n²) worst case via grouping.
 func DedupCoincidentEdges(segs []Segment) []Segment {
@@ -147,9 +147,9 @@ func DedupCoincidentEdges(segs []Segment) []Segment {
 }
 
 // applySameSrcRules processes one group of fully-coincident segments per
-// §11.7's same-source cases. Different-source cases are handled by the
-// sweep (synth-intersect at local-min and local-max — see sweep.go's
-// processSynthIntersectsAtLocalMin / findSynthMaxPartner).
+// §11.7's same-source cases. Different-source cases are left for the sweep,
+// where first-class horizontal AEL edges resolve them via winding
+// classification (DESIGN.md §12.6.1).
 func applySameSrcRules(segs []Segment, idxs []int, dropped map[int]struct{}) {
 	// Partition by (Src, Reversed).
 	var subjFwd, subjRev, clipFwd, clipRev []int

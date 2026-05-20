@@ -156,15 +156,21 @@ func AddLocalMaxPoly(_ *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 		// is unreachable for closed paths (SwapFrontBackSides is reserved for
 		// open ends; the closed-path branch is a hard error) — it means a
 		// crossing-spawned ring upstream got an inverted front/back orientation.
-		// Most such cases are now prevented by AddLocalMinPoly resolving
-		// orientation from AEL position (DESIGN.md §12.11); a residual minority
-		// of non-convex configurations still reach here. Recover by reversing
-		// e2's ring sides so the polarities oppose, then join. This mirrors
-		// Clipper2's SwapFrontBackSides (engine.cpp:460), which ALSO advances the
-		// Pts head by one — the chain head is the front vertex (Pts) with the
-		// back at Pts.Next, so swapping which edge is front must move the head to
-		// keep [AddOutPt] and [JoinOutrecPaths] splicing on the correct ends.
-		// Omitting the head shift tangles the merged chain.
+		// AddLocalMinPoly resolving orientation from AEL position (DESIGN.md
+		// §12.11) and the shared-vertex crossing dispatch
+		// ([sweep.reconcileSharedVertexCrossings]) drove firings to ZERO for
+		// Union/Intersect/Difference over the simple-quad differential; the only
+		// op that still reaches here is Xor, and those firings belong to the
+		// separately-tracked Xor classification gap (DESIGN.md §12.11). Replacing
+		// this branch with `return nil` (Clipper2's hard-error) currently leaves
+		// the whole suite green and the differential wrong-rates unchanged, so
+		// the recovery is kept only as a safety net until the Xor track lands.
+		// Recover by reversing e2's ring sides so the polarities oppose, then
+		// join. This mirrors Clipper2's SwapFrontBackSides (engine.cpp:460), which
+		// ALSO advances the Pts head by one — the chain head is the front vertex
+		// (Pts) with the back at Pts.Next, so swapping which edge is front must
+		// move the head to keep [AddOutPt] and [JoinOutrecPaths] splicing on the
+		// correct ends. Omitting the head shift tangles the merged chain.
 		e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
 		e2.Outrec.Pts = e2.Outrec.Pts.Next
 	}

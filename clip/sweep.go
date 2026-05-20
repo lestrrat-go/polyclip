@@ -219,7 +219,7 @@ func (s *sweep) run() {
 			// classification (DESIGN.md §11.10 invariant 1). Mirrors Clipper2's
 			// per-scanbeam curr_x update in DoTopOfScanbeam.
 			s.ael.UpdateForScanline(y)
-			s.handleScanlineBound(evs)
+			s.handleScanlineBound(evs, y)
 		} else {
 			s.handleScanlineLegacy(evs)
 		}
@@ -325,7 +325,7 @@ func (s *sweep) edgesAdjacent(nd intersectNode) bool {
 // ring's local minimum must classify against an AEL from which the lower
 // ring's maxima edges have already been removed, or it is misclassified as
 // interior and never created. Horizontals are flushed afterwards by [run].
-func (s *sweep) handleScanlineBound(evs []Event) {
+func (s *sweep) handleScanlineBound(evs []Event, y fixed.Coord) {
 	var tops, localMins, intersects []Event
 	for _, e := range evs {
 		switch e.Kind {
@@ -341,6 +341,14 @@ func (s *sweep) handleScanlineBound(evs []Event) {
 		s.handleTop(e)
 		s.appendTrace(e, nil)
 	}
+	// Shared-vertex crossings: after every cursor has advanced through this
+	// scanline's vertices, two bounds that pass through the SAME vertex may
+	// have swapped left-right order there (one was left below the vertex and
+	// is right above it). doIntersections cannot see this — at the vertex the
+	// two below-segments meet as a Touch on the beam boundary, not a
+	// ProperCross strictly inside the open beam — so the crossing is dispatched
+	// here instead, mirroring handleLocalMin's bubble (DESIGN.md §12.11).
+	s.reconcileSharedVertexCrossings(y)
 	for _, e := range localMins {
 		s.handleLocalMin(e)
 		s.appendTrace(e, nil)
@@ -348,6 +356,41 @@ func (s *sweep) handleScanlineBound(evs []Event) {
 	for _, e := range intersects {
 		s.handleIntersection(e)
 		s.appendTrace(e, nil)
+	}
+}
+
+// reconcileSharedVertexCrossings dispatches crossings that occur exactly at a
+// shared vertex on scanline y. After SplitTJunctions every vertex-on-edge is a
+// clean shared vertex, so two bounds (from either source) can pass through the
+// same point and exchange left-right order there. Such a crossing is invisible
+// to doIntersections: at the vertex the two lower segments meet as a Touch on
+// the beam boundary rather than a ProperCross strictly inside the open beam, so
+// IntersectEdges is never called and hot/cold status (and winding) fail to flip
+// — the symptom the d50048a AddLocalMaxPoly workaround patched (DESIGN.md
+// §12.11, "shared-vertex crossing dispatch").
+//
+// All edges sharing a vertex V at this scanline have CurrX == V.X (an edge with
+// V strictly interior would have been split by SplitTJunctions). So a pair of
+// AEL-adjacent edges with equal CurrX that is now out of slope order has
+// crossed at that shared vertex; IntersectEdges processes the §12.5 transition
+// and swaps them. This is the through-vertex analog of handleLocalMin's bubble
+// (sweep.go local-min IsValidAelOrder loop). The outer loop repeats until no
+// adjacent inversion remains, resolving multi-bound confluences at one vertex.
+func (s *sweep) reconcileSharedVertexCrossings(y fixed.Coord) {
+	for {
+		swapped := false
+		for i := 0; i+1 < s.ael.Len(); i++ {
+			l := s.ael.At(i)
+			r := s.ael.At(i + 1)
+			if l.CurrX != r.CurrX || !s.ael.Less(r, l) {
+				continue
+			}
+			IntersectEdges(s.ael, s.op, l, r, fixed.Point{X: l.CurrX, Y: y})
+			swapped = true
+		}
+		if !swapped {
+			return
+		}
 	}
 }
 

@@ -222,6 +222,31 @@ func TestUnionOverlappingDiamonds(t *testing.T) {
 	}
 }
 
+func TestUnionSharedVertexCrossing(t *testing.T) {
+	// B's vertex (6,9) lies exactly on A's edge (1,8)->(16,11). SplitTJunctions
+	// turns that into a shared vertex where A and B swap left-right order — a
+	// real crossing the per-scanbeam intersection pass cannot see (it is a Touch
+	// on the beam boundary, not a ProperCross strictly inside the open beam).
+	// reconcileSharedVertexCrossings dispatches it. Before the fix the engine
+	// reported 75.5; the true union area is ~298.5 (DESIGN.md §12.11).
+	a := Polygon{{1, 8}, {16, 11}, {21, 5}, {29, 24}}
+	b := Polygon{{6, 9}, {24, 7}, {19, 28}, {13, 29}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gotArea := got.Area()
+	if gotArea < 290 || gotArea > 305 {
+		t.Errorf("Union area %v outside expected band [290,305] (truth ~298.5)", gotArea)
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

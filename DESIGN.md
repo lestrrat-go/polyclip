@@ -1134,7 +1134,20 @@ Done / still open:
 
   **Worked example** (`A=(1,8),(16,11),(21,5),(29,24)` ∪ `B=(6,9),(24,7),(19,28),(13,29)`; engine 75.5 vs truth 298.5): B's vertex (6,9) lies on A's edge (1,8)→(16,11). `SplitTJunctions` inserts (6,9) into A's bound; at that shared vertex A is left of B below, right of B above — a real crossing — but it is never dispatched, so A's front bound stays hot through B's interior.
 
-  **Next increment (shared-vertex crossing dispatch).** Extend the through-vertex / `EventTop` path the way `handleLocalMin` already handles the local-min coincidence (sweep.go:641 bubble: dispatch `IntersectEdges` at the vertex for every edge passed). When bounds from different sources share a vertex and swap order there, dispatch the crossing *at* that point so hotness/winding update correctly; then verify the workaround firings drop to 0 over the differential and **delete the workaround** (Clipper2 treats the same-side closed-path branch as a hard error). This is in-sweep degenerate-position work with regression risk against the existing through-vertex tests — sequence it as its own atomic increment.
+  **Shared-vertex crossing dispatch — DONE (2026-05-20, this session).** Added `sweep.reconcileSharedVertexCrossings(y)`, called after the Tops phase in `handleScanlineBound`. After every cursor has advanced through a scanline's vertices, any two AEL-adjacent edges with equal `CurrX` that are now out of slope order have crossed at that shared vertex (post-`SplitTJunctions`, an edge with the point strictly interior would have been split, so `CurrX == V.X` ⟺ the point is a vertex of that edge's bound). `IntersectEdges` is dispatched for each such inversion and bubbled until no adjacent inversion remains — the through-vertex analog of `handleLocalMin`'s `IsValidAelOrder` bubble. The worked example below now yields 298.0 (truth ~298.5).
+
+  Measured over the simple-quad differential (random *simple* CCW integer quads, coords [0,30], 20k pairs/op, vs the MC oracle), before → after:
+
+  | op | wrong rate | workaround firings |
+  |----|-----------|--------------------|
+  | Union | 0.53% → 0.15% | 2 → **0** |
+  | Intersect | 0.20% → 0.04% | 1 → **0** |
+  | Difference | 0.24% → 0.04% | 0 → **0** |
+  | Xor | 0.47% → 0.04% | 110 → **11** |
+
+  General position (coords [-1000,1000]) stays at 0% wrong / 0 firings — no regression. The whole existing suite passes; `TestUnionSharedVertexCrossing` added as the regression guard.
+
+  **Residual — now Xor-only, deferred to the Xor classification track.** Firings reached 0 for Union/Intersect/Difference; only Xor still reaches the `AddLocalMaxPoly` same-side branch (~11×). With the shared-vertex fix in place, replacing the workaround with `return nil` (Clipper2's hard-error) leaves the whole suite green and the differential wrong-rates unchanged (Xor 7→8, MC noise) — i.e. the recovery is doing no real work and the residual firings are the **separately-tracked Xor classification gap** below, not a shared-vertex problem. The workaround is kept only as a safety net until that track lands, at which point it should be deleted. (Decision 2026-05-20: keep + defer, do not couple workaround deletion to the unresolved Xor track.)
 
   Original diagnosis (preserved for context):
   - The diamond re-union gap was previously attributed to maxima/through-vertex coincidence at the shared y=10 peaks / y=7.5 valleys. **That hypothesis was disproven.** Differential evidence:

@@ -299,3 +299,31 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 		t.Errorf("Xor(axial overlap) area %v want %v", got.Area(), wantArea)
 	}
 }
+
+// TestUnionOverlappingSquaresVertexInsideOther documents a Union failure on
+// two axis-aligned squares that overlap such that each square has a vertex
+// strictly INSIDE the other (and edges that cross interior-to-interior,
+// not at endpoints). Distinct from TestUnionOverlappingAxisAligned where
+// the squares share horizontal y-values: there §11.7's synth-intersect
+// handles diff-src coincident edges. Here there are no coincident edges
+// at all, just proper edge-edge crossings that should produce a single
+// merged piece of area 184 (100 + 100 − 16 overlap).
+//
+// Actual behaviour as of 2026-05-20: Union returns one of the inputs
+// unchanged (area 100). Tracked for engine follow-up.
+func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
+	t.Skip("engine bug: Union of two overlapping squares with vertex-strictly-inside-other drops a piece (tracked in roadmap)")
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{6, 6}, {16, 6}, {16, 16}, {6, 16}}}}
+	got, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 184.0 // 100 + 100 − 16 overlap [6,10]×[6,10]
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Union area %v want %v", got.Area(), wantArea)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 merged piece, got %d", len(got))
+	}
+}

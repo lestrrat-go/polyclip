@@ -446,8 +446,8 @@ The phases are designed so each one produces a usable, testable artifact even if
 - [ ] Documentation pass: every public symbol has a Go doc comment with at least one example.
 
 ### Phase 6 — Examples and v0.1 release
-- [ ] `examples/union/`, `examples/offset/` runnable programs.
-- [ ] Tag `v0.1.0`. Downstream `lestrrat-go/makislicer` switches off its naive offsetter onto polyclip.
+- [x] `examples/union/`, `examples/offset/` runnable programs.
+- [ ] Downstream `lestrrat-go/makislicer` switches off its naive offsetter onto polyclip.
 
 ---
 

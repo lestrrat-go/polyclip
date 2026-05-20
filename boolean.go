@@ -290,7 +290,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		if r.Pts == nil {
 			continue
 		}
-		fixedPts := r.Points()
+		fixedPts := dedupConsecutive(r.Points())
 		if len(fixedPts) < 3 {
 			continue
 		}
@@ -432,6 +432,31 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	}
 
 	return result
+}
+
+// dedupConsecutive removes consecutive identical points from a closed ring,
+// including the wrap-around (last == first). The sweep can emit a vertex
+// twice at a maxima confluence — once when a hot maxima edge is crossed past
+// a cold co-maximum edge (the one-hot IntersectEdges branch adds the apex on
+// one ring side) and again when AddLocalMaxPoly closes the ring on the other
+// side — leaving a zero-length edge. Clipper2 strips these in its output
+// stage (BuildPath); this is the equivalent cleanup.
+func dedupConsecutive(pts []fixed.Point) []fixed.Point {
+	if len(pts) < 2 {
+		return pts
+	}
+	out := make([]fixed.Point, 0, len(pts))
+	out = append(out, pts[0])
+	for _, p := range pts[1:] {
+		if p == out[len(out)-1] {
+			continue
+		}
+		out = append(out, p)
+	}
+	for len(out) >= 2 && out[len(out)-1] == out[0] {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
 // polyCentroid returns the average of the polygon's vertices — a point

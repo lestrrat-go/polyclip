@@ -273,6 +273,32 @@ func TestUnionSharedVertexViaHorizontal(t *testing.T) {
 	}
 }
 
+func TestUnionSharedLocalMaxConfluence(t *testing.T) {
+	// A and B both reach their local MAXIMUM at the shared vertex (8,6) — four
+	// bounds (two per polygon) converging on one apex, with a cross-source
+	// crossing just below at (8.33,3.33). The maxima pairing must pair each
+	// polygon's own two bounds (vertex-identity, approximated by same source),
+	// not the nearest coincident other-source edge; otherwise the hot ring
+	// spanning both sources is never closed at the apex and everything above the
+	// lower crossing is dropped. Pre-fix the engine returned 1.333 (≈ the
+	// intersection area); the true union is ~5.67 (DESIGN.md §12.11, track C).
+	a := Polygon{{9, 2}, {10, 4}, {8, 6}, {8, 4}}
+	b := Polygon{{7, 0}, {8, 3}, {9, 4}, {8, 6}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotArea := got.Area(); gotArea < 5.5 || gotArea > 5.85 {
+		t.Errorf("Union area %v outside expected band [5.5,5.85] (truth ~5.67; pre-fix bug was 1.333)", gotArea)
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

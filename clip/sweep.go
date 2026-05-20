@@ -1064,10 +1064,20 @@ func outrecOther(ae *ActiveEdge) *ActiveEdge {
 }
 
 // maximaPartner returns ae's local-maximum partner: the nearest AEL edge whose
-// bound, like ae's, reaches its last segment at maxPt. Returns nil if none
-// qualifies. Mirrors Clipper2's GetMaximaPair (engine.cpp:254), whose
-// vertex_top identity test we approximate with maxPt coincidence (valid for
-// non-self-intersecting input, where no two distinct maxima share a point).
+// bound, like ae's, reaches its last segment at maxPt AND belongs to the same
+// source. Returns nil if none qualifies. Mirrors Clipper2's GetMaximaPair
+// (engine.cpp:254), which pairs by vertex_top POINTER identity — the two
+// bounds meeting at the same physical apex of the same input ring.
+//
+// The same-source requirement is what makes a SHARED-apex confluence correct:
+// when two different polygons reach their local maximum at the same coordinate
+// (four bounds converging on one point), each polygon's two bounds form a
+// maxima pair, NOT the nearest coincident edge of the other source. Pairing by
+// bare coordinate coincidence grabbed the wrong (other-source) edge, so the
+// hot ring spanning both sources was never closed at the apex (DESIGN.md
+// §12.11, "shared local-MAX confluence"). The cross-source edges sitting
+// between the pair are crossed by [resolveBetweenMaxima], which transfers the
+// hot ring onto the surviving same-source bound that then closes it.
 //
 // The partner need NOT be AEL-adjacent: at a multi-edge confluence another
 // ring's bounds may sit between the pair (the interleaved a-L,b-L,a-R,b-R
@@ -1116,7 +1126,8 @@ func (s *sweep) scanMaximaPartner(ae *ActiveEdge, i, dir int, maxPt fixed.Point)
 // distinct bound-last edge reaching maxPt.
 func isMaximaPartner(ae, cand *ActiveEdge, maxPt fixed.Point) bool {
 	return cand != nil && cand != ae && cand.Bound != nil &&
-		cand.IsBoundLast() && boundMaxPt(cand) == maxPt
+		cand.IsBoundLast() && boundMaxPt(cand) == maxPt &&
+		cand.Seg.Src == ae.Seg.Src
 }
 
 // resolveBetweenMaxima crosses every edge lying strictly between ae and its

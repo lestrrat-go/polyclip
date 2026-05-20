@@ -97,6 +97,78 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 	return Segment{Bot: bot, Top: top, Src: src, Reversed: reversed}
 }
 
+// SplitTJunctions splits any segment whose interior is touched by an endpoint
+// (vertex) of another segment, inserting that vertex as a shared endpoint. A
+// "T-junction" is a vertex of one edge lying strictly inside another edge (not
+// at its endpoints). This establishes the invariant "no vertex lies in the
+// open interior of any edge" — the sibling of [SplitOverlaps]'s "no partial
+// collinear overlaps".
+//
+// The split point is the touching vertex itself — an existing grid coordinate
+// — so no new rounding is introduced and the transform is area-preserving.
+//
+// This is a PRECONDITION for shared-vertex crossing dispatch, not a fix on its
+// own: it converts a vertex-on-edge into a coincident shared vertex, which the
+// sweep currently still mishandles (the crossing of two bounds that swap order
+// exactly at the shared vertex is never dispatched). See DESIGN.md §12.11,
+// vertex-on-edge track.
+//
+// Run AFTER [SplitOverlaps] (so collinear overlaps are already resolved to
+// disjoint or fully-coincident) and before [DedupCoincidentEdges].
+//
+// Complexity is O(n³) in the worst case (an O(n²) scan repeated up to O(n)
+// times), matching [SplitOverlaps]; correctness-first.
+func SplitTJunctions(segs []Segment) []Segment {
+	work := make([]Segment, 0, len(segs))
+	for _, s := range segs {
+		if !s.Degenerate() {
+			work = append(work, s)
+		}
+	}
+
+	for {
+		i, p, found := findFirstTJunction(work)
+		if !found {
+			return work
+		}
+		pieces := splitAt(work[i], p, p)
+		out := make([]Segment, 0, len(work)+1)
+		for k, s := range work {
+			if k == i {
+				out = append(out, pieces...)
+				continue
+			}
+			out = append(out, s)
+		}
+		work = out
+	}
+}
+
+// findFirstTJunction returns the index of the first segment that has a vertex
+// of another segment lying strictly in its interior, together with that
+// vertex. A [Touch] whose point is an endpoint of both segments (a shared
+// corner) needs no split and is skipped.
+func findFirstTJunction(segs []Segment) (idx int, p fixed.Point, found bool) {
+	interior := func(s Segment, pt fixed.Point) bool {
+		return pt != s.Bot && pt != s.Top
+	}
+	for i := range segs {
+		for j := i + 1; j < len(segs); j++ {
+			res := Intersect(segs[i], segs[j])
+			if res.Kind != Touch {
+				continue
+			}
+			if interior(segs[i], res.P) {
+				return i, res.P, true
+			}
+			if interior(segs[j], res.P) {
+				return j, res.P, true
+			}
+		}
+	}
+	return 0, fixed.Point{}, false
+}
+
 // DedupCoincidentEdges handles the same-source §11.7 cases:
 //
 //   - Same source, same direction (duplicate input edge): keep one, drop

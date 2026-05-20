@@ -229,6 +229,7 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
 
 	segs = clip.SplitOverlaps(segs)
+	segs = clip.SplitTJunctions(segs)
 	segs = clip.DedupCoincidentEdges(segs)
 	sw := clip.Sweep(segs, op)
 	if sw.Err != nil {

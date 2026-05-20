@@ -195,3 +195,62 @@ func TestDedupCoincidentEdgesDifferentSrcUnchanged(t *testing.T) {
 		t.Errorf("len: got %d want 2 (diff-src preserved); out=%+v", len(out), out)
 	}
 }
+
+func TestSplitTJunctionsSplitsInteriorVertex(t *testing.T) {
+	// Clip segment's lower endpoint (5,5) lies in the interior of the
+	// Subject segment (0,0)->(10,10). Subject must be split there.
+	subj := segSrc(0, 0, 10, 10, Subject)
+	clp := segSrc(5, 5, 15, 5, Clip)
+	out := SplitTJunctions([]Segment{subj, clp})
+	if len(out) != 3 {
+		t.Fatalf("len: got %d want 3 (subj split in two + clip); out=%+v", len(out), out)
+	}
+	mid := fixed.Point{X: 5, Y: 5}
+	var touchingMid int
+	for _, s := range out {
+		if s.Bot == mid || s.Top == mid {
+			touchingMid++
+		}
+	}
+	// The split point is now a shared endpoint of both subject halves and
+	// the clip segment.
+	if touchingMid != 3 {
+		t.Errorf("segments touching split point (5,5): got %d want 3; out=%+v", touchingMid, out)
+	}
+}
+
+func TestSplitTJunctionsPreservesSourceAndDirection(t *testing.T) {
+	// A reversed subject edge split at an interior vertex keeps Src and the
+	// Reversed flag on both halves.
+	subj := NewSegment(fixed.Point{X: 10, Y: 10}, fixed.Point{X: 0, Y: 0}, Subject) // reversed
+	if !subj.Reversed {
+		t.Fatal("test setup: expected reversed subject edge")
+	}
+	clp := segSrc(5, 5, 15, 5, Clip)
+	out := SplitTJunctions([]Segment{subj, clp})
+	for _, s := range out {
+		if s.Src == Subject && !s.Reversed {
+			t.Errorf("subject half lost Reversed flag: %+v", s)
+		}
+	}
+}
+
+func TestSplitTJunctionsSharedCornerUnchanged(t *testing.T) {
+	// Two segments meeting at a shared endpoint (a corner, not a T-junction)
+	// need no split.
+	a := segSrc(0, 0, 10, 10, Subject)
+	b := segSrc(10, 10, 20, 0, Clip)
+	out := SplitTJunctions([]Segment{a, b})
+	if len(out) != 2 {
+		t.Errorf("len: got %d want 2 (shared corner, no split); out=%+v", len(out), out)
+	}
+}
+
+func TestSplitTJunctionsNoTouchUnchanged(t *testing.T) {
+	a := segSrc(0, 0, 10, 10, Subject)
+	b := segSrc(0, 10, 10, 20, Clip) // parallel, disjoint
+	out := SplitTJunctions([]Segment{a, b})
+	if len(out) != 2 {
+		t.Errorf("len: got %d want 2 (disjoint, no split); out=%+v", len(out), out)
+	}
+}

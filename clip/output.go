@@ -142,8 +142,14 @@ func AddLocalMaxPoly(_ *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 		// one ring was created at an "inverted" local minimum (a downward notch
 		// in a concave union boundary) whose front/back orientation is opposite
 		// to the ring it now joins. Reverse e2's ring sides so the polarities
-		// oppose, then join (analogous to Clipper2's SwapFrontBackSides).
+		// oppose, then join. This mirrors Clipper2's SwapFrontBackSides
+		// (engine.cpp:460), which ALSO advances the Pts head by one — the chain
+		// head is the front vertex (Pts) with the back at Pts.Next, so swapping
+		// which edge is front must move the head to keep [AddOutPt] and
+		// [JoinOutrecPaths] splicing on the correct ends. Omitting the head
+		// shift tangles the merged chain (a far-side vertex gets disconnected).
 		e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
+		e2.Outrec.Pts = e2.Outrec.Pts.Next
 	}
 	result := AddOutPt(e1, pt)
 	if e1.Outrec == e2.Outrec {

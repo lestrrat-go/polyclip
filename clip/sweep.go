@@ -606,11 +606,18 @@ func (s *sweep) handleLocalMin(e Event) {
 	if lm == nil {
 		return
 	}
+	// Insert the left bound at its sorted position, then the right bound
+	// IMMEDIATELY to its right (adjacent, not sorted). This mirrors Clipper2's
+	// InsertLeftEdge + InsertRightEdge: the right bound is later bubbled into
+	// sorted order, and every edge it passes is an intersection AT the
+	// local-min point that must be processed (the vertex-on-edge / coincident
+	// case — DESIGN.md §12.11).
 	leftAE := s.spawnBoundActive(lm.Left, lm.Vertex)
-	rightAE := s.spawnBoundActive(lm.Right, lm.Vertex)
+	rightAE := s.makeBoundActive(lm.Right, lm.Vertex)
 	if leftAE == nil || rightAE == nil {
 		return
 	}
+	s.ael.InsertAt(s.ael.IndexOf(leftAE)+1, rightAE)
 	Classify(s.ael, leftAE, s.op)
 	Classify(s.ael, rightAE, s.op)
 	// AddLocalMinPoly creates the new ring only when both bounds are
@@ -624,6 +631,21 @@ func (s *sweep) handleLocalMin(e Event) {
 	if leftAE.Contributing && rightAE.Contributing {
 		AddLocalMinPoly(s.ael, rightAE, leftAE, lm.Vertex, true)
 	}
+	// Bubble the right bound rightward past any edge it is out of order with
+	// (an edge coincident at the local-min point that sorts before it). Each
+	// such pass is an intersection at lm.Vertex: IntersectEdges processes the
+	// §12.5 winding/ring transition and swaps, leaving the right bound in
+	// sorted order. For non-degenerate minima nothing is out of order and the
+	// loop is a no-op (mirrors Clipper2 InsertLocalMinimaIntoAEL's
+	// IsValidAelOrder bubble).
+	for {
+		i := s.ael.IndexOf(rightAE)
+		nb := s.ael.RightOf(i)
+		if nb == nil || !s.ael.Less(nb, rightAE) {
+			break
+		}
+		IntersectEdges(s.ael, s.op, rightAE, nb, lm.Vertex)
+	}
 	// Activate both bounds. A bound whose first segment is horizontal (an
 	// axial polygon's bottom edge is a local-min horizontal) is queued for
 	// the horizontal pass instead of scheduling a Top; doHorizontal walks it
@@ -631,6 +653,25 @@ func (s *sweep) handleLocalMin(e Event) {
 	// first-class AEL edges).
 	s.activateBound(leftAE, lm.Vertex.Y)
 	s.activateBound(rightAE, lm.Vertex.Y)
+}
+
+// makeBoundActive creates the [ActiveEdge] for bound b's first segment and
+// registers it in bySeg, WITHOUT inserting it into the AEL (the caller places
+// it). See [spawnBoundActive] for the AEL-inserting variant.
+func (s *sweep) makeBoundActive(b *Bound, vertex fixed.Point) *ActiveEdge {
+	if b == nil || len(b.Segs) == 0 {
+		return nil
+	}
+	seg := b.Segs[0]
+	ae := &ActiveEdge{
+		Seg:     seg,
+		Bound:   b,
+		EdgeIdx: 0,
+		CurrX:   vertex.X,
+		WindDx:  boundWindDx(b),
+	}
+	s.bySeg[seg] = ae
+	return ae
 }
 
 // activateBound schedules the future processing of a freshly-positioned bound

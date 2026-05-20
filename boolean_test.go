@@ -415,10 +415,11 @@ func TestUnionAllManyDisjoint(t *testing.T) {
 }
 
 func TestUnionAllManyOverlapping(t *testing.T) {
-	t.Skip("WIP DoIntersections rework (DESIGN.md §12.11): degenerate-position " +
-		"handling incomplete. These diamonds share y=0,±10, so re-unioning " +
-		"intermediate blobs produces crossings exactly on vertex scanlines that " +
-		"the per-scanbeam recompute does not yet integrate with Top/LocalMin events.")
+	t.Skip("WIP DoIntersections rework (DESIGN.md §12.11): local-min vertex-on-edge " +
+		"coincidence is now handled (the right-bound bubble in handleLocalMin), but " +
+		"re-unioning these diamonds still mishandles coincidences at local MAXIMA / " +
+		"through-vertices (shared y=10 peaks, y=7.5 valleys): a peak ring gets " +
+		"disconnected. Needs the symmetric maxima/through-vertex coincidence handling.")
 	// Five horizontally-shifted diamonds. Diamonds have no horizontal
 	// edges so the bound model handles them cleanly even when shifted
 	// to share x-extents. UnionAll's tournament reduction must produce

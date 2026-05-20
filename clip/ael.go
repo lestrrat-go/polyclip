@@ -148,6 +148,20 @@ func (a *AEL) Insert(ae *ActiveEdge) int {
 	return idx
 }
 
+// InsertAt inserts ae at position idx, shifting existing entries right. Used
+// by the local-min handler to place a freshly-spawned right bound adjacent to
+// its left bound before bubbling it into sorted position (mirroring Clipper2's
+// InsertRightEdge + the IsValidAelOrder bubble loop).
+func (a *AEL) InsertAt(idx int, ae *ActiveEdge) {
+	a.edges = append(a.edges, nil)
+	copy(a.edges[idx+1:], a.edges[idx:])
+	a.edges[idx] = ae
+}
+
+// Less reports whether edge x sorts strictly left of edge y in the AEL. It is
+// the exported form of the internal ordering used by [AEL.Insert].
+func (a *AEL) Less(x, y *ActiveEdge) bool { return aelLess(x, y) }
+
 // Remove deletes ae from the AEL. It is a no-op if ae is not present.
 func (a *AEL) Remove(ae *ActiveEdge) {
 	for i, e := range a.edges {

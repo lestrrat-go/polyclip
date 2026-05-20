@@ -1105,7 +1105,16 @@ Diagnostic signature: any closed-ring input with a mid-bound horizontal (e.g. an
 | convex-convex (with crossings) | ~49% wrong | **0.0%** |
 | non-convex involved | ~57% wrong | **8.3%** |
 
-So general-position crossings are fixed outright for convex inputs and dramatically improved for non-convex. The residual non-convex failures and the regression of `TestUnionAllManyOverlapping` (overlapping diamonds) are all **degenerate-position** cases — multiple vertices sharing a Y (the diamonds share y=0,±10; the minimal repro below has two clip vertices at y=1) so crossings land exactly on vertex scanlines and coincide with Top/LocalMin events. `buildIntersectList` uses the half-open beam `(botY, topY]` (Clipper2 clamps boundary crossings inward rather than dropping them), which fixed the simplest boundary cases but not the full vertex-coincident interaction with the maxima/minima/through-vertex handlers. That integration — process beam crossings, then re-derive which Top/LocalMin events still hold at the swapped positions — is the remaining work before this can merge.
+So general-position crossings are fixed outright for convex inputs and dramatically improved for non-convex. `buildIntersectList` uses the half-open beam `(botY, topY]` (Clipper2 clamps boundary crossings inward rather than dropping them).
+
+**Degenerate-position handling — partial.** Where a vertex of one polygon lies exactly on an edge of the other, or crossings land on a vertex scanline, the per-scanbeam recompute is not enough; the coincidence must be processed at the corresponding vertex event. Done so far:
+
+- **Local-min vertex-on-edge** (`handleLocalMin`): the right bound is now inserted ADJACENT to the left bound and bubbled into sorted order, calling `IntersectEdges` at the local-min point for every edge it passes (Clipper2's `InsertLocalMinimaIntoAEL` + `IsValidAelOrder` bubble). This fixes the minimal repro `a=(1,1),(-1,2),(0,-2),(2,0)` ∪ `b=(-2,1),(-5,0),(0,-3),(0,1)` (a's vertex (0,-2) on b's x=0 edge): Union now 15.375 (was 11.0).
+
+Still open (so `TestUnionAllManyOverlapping` remains skipped, not merged):
+
+- **Local-max / through-vertex coincidence:** re-unioning the overlapping diamonds (shared y=10 peaks, y=7.5 valleys) disconnects a peak ring. `closeBound` has partial maxima-pair handling (§12.6.1) but not the full symmetric bubble; `advanceBoundCursor` (through-vertex) has none.
+- **Xor / Difference classification:** the differential's residual failures are dominated by identity violations (`X≠U−I`, `D≠a−I`) even at general position, while Union/Intersect *bounds* mostly hold (U ~4%, I ~0%). Xor/Difference need a classification audit independent of the crossing rework.
 
 **Symptom.** The boolean engine is reliable only for inputs whose boundaries do not properly cross (disjoint, nested, touching) or cross at axis-aligned / special-position points. For general-position sloped crossings it is broadly wrong.
 

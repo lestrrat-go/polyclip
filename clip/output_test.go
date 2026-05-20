@@ -45,16 +45,19 @@ func TestAddLocalMinPolyCreatesRing(t *testing.T) {
 	if outrec.Pts != op {
 		t.Errorf("outrec.Pts != op")
 	}
-	// With no prior hot edge and isNew=true: front=e1, back=e2.
-	if outrec.FrontEdge != e1 || outrec.BackEdge != e2 {
-		t.Errorf("sides wrong: front=%p back=%p (want e1=%p e2=%p)",
-			outrec.FrontEdge, outrec.BackEdge, e1, e2)
+	// With no prior hot edge and isNew=true the FrontEdge is the RIGHT-side
+	// edge (e2, at x=10), so the Pts cycle reads CCW (polyclip's mirror of
+	// Clipper2's convention — see AddLocalMinPoly). Orientation is resolved
+	// from AEL position, not argument order.
+	if outrec.FrontEdge != e2 || outrec.BackEdge != e1 {
+		t.Errorf("sides wrong: front=%p back=%p (want front=e2=%p back=e1=%p)",
+			outrec.FrontEdge, outrec.BackEdge, e2, e1)
 	}
 	if !e1.IsHotEdge() || !e2.IsHotEdge() {
 		t.Errorf("edges should be hot")
 	}
-	if !e1.IsFront() || e2.IsFront() {
-		t.Errorf("IsFront: e1=%v e2=%v want true false", e1.IsFront(), e2.IsFront())
+	if e1.IsFront() || !e2.IsFront() {
+		t.Errorf("IsFront: e1=%v e2=%v want false true", e1.IsFront(), e2.IsFront())
 	}
 }
 
@@ -67,19 +70,20 @@ func TestAddOutPtAppendsAndPrepends(t *testing.T) {
 
 	startPt := fixed.Point{X: 5, Y: 0}
 	AddLocalMinPoly(ael, e1, e2, startPt, true)
+	// e2 (right, x=10) is the front edge; e1 (left) is the back edge.
 
-	// Add a point via e1 (front) — should prepend (become new head).
+	// Add a point via e2 (front) — should prepend (become new head).
 	p1 := fixed.Point{X: 0, Y: 5}
-	newFront := AddOutPt(e1, p1)
-	if e1.Outrec.Pts != newFront {
+	newFront := AddOutPt(e2, p1)
+	if e2.Outrec.Pts != newFront {
 		t.Errorf("front add did not update Pts to new head")
 	}
 
-	// Add a point via e2 (back) — should append (head stays put).
+	// Add a point via e1 (back) — should append (head stays put).
 	p2 := fixed.Point{X: 10, Y: 5}
-	oldHead := e2.Outrec.Pts
-	AddOutPt(e2, p2)
-	if e2.Outrec.Pts != oldHead {
+	oldHead := e1.Outrec.Pts
+	AddOutPt(e1, p2)
+	if e1.Outrec.Pts != oldHead {
 		t.Errorf("back add changed the head pointer")
 	}
 
@@ -152,12 +156,13 @@ func TestSwapOutrecsAcrossTwoRings(t *testing.T) {
 		t.Errorf("SwapOutrecs did not exchange: e1.Outrec=%p e3.Outrec=%p want %p %p",
 			e1.Outrec, e3.Outrec, or2, or1)
 	}
-	// And the rings' side pointers should reflect the swap.
-	if or1.FrontEdge != e3 {
-		t.Errorf("or1.FrontEdge = %p want %p", or1.FrontEdge, e3)
+	// e1 and e3 are the BACK edges of their rings (front = right edge, e2/e4),
+	// so the swap updates the BackEdge pointers.
+	if or1.BackEdge != e3 {
+		t.Errorf("or1.BackEdge = %p want %p", or1.BackEdge, e3)
 	}
-	if or2.FrontEdge != e1 {
-		t.Errorf("or2.FrontEdge = %p want %p", or2.FrontEdge, e1)
+	if or2.BackEdge != e1 {
+		t.Errorf("or2.BackEdge = %p want %p", or2.BackEdge, e1)
 	}
 }
 

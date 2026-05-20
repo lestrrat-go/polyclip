@@ -38,14 +38,11 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	e2Hot := e2.IsHotEdge()
 	samePolyType := e1.Seg.Src == e2.Seg.Src
 
-	// Perform the AEL swap (intersection event semantics). e1 is the edge that
-	// was left of e2; their winding update below is by edge identity, not
-	// position, so it is unaffected by the swap.
-	ael.SwapAt(i1)
-
 	// Update winding counts in place — Clipper2 SetWindCount-free incremental
 	// model for the non-zero fill rule. Crossing an edge of the same source
 	// flips/steps WindSelf; crossing the other source's edge steps WindOther.
+	// This is by edge identity (uses e1/e2's WindDx), so the AEL position swap
+	// is irrelevant to it.
 	if samePolyType {
 		if e1.WindSelf+e2.WindDx == 0 {
 			e1.WindSelf = -e1.WindSelf
@@ -70,14 +67,25 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	e1.Contributing = isContributing(op, e1)
 	e2.Contributing = isContributing(op, e2)
 
+	// Dispatch BEFORE swapping AEL positions: Clipper2 runs IntersectEdges with
+	// the AEL still in pre-crossing order and only swaps afterwards
+	// (engine.cpp:2461-2462). This matters because AddLocalMinPoly's
+	// getPrevHotEdge walks the AEL by position; with e1 still the left edge it
+	// finds the genuine enclosing hot edge instead of e2 itself, fixing the
+	// crossing-spawned ring's front/back orientation (DESIGN.md §12.11). The
+	// swap is performed unconditionally on exit, including the guard path,
+	// matching Clipper2's caller which always swaps.
+	var result *OutPt
 	// Guard: a non-hot edge whose own count is now deeper than the outer
-	// boundary (abs > 1) cannot start or close a ring here. (Clipper2
-	// engine.cpp:1932 — the swap has already happened, matching its caller.)
-	if (!e1Hot && w1 != 0 && w1 != 1) || (!e2Hot && w2 != 0 && w2 != 1) {
-		return nil
+	// boundary (abs > 1) cannot start or close a ring here (engine.cpp:1932).
+	if !((!e1Hot && w1 != 0 && w1 != 1) || (!e2Hot && w2 != 0 && w2 != 1)) {
+		result = dispatchIntersect(ael, op, e1, e2, pt, e1Hot, e2Hot, w1, w2, samePolyType)
 	}
 
-	return dispatchIntersect(ael, op, e1, e2, pt, e1Hot, e2Hot, w1, w2, samePolyType)
+	// e1 was the edge left of e2; swap their AEL positions now (the crossing
+	// has been processed).
+	ael.SwapAt(i1)
+	return result
 }
 
 func dispatchIntersect(

@@ -82,34 +82,48 @@ func AddOutPt(ae *ActiveEdge, pt fixed.Point) *OutPt {
 	return newOp
 }
 
-// AddLocalMinPoly creates a new OutRec rooted at pt and assigns e1, e2 as its
-// two sides. isNew is true for input local minima and false for synthetic
-// minima from IntersectEdges' tunnel case. Returns the new ring's first OutPt.
+// AddLocalMinPoly creates a new OutRec rooted at pt and assigns the two edges
+// as its sides. isNew is true for input local minima and false for synthetic
+// minima from IntersectEdges' crossing case. Returns the new ring's first
+// OutPt.
 //
-// Per DESIGN.md §12.3 / clipper.engine.cpp:1332.
+// Per DESIGN.md §12.3 / clipper.engine.cpp:1332. The front/back assignment
+// transcribes Clipper2's SetSides logic, which is expressed in terms of the
+// LEFT and RIGHT AEL edges (front_edge is the ascending/left side for a simple
+// outer minimum). The two arguments may be passed in either AEL order; this
+// function resolves left/right from their current AEL positions so the
+// orientation — and crucially getPrevHotEdge, which must find the enclosing
+// hot edge to the left of BOTH new edges rather than the partner — matches
+// Clipper2 regardless of caller argument order.
 func AddLocalMinPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point, isNew bool) *OutPt {
 	outrec := &OutRec{Idx: ael.NextOutRecIdx()}
 	ael.RegisterRing(outrec)
 	e1.Outrec = outrec
 	e2.Outrec = outrec
 
-	prevHot := getPrevHotEdge(ael, e1)
+	left, right := e1, e2
+	if ael.IndexOf(e2) < ael.IndexOf(e1) {
+		left, right = e2, e1
+	}
+
+	// getPrevHotEdge must find the hot edge enclosing this minimum from the
+	// LEFT — i.e. the nearest hot edge strictly left of BOTH new edges, never
+	// the partner. Walk from the left edge so the right edge (just made hot)
+	// is never returned. polyclip uses the mirror of Clipper2's orientation
+	// (FrontEdge = the RIGHT/descending side, so the Pts cycle reads CCW), so
+	// the front side is the right edge for a simple outer minimum and the
+	// nesting parity is read off outrecIsAscending in that same mirror.
+	prevHot := getPrevHotEdge(ael, left)
+	frontIsRight := isNew
 	if prevHot != nil {
-		if outrecIsAscending(prevHot) == isNew {
-			outrec.FrontEdge = e2
-			outrec.BackEdge = e1
-		} else {
-			outrec.FrontEdge = e1
-			outrec.BackEdge = e2
-		}
+		frontIsRight = outrecIsAscending(prevHot) == isNew
+	}
+	if frontIsRight {
+		outrec.FrontEdge = right
+		outrec.BackEdge = left
 	} else {
-		if isNew {
-			outrec.FrontEdge = e1
-			outrec.BackEdge = e2
-		} else {
-			outrec.FrontEdge = e2
-			outrec.BackEdge = e1
-		}
+		outrec.FrontEdge = left
+		outrec.BackEdge = right
 	}
 
 	op := &OutPt{P: pt, Outrec: outrec}
@@ -138,16 +152,19 @@ func AddLocalMaxPoly(_ *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 			// Same ring, same side — a genuine inconsistency; bail.
 			return nil
 		}
-		// Two different rings meeting same-side at a maximum. This arises when
-		// one ring was created at an "inverted" local minimum (a downward notch
-		// in a concave union boundary) whose front/back orientation is opposite
-		// to the ring it now joins. Reverse e2's ring sides so the polarities
-		// oppose, then join. This mirrors Clipper2's SwapFrontBackSides
-		// (engine.cpp:460), which ALSO advances the Pts head by one — the chain
-		// head is the front vertex (Pts) with the back at Pts.Next, so swapping
-		// which edge is front must move the head to keep [AddOutPt] and
-		// [JoinOutrecPaths] splicing on the correct ends. Omitting the head
-		// shift tangles the merged chain (a far-side vertex gets disconnected).
+		// Two different rings meeting same-side at a maximum. In Clipper2 this
+		// is unreachable for closed paths (SwapFrontBackSides is reserved for
+		// open ends; the closed-path branch is a hard error) — it means a
+		// crossing-spawned ring upstream got an inverted front/back orientation.
+		// Most such cases are now prevented by AddLocalMinPoly resolving
+		// orientation from AEL position (DESIGN.md §12.11); a residual minority
+		// of non-convex configurations still reach here. Recover by reversing
+		// e2's ring sides so the polarities oppose, then join. This mirrors
+		// Clipper2's SwapFrontBackSides (engine.cpp:460), which ALSO advances the
+		// Pts head by one — the chain head is the front vertex (Pts) with the
+		// back at Pts.Next, so swapping which edge is front must move the head to
+		// keep [AddOutPt] and [JoinOutrecPaths] splicing on the correct ends.
+		// Omitting the head shift tangles the merged chain.
 		e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
 		e2.Outrec.Pts = e2.Outrec.Pts.Next
 	}

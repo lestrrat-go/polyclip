@@ -1,6 +1,8 @@
 package clip
 
 import (
+	"unsafe"
+
 	"github.com/lestrrat-go/polyclip/fixed"
 )
 
@@ -93,6 +95,16 @@ type sweep struct {
 	trace  []TraceEvent
 	err    error
 
+	// pendingCross counts how many unconsumed EventIntersections are queued
+	// for each canonical (pointer-ordered) segment pair. It is incremented on
+	// schedule and decremented when the event is handled. The post-horizontal
+	// re-scan in [run] consults it to avoid enqueuing a SECOND copy of a
+	// crossing the incremental path already has pending: a duplicate would
+	// fire while the edges are adjacent and swap them back. The incremental
+	// scheduler itself does not consult it (the engine relies on its repeated
+	// adjacency-driven scheduling).
+	pendingCross map[[2]*Segment]int
+
 	// pendingHoriz holds bound-model ActiveEdges whose cursor currently sits
 	// on a horizontal segment, awaiting the horizontal pass ([doHorizontal]).
 	// They are flushed at the end of each scanline Y, AFTER every Top/LocalMin
@@ -110,12 +122,13 @@ type sweep struct {
 
 func newSweep(segs []Segment, op Operation) *sweep {
 	s := &sweep{
-		segs:   segs,
-		op:     op,
-		queue:  NewEventQueue(),
-		ael:    NewAEL(),
-		bySeg:  make(map[*Segment]*ActiveEdge, len(segs)),
-		minima: make(map[fixed.Point]*LocalMin),
+		segs:         segs,
+		op:           op,
+		queue:        NewEventQueue(),
+		ael:          NewAEL(),
+		bySeg:        make(map[*Segment]*ActiveEdge, len(segs)),
+		minima:       make(map[fixed.Point]*LocalMin),
+		pendingCross: make(map[[2]*Segment]int),
 	}
 	// Try the bound-model pre-pass first (DESIGN.md §12.7 / §12.10). On
 	// success it claims every segment of every bound — handleLocalMin
@@ -214,7 +227,18 @@ func (s *sweep) run() {
 		// Top/LocalMin events above. doHorizontal may promote a cursor onto a
 		// further horizontal at the same Y; it appends to pendingHoriz, so the
 		// loop drains until none remain. Per DESIGN.md §12.6 / §12.10.
+		hadHoriz := len(s.pendingHoriz) > 0
 		s.flushPendingHoriz(y)
+		// The horizontal pass may have advanced cursors and rearranged the
+		// AEL, creating new adjacencies whose crossings the per-event checks
+		// missed (a transient edge stood between them at check time). Re-scan
+		// the settled AEL so those crossings are scheduled before the sweep
+		// moves to the next scanline. Only needed when horizontals actually
+		// ran — without them the per-event scheduling already sees every
+		// adjacency as it forms.
+		if s.boundModel && hadHoriz {
+			s.rescanAdjacentIntersections(y)
+		}
 	}
 }
 
@@ -1144,6 +1168,9 @@ func (s *sweep) handleHorizMax(e Event) {
 }
 
 func (s *sweep) handleIntersection(e Event) {
+	if k := crossKey(e.SegA, e.SegB); s.pendingCross[k] > 0 {
+		s.pendingCross[k]--
+	}
 	aeA, okA := s.bySeg[e.SegA]
 	aeB, okB := s.bySeg[e.SegB]
 	if !okA || !okB {
@@ -1177,10 +1204,39 @@ func (s *sweep) maybeScheduleIntersect(left, right *ActiveEdge, currY fixed.Coor
 	if res.P.Y <= currY {
 		return
 	}
+	s.pendingCross[crossKey(left.Seg, right.Seg)]++
 	s.queue.Push(Event{
 		Kind: EventIntersection,
 		P:    res.P,
 		SegA: left.Seg,
 		SegB: right.Seg,
 	})
+}
+
+// crossKey canonicalises a segment pair (order-independent) for the
+// [sweep.pendingCross] map.
+func crossKey(a, b *Segment) [2]*Segment {
+	if uintptr(unsafe.Pointer(a)) > uintptr(unsafe.Pointer(b)) {
+		a, b = b, a
+	}
+	return [2]*Segment{a, b}
+}
+
+// rescanAdjacentIntersections re-checks every adjacent AEL pair for a proper
+// crossing above scanline y and schedules any not already pending. The
+// incremental per-event scheduling can miss a crossing when a transient edge
+// (e.g. a coincident horizontal being walked) sits between two bounds at the
+// moment their neighbours are checked, then advances away to leave them
+// adjacent with no fresh check. Running this after the horizontal pass settles
+// the AEL closes that gap. The [sweep.pendingCross] guard ensures a crossing
+// the incremental path already queued is not enqueued twice (a duplicate would
+// fire while the pair is adjacent and swap it back).
+func (s *sweep) rescanAdjacentIntersections(y fixed.Coord) {
+	for i := 0; i+1 < s.ael.Len(); i++ {
+		l, r := s.ael.At(i), s.ael.At(i+1)
+		if s.pendingCross[crossKey(l.Seg, r.Seg)] > 0 {
+			continue
+		}
+		s.maybeScheduleIntersect(l, r, y)
+	}
 }

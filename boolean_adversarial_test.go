@@ -347,3 +347,34 @@ func TestUnionCoincidentHorizConfluence(t *testing.T) {
 		t.Errorf("Union area %v want %v", got.Area(), wantArea)
 	}
 }
+
+// TestUnionSlantCoincidentBottom is a regression captured from FuzzUnion. The
+// subject `a` is a slanted quad whose bottom edge (-5,-5)->(16,-5) is partly
+// COINCIDENT with the clip square `b`'s bottom edge (15,-5)->(25,-5) over
+// x∈[15,16]. Preprocess splits that overlap into a shared segment carried by
+// both `a` and `b`. `a`'s slant (16,-5)->(5,5) then crosses `b`'s left edge
+// x=15 at (15,-45/11≈-4.09); above that crossing each shape exits the other.
+//
+// Before the fix the crossing was never scheduled: while the bottom horizontals
+// were walked, `b`'s coincident horizontal sat transiently between `b`'s left
+// edge and `a`'s slant at the moment their neighbours were checked, then
+// advanced away leaving them adjacent with no fresh intersection check. The
+// engine produced a single triangle of area 150 — losing the entire top
+// boundary. The fix re-scans adjacent AEL pairs after the horizontal pass.
+//
+// Expected area 254.5454…: |a|+|b| − overlap = 155 + 100 − 5/11.
+func TestUnionSlantCoincidentBottom(t *testing.T) {
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{-5, -5}, {16, -5}, {5, 5}, {-5, 5}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{15, -5}, {25, -5}, {25, 5}, {15, 5}}}}
+	got, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	wantArea := 255.0 - 5.0/11.0
+	if math.Abs(got.Area()-wantArea) > 0.01 {
+		t.Errorf("Union area %v want %v", got.Area(), wantArea)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 merged piece, got %d", len(got))
+	}
+}

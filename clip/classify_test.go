@@ -46,8 +46,12 @@ func TestClassifyTwoSameSource(t *testing.T) {
 	Classify(ael, aeL, OpUnion)
 	Classify(ael, aeR, OpUnion)
 
-	if aeL.WindSelf != 1 || aeR.WindSelf != 0 {
-		t.Errorf("WindSelf: L=%d R=%d want 1 0", aeL.WindSelf, aeR.WindSelf)
+	// WindSelf is Clipper2's wind_cnt — the HIGHER of the winding counts of
+	// the two regions touching the edge — so both sides of the square read 1
+	// (interior region has winding 1; exterior 0). The right edge reverses
+	// direction relative to the left, so it inherits the left's count.
+	if aeL.WindSelf != 1 || aeR.WindSelf != 1 {
+		t.Errorf("WindSelf: L=%d R=%d want 1 1", aeL.WindSelf, aeR.WindSelf)
 	}
 	if !aeL.Contributing || !aeR.Contributing {
 		t.Errorf("Contributing: L=%v R=%v want both true", aeL.Contributing, aeR.Contributing)
@@ -81,11 +85,13 @@ func TestClassifyTwoOverlappingSquares(t *testing.T) {
 		Classify(ael, ae, OpUnion)
 	}
 
-	// Expected:
-	//   aeSL: WindSelf=+1 WindOther=0  contributing (outer boundary entry)
-	//   aeCL: WindSelf=+1 WindOther=+1 NOT contributing (inside subject)
-	//   aeSR: WindSelf=0  WindOther=+1 NOT contributing (inside clip)
-	//   aeCR: WindSelf=0  WindOther=0  contributing (outer boundary exit)
+	// WindSelf is Clipper2's wind_cnt (higher winding of the two adjacent
+	// same-source regions), so each square's left and right edges both read 1.
+	// Contributing is what actually drives output and is unchanged:
+	//   aeSL: WindSelf=1 WindOther=0  contributing (subject outer, outside clip)
+	//   aeCL: WindSelf=1 WindOther=1  NOT contributing (clip edge inside subject)
+	//   aeSR: WindSelf=1 WindOther=1  NOT contributing (subject edge inside clip)
+	//   aeCR: WindSelf=1 WindOther=0  contributing (clip outer, outside subject)
 	cases := []struct {
 		name        string
 		ae          *ActiveEdge
@@ -95,8 +101,8 @@ func TestClassifyTwoOverlappingSquares(t *testing.T) {
 	}{
 		{"aeSL", aeSL, 1, 0, true},
 		{"aeCL", aeCL, 1, 1, false},
-		{"aeSR", aeSR, 0, 1, false},
-		{"aeCR", aeCR, 0, 0, true},
+		{"aeSR", aeSR, 1, 1, false},
+		{"aeCR", aeCR, 1, 0, true},
 	}
 	for _, c := range cases {
 		if c.ae.WindSelf != c.wantSelf || c.ae.WindOther != c.wantOther || c.ae.Contributing != c.wantContrib {

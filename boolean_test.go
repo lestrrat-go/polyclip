@@ -415,11 +415,12 @@ func TestUnionAllManyDisjoint(t *testing.T) {
 }
 
 func TestUnionAllManyOverlapping(t *testing.T) {
-	t.Skip("WIP DoIntersections rework (DESIGN.md §12.11): local-min vertex-on-edge " +
-		"coincidence is now handled (the right-bound bubble in handleLocalMin), but " +
-		"re-unioning these diamonds still mishandles coincidences at local MAXIMA / " +
-		"through-vertices (shared y=10 peaks, y=7.5 valleys): a peak ring gets " +
-		"disconnected. Needs the symmetric maxima/through-vertex coincidence handling.")
+	t.Skip("WIP DoIntersections rework (DESIGN.md §12.11): the incremental " +
+		"wind-count rewrite (Classify + IntersectEdges aligned with Clipper2's " +
+		"wind_cnt/wind_cnt2 model) improved cumulative Union of these diamonds " +
+		"(475→489, truth 550) but did not close the gap. The remaining fault is " +
+		"the separate maxima/through-vertex coincidence handling in AddLocalMaxPoly " +
+		"/ advanceBoundCursor (shared y=10 peaks, y=7.5 valleys), not the wind drift.")
 	// Five horizontally-shifted diamonds. Diamonds have no horizontal
 	// edges so the bound model handles them cleanly even when shifted
 	// to share x-extents. UnionAll's tournament reduction must produce

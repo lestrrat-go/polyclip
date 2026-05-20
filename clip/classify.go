@@ -15,14 +15,18 @@ const (
 )
 
 // Classify computes ae.WindSelf, ae.WindOther, and ae.Contributing for the
-// active edge that has just been inserted (or repositioned) in ael, against
-// the given boolean operation.
+// active edge that has just been inserted in ael, against the given boolean
+// operation. It is the insertion-time winding setup only; once an edge is in
+// the AEL its counts are updated incrementally by [IntersectEdges], never by
+// re-running Classify.
 //
-// Classification follows the rules in DESIGN.md §11.3 / §11.4: walk the AEL
-// leftward from ae's current position to find the nearest predecessor of
-// the same source and of the other source, take their WindSelf values, and
-// add ae's own signed contribution to derive WindSelf. The contribution
-// rule from §11.4 then sets Contributing.
+// This transcribes Clipper2's SetWindCountForClosedPathEdge (engine.cpp:1011)
+// for the non-zero fill rule. WindSelf (Clipper2's wind_cnt) is the winding
+// count of ae's own source in the region just right of ae; WindOther
+// (wind_cnt2) is the running sum of the other source's signed contributions
+// to ae's left. The naive "nearest predecessor + delta" model this replaced
+// dropped the reversing-direction and now-outside cases, which is what made
+// front/back polarity drift at intersections (DESIGN.md §12.11).
 func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	pos := ael.IndexOf(ae)
 	if pos < 0 {
@@ -30,26 +34,48 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	}
 	delta := ae.WindDx
 
-	prevSelf, prevOther := 0, 0
-	foundSelf, foundOther := false, false
+	// Nearest same-source predecessor (Clipper2's e2).
+	var e2 *ActiveEdge
 	for i := pos - 1; i >= 0; i-- {
-		prev := ael.At(i)
-		switch {
-		case prev.Seg.Src == ae.Seg.Src && !foundSelf:
-			prevSelf = prev.WindSelf
-			foundSelf = true
-		case prev.Seg.Src != ae.Seg.Src && !foundOther:
-			prevOther = prev.WindSelf
-			foundOther = true
-		}
-		if foundSelf && foundOther {
+		if prev := ael.At(i); prev.Seg.Src == ae.Seg.Src {
+			e2 = prev
 			break
 		}
 	}
 
-	ae.WindSelf = prevSelf + delta
-	ae.WindOther = prevOther
-	ae.Contributing = isContributing(op, ae, delta)
+	switch {
+	case e2 == nil:
+		ae.WindSelf = delta
+	case e2.WindSelf*e2.WindDx < 0:
+		// Opposite directions: ae is outside e2.
+		if absInt(e2.WindSelf) > 1 {
+			if e2.WindDx*delta < 0 {
+				ae.WindSelf = e2.WindSelf // reversing direction
+			} else {
+				ae.WindSelf = e2.WindSelf + delta
+			}
+		} else {
+			ae.WindSelf = delta // now outside all polys of same source
+		}
+	default:
+		// ae is inside e2.
+		if e2.WindDx*delta < 0 {
+			ae.WindSelf = e2.WindSelf // reversing direction
+		} else {
+			ae.WindSelf = e2.WindSelf + delta
+		}
+	}
+
+	// WindOther = sum of the other source's signed contributions to ae's left.
+	other := 0
+	for i := range pos {
+		if prev := ael.At(i); prev.Seg.Src != ae.Seg.Src {
+			other += prev.WindDx
+		}
+	}
+	ae.WindOther = other
+
+	ae.Contributing = isContributing(op, ae)
 }
 
 // signedContribution returns the AEL contribution of seg per the convention
@@ -73,26 +99,30 @@ func signedContribution(seg *Segment) int {
 	return -1
 }
 
-// isContributing applies the classification table from DESIGN.md §11.4 for
-// the given operation. ae must already have WindSelf and WindOther set;
-// delta is its signed contribution.
-func isContributing(op Operation, ae *ActiveEdge, delta int) bool {
-	before := ae.WindSelf - delta
-	flips := (before == 0) != (ae.WindSelf == 0)
+// isContributing reports whether ae bounds an output region for op, given its
+// current WindSelf/WindOther. This transcribes Clipper2's IsContributingClosed
+// (engine.cpp:908) for the non-zero fill rule: the edge must be on the outer
+// boundary of its own source (abs(WindSelf) == 1), and the other source's
+// count must satisfy the operation's inside/outside test. ae must already have
+// WindSelf and WindOther set.
+func isContributing(op Operation, ae *ActiveEdge) bool {
+	if absInt(ae.WindSelf) != 1 {
+		return false
+	}
 	switch op {
 	case OpUnion:
-		return ae.WindOther == 0 && flips
+		return ae.WindOther == 0
 	case OpIntersect:
-		return ae.WindOther != 0 && flips
+		return ae.WindOther != 0
 	case OpXor:
-		return flips
+		return true
 	case OpDifference:
 		// Subject edge: contribute when clip count is 0; clip edge: when
-		// subject count is non-zero. Reserved until Phase 3 tests cover it.
+		// subject count is non-zero.
 		if ae.Seg.Src == Subject {
-			return ae.WindOther == 0 && flips
+			return ae.WindOther == 0
 		}
-		return ae.WindOther != 0 && flips
+		return ae.WindOther != 0
 	}
 	return false
 }

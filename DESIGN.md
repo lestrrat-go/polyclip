@@ -831,6 +831,23 @@ Crucial phasing detail Clipper2 handles: a horizontal segment is *itself* a boun
 
 For a horizontal local minimum (the bottom of a polygon is a horizontal edge), the two vertical bounds emerging from its endpoints are Bot events at the same Y. They enter the AEL first; then the horizontal pass runs, sees both verticals as `AEL` entries, and calls `AddLocalMinPoly` on them with the horizontal's leftmost point. The horizontal itself contributes the bottom segment of the ring.
 
+### 12.6.1 Execution plan: making horizontals first-class AEL edges (the "option 3" rework)
+
+Status (2026-05-20): **not started.** Captured here so the rework is resumable; it is a multi-stage change with no correct intermediate code state (the winding model cannot be reconciled halfway), so it must land as one coherent effort on a branch, driving the full `clip` + `polyclip` suite red→green.
+
+**Why this is the correct fix.** The current engine excludes horizontals from the AEL and patches the resulting missed crossings with the §11.7 *synth-intersect* mechanism. That mechanism is Union-only (hence the skipped `TestIntersect/Difference/XorOverlappingAxisAligned`) and still misses interior crossings of a through-edge with a horizontal's span (`TestUnionOverlappingSquaresVertexInsideOther`, skipped). Clipper2 has no synth-intersect: every edge — horizontal or not — lives in the AEL and crossings flow through one `IntersectEdges` path. Option 3 = adopt that uniform model and delete the workaround.
+
+**The crux — winding model.** `clip/classify.go:signedContribution` returns **0** for horizontals. That is only safe because horizontals are never in the AEL today. Once a horizontal is an AEL member, `Classify`'s left-walk would treat it as a same/other-source predecessor with `WindSelf` derived from a 0 contribution, corrupting neighbour winding. Clipper2 instead gives every edge a `wind_dx` of ±1 (the sign of the edge's bottom-vertex traversal direction) and computes `wind_cnt` from it (`SetWindCountForClosedPathEdge`, engine.cpp:1011). **Resolution:** a horizontal in the AEL must carry the `wind_dx`/contribution of the *bound it belongs to* (i.e. the sign of the bound's adjacent non-horizontal edge), not 0. The horizontal does not change the winding of a vertical ray that it lies along; what matters is that it carries its bound's contribution forward so neighbours classify correctly while it sits in the AEL.
+
+**Stages (all on one branch; suite is red until the last):**
+
+1. **Winding reconciliation.** Give each AEL edge a `WindDx` (±1) set from the bound's traversal direction; horizontals inherit their bound's `WindDx` rather than contributing 0. Rework `signedContribution`/`Classify` to use it. Re-green the existing non-horizontal tests first to confirm the new winding model is behaviour-preserving for the cases already passing.
+2. **AEL membership.** `spawnBoundActive` stops skipping leading horizontals: the bound's `ActiveEdge` sits on its first segment even when horizontal, inserted at the near-X with a sweeping `CurrX`. `advanceBoundCursor` likewise stops the skip-and-emit-endpoints shortcut.
+3. **`DoHorizontal` walk** (port of engine.cpp:2526). When a bound's cursor is on a horizontal, walk the AEL in the horizontal's direction: for each crossed edge call `IntersectEdges(horz, e, pt)` then swap positions, advancing `horz.CurrX`; at the bound's local-max vertex call `AddLocalMaxPoly`; otherwise promote the cursor (`UpdateEdgeIntoAEL` equivalent) to the next bound segment.
+4. **Delete synth-intersect.** Remove `processSynthIntersectsAtLocalMin`, `synthIntersect`, `findSynthMaxPartner`, `boundLeadingHorizFarXs`, `emitLeadingHorizOutPts`, `boundHasInteriorVertex` and the legacy `handleHorizMin`/`handleHorizMax` per-edge path once `DoHorizontal` subsumes them.
+5. **Event ordering.** Confirm/adjust the `EventKind` order to `Top < Bot(LocalMin) < Horiz < Intersection` (§12.6 phasing note).
+6. **Re-green + un-skip.** Drive the full suite green; un-skip `TestUnionOverlappingSquaresVertexInsideOther` (expect area 184) and the three `Intersect/Difference/Xor` axial-overlap tests (the synth-intersect Union-only limitation is gone).
+
 ### 12.7 Pre-pass: identifying local minima
 
 Before the sweep, walk each input ring once:

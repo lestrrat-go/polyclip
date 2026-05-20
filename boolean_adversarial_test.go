@@ -309,10 +309,17 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 // at all, just proper edge-edge crossings that should produce a single
 // merged piece of area 184 (100 + 100 − 16 overlap).
 //
-// Actual behaviour as of 2026-05-20: Union returns one of the inputs
-// unchanged (area 100). Tracked for engine follow-up.
+// Root cause (investigated 2026-05-20): the two crossings (10,6) and
+// (6,10) are each a vertical edge passing through the INTERIOR of a
+// horizontal edge. Horizontals are excluded from the AEL, so
+// maybeScheduleIntersect never sees these crossings, and the §11.7
+// synth-intersect workaround only matches horizontal ENDPOINTS, not
+// interior crossings. The fix is the DoHorizontal rework (horizontals as
+// first-class AEL edges) planned in DESIGN.md §12.6.1; a synth-intersect
+// shortcut was tried and proven insufficient (front/back polarity wall —
+// AddLocalMaxPoly bails when both crossing edges are the same ring side).
 func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
-	t.Skip("engine bug: Union of two overlapping squares with vertex-strictly-inside-other drops a piece (tracked in roadmap)")
+	t.Skip("engine bug: vertical-through-horizontal-interior crossing dropped; fix = DoHorizontal rework, DESIGN.md §12.6.1")
 	a := MultiPolygon{ExPolygon{Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{6, 6}, {16, 6}, {16, 16}, {6, 16}}}}
 	got, err := Union(a, b)

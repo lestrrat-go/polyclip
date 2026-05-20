@@ -307,7 +307,7 @@ func appendMiter(out *Polygon, v, a, c, prevN, nextN Point, d, miterLimit float6
 // extended by |d| along its edge's tangent (away from v), giving a
 // pentagon-style square corner. The result is two output points
 // (a_ext, c_ext) inserted between adjacent offset edges.
-func appendSquareJoin(out *Polygon, v, a, c, prevN, nextN Point, d float64) {
+func appendSquareJoin(out *Polygon, _, a, c, prevN, nextN Point, d float64) {
 	// Tangent of prev edge in its direction (perpendicular to right-hand
 	// normal): (-pny, pnx). At endpoint a, extending in this tangent moves
 	// AWAY from v.
@@ -346,10 +346,7 @@ func appendRoundJoin(out *Polygon, v, a, c Point, d, arcTol float64) {
 		return
 	}
 	maxStep := 2 * math.Acos(cosVal)
-	segs := int(math.Ceil(math.Abs(sweep) / maxStep))
-	if segs < 2 {
-		segs = 2
-	}
+	segs := max(int(math.Ceil(math.Abs(sweep)/maxStep)), 2)
 	*out = append(*out, a)
 	step := sweep / float64(segs)
 	for i := 1; i < segs; i++ {

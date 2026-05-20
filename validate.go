@@ -241,9 +241,9 @@ func ringsOverlap(a, b Polygon) bool {
 		return true
 	}
 	// Edge-edge proper crossing.
-	for i := range len(a) {
+	for i := range a {
 		a1, a2 := a[i], a[(i+1)%len(a)]
-		for j := range len(b) {
+		for j := range b {
 			b1, b2 := b[j], b[(j+1)%len(b)]
 			if segmentsCrossStrict(a1, a2, b1, b2) {
 				return true

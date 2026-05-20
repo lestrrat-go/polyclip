@@ -78,7 +78,11 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	var result *OutPt
 	// Guard: a non-hot edge whose own count is now deeper than the outer
 	// boundary (abs > 1) cannot start or close a ring here (engine.cpp:1932).
-	if !((!e1Hot && w1 != 0 && w1 != 1) || (!e2Hot && w2 != 0 && w2 != 1)) {
+	// An edge is eligible when it is hot or its count is in {0,1}; dispatch only
+	// when BOTH edges are eligible.
+	e1Eligible := e1Hot || w1 == 0 || w1 == 1
+	e2Eligible := e2Hot || w2 == 0 || w2 == 1
+	if e1Eligible && e2Eligible {
 		result = dispatchIntersect(ael, op, e1, e2, pt, e1Hot, e2Hot, w1, w2, samePolyType)
 	}
 

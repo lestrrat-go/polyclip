@@ -88,8 +88,8 @@ func TestValidateOverlappingHoles(t *testing.T) {
 	m := MultiPolygon{ExPolygon{
 		Outer: Polygon{{0, 0}, {20, 0}, {20, 20}, {0, 20}},
 		Holes: []Polygon{
-			{{4, 4}, {4, 12}, {12, 12}, {12, 4}},   // CW
-			{{8, 8}, {8, 16}, {16, 16}, {16, 8}},   // CW, overlaps hole 0
+			{{4, 4}, {4, 12}, {12, 12}, {12, 4}}, // CW
+			{{8, 8}, {8, 16}, {16, 16}, {16, 8}}, // CW, overlaps hole 0
 		},
 	}}
 	issues := m.Validate()

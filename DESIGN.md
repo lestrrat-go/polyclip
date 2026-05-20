@@ -67,10 +67,6 @@ github.com/lestrrat-go/polyclip
 │   ├── intersect.go           segment-segment intersection
 │   ├── classify.go            edge winding-count classification
 │   └── build.go               output-polygon reassembly
-├── offset/                    internal offset engine (subpackage)
-│   ├── doc.go
-│   ├── edge.go                per-edge offset rectangles + join geometry
-│   └── arc.go                 arc tessellation for round joins
 ├── fixed/                     internal fixed-point arithmetic helpers
 │   ├── doc.go
 │   ├── coord.go
@@ -83,7 +79,7 @@ github.com/lestrrat-go/polyclip
     └── golden/                expected outputs for regression
 ```
 
-Subpackages under `clip/`, `offset/`, `fixed/` are **internal in spirit** but kept exported within the module so tests can address them directly. They are not part of the stable public API; the only stable surface is what's exported by the top-level `polyclip` package.
+Subpackages under `clip/`, `fixed/` are **internal in spirit** but kept exported within the module so tests can address them directly. They are not part of the stable public API; the only stable surface is what's exported by the top-level `polyclip` package.
 
 ### 2.1 Why subpackages
 
@@ -276,30 +272,35 @@ Implementation specifics, suggested ordering:
 
 ### 4.3 Offset engine
 
-Offset is **not** the same algorithm as boolean. It works like this:
+Offset walks each input ring once and emits an offset ring directly, vertex by vertex. With `n_i` = right-hand unit normal of input edge `ring[i]→ring[i+1]` and `d` the signed offset distance, each input vertex `v` expands into one or more output vertices based on the local turn direction:
 
-1. For each edge of the input polygon, construct a rectangle that the edge sweeps when moved outward by `d`. (For inward offset, the rectangle is on the other side.)
-2. At each vertex, construct a **join geometry** — miter, round, or square — that connects the two adjacent rectangles.
-3. The collection of these rectangles + joins is a (possibly self-overlapping) polygon. Take its **union with itself** via the boolean engine. The result is the offset polygon.
+1. Let `a = v + d·prevN`, `c = v + d·nextN` — the offset endpoints of the prev- and next-edges at `v`.
+2. Let `cross = prevN × nextN`. The sign of `cross·d` classifies the corner:
+   - **Wedge** (`cross·d > 0`): convex offset corner — the two offset edges leave a gap on the offset side. Emit a join (miter apex, square chamfer, or arc-tessellated round), per `OffsetOptions.Join`.
+   - **Overlap** (`cross·d ≤ 0`): the two offset edges cross on the offset side. Emit just the miter apex (a single intersection point); for antiparallel adjacent normals, fall back to emitting `a` and `c`.
 
-Equivalent phrasing: the offset region is the Minkowski sum of the polygon with a disk (or square, depending on join type). Doing it via "fat-edge polygons → union" is the standard implementation, and it's how Clipper2's offset module works.
+Holes are offset by `-d` (a CW ring's right-hand normal points into the hole, so the sign flips to keep "outward of the printable region" consistent).
 
-Why this approach over a direct edge-walk + miter math like makislicer's current naive offset?
+For `d < 0` the apex formula can produce a small "inside-out" ring when `|d|` overshoots the inradius. Detection: every output vertex must satisfy the inward half-plane constraint `(V − ring[i])·n_i ≤ d` for every input edge `i`, with tolerance `max(ArcTol, |d|·1e-6)`. A ring failing any constraint is discarded; if all rings of a piece collapse, the piece is dropped, and if the result is empty `Offset` returns `ErrOffsetEmpty`.
 
-- **Handles topology change for free.** When inward offset makes a feature collapse, the corresponding edge-rectangles produce zero or negative-area regions that the union eliminates.
-- **Disjoint output for free.** A U-shape offset inward enough to split into two pieces — the union correctly produces two output polygons.
-- **Correctness at sharp reflex corners.** No special cases.
+Why direct ring construction over the per-fragment "fat-edge polygons → union" approach (the Clipper2 algorithm sketched in earlier revisions of this doc, and what Clipper2 actually does)?
 
-The cost is that offset depends on the boolean engine being implemented first. Implementation steps for `offset/`:
+- **No diff-src coincident-edge pile-up.** The fat-edge approach generates `O(n)` quads that share edges pairwise; running them through repeated `Union` exposes the engine to dense diff-src coincident corners that it does not fuse reliably. Single-ring construction sidesteps the issue.
+- **No `O(n²)` pairwise union reduction.** Direct construction is `O(n)`.
+- **Exact convex output.** Convex inputs produce the exact closed-form result (no engine round-trip → no fixed-point snapping noise).
 
-- `offset/edge.go` — given an input ring, produce the list of per-edge offset rectangles and per-vertex join polygons (without yet unioning).
-- `offset/arc.go` — for round joins, tessellate the arc into segments respecting `ArcTol`.
-- `offset.go` (top-level) — orchestrate: build the per-edge fragments for outer + holes, feed into `Union`, return.
+The trade-off: for non-convex inputs where inward offset causes partial collapse (U-shape splits into two pieces, deep notch closes), the current implementation doesn't handle topology change — it either accepts the offset ring whole or rejects it whole. Topology change is a follow-up; when implemented it will re-introduce a per-ring boolean self-union to resolve self-intersections in the constructed offset ring.
+
+Implementation lives in `offset.go`:
+- `Offset` — public entry; per-piece orchestration, hole sign handling.
+- `offsetRing` — walks one ring; produces normals, emits per-vertex points, runs the overshoot validity check for `d < 0`.
+- `emitVertex` — wedge-vs-overlap classification and dispatch.
+- `appendMiter` / `appendMiterApex` / `appendSquareJoin` / `appendRoundJoin` — per-join geometry.
 
 ### 4.4 Algorithmic complexity
 
 - Boolean ops: `O((n + k) log n)` where `n` = total edges and `k` = total intersection points. For typical slicer layers `k = O(n)`, so `O(n log n)`.
-- Offset: dominated by the union of `O(n)` rectangles, so also `O(n log n)`.
+- Offset: `O(n)` per ring for construction, plus `O(n·m)` for the inward-overshoot check (m output vertices × n input edges). For typical slicer layers `O(n²)` in the worst case but linear in practice (the check exits early on the first failing vertex).
 
 ---
 
@@ -370,7 +371,7 @@ Standard `_test.go` files alongside each source file. Required coverage:
 - `clip/intersect_test.go` — orientation predicates against hand-computed integer inputs; segment-segment intersection cases (cross, touch, collinear-overlapping, collinear-disjoint, parallel).
 - `clip/sweep_test.go` — event queue ordering, AEL insertion/removal, intersection detection. Use small hand-built scenes (2–6 segments).
 - `clip/build_test.go` — ring reassembly from a fixed list of contributions.
-- `offset/edge_test.go` — per-edge fragment geometry for a single edge.
+- `offset_test.go` — per-join geometry (miter / square / round), inward/outward, collapse detection, round-trip area tolerance.
 
 ### 6.2 Integration tests (golden)
 
@@ -434,7 +435,7 @@ The phases are designed so each one produces a usable, testable artifact even if
 - [ ] Invariant tests from §6.2 pass.
 
 ### Phase 4 — Offset (≤ 800 LoC)
-- [ ] `offset/edge.go`, `offset/arc.go`, `offset.go`.
+- [ ] `offset.go` — direct per-ring construction, no boolean self-union (topology-change cases deferred).
 - [ ] Miter and round joins. Square is trivial; add at the end.
 - [ ] Round-trip property tests.
 
@@ -472,7 +473,7 @@ Internal parallelism is **not** in scope for v0.1. The slicer parallelizes at th
 - Follow `gofmt`, `go vet`, `staticcheck`. CI enforces.
 - Errors wrap with `fmt.Errorf("polyclip: ...: %w", ...)`.
 - Public functions have doc comments starting with the function name, per Go convention.
-- Internal subpackages (`clip/`, `offset/`, `fixed/`) may use shorter doc comments and may export aggressively for testing — they're not part of the stable API.
+- Internal subpackages (`clip/`, `fixed/`) may use shorter doc comments and may export aggressively for testing — they're not part of the stable API.
 - No package-global mutable state. No `init()` that does work.
 
 ### 8.5 Things that will look tempting but are wrong

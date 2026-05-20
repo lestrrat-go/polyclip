@@ -1095,3 +1095,49 @@ if mErr == nil {
 
 Diagnostic signature: any closed-ring input with a mid-bound horizontal (e.g. an L-shape staircase polygon `(0,0)→(2,0)→(2,2)→(4,2)→(4,4)→(0,4)`) errors with `ErrUnsupportedHorizontal` even though the bound model could handle it.
 
+
+### 12.11 The general-crossing correctness gap and the DoIntersections rework
+
+**Status (2026-05-20): implemented for general position; degenerate positions WIP on branch `feat-dointersections` (not merged).** The per-scanbeam recompute is in `clip/sweep.go` (`doIntersections`/`buildIntersectList`/`processIntersectList`); incremental scheduling is gated off under the bound model (kept only for the legacy fallback). Measured vs the Monte-Carlo oracle, random simple quad pairs *with* boundary crossings, coords in [-1000,1000]:
+
+| input class | before | after |
+|-------------|--------|-------|
+| convex-convex (with crossings) | ~49% wrong | **0.0%** |
+| non-convex involved | ~57% wrong | **8.3%** |
+
+So general-position crossings are fixed outright for convex inputs and dramatically improved for non-convex. The residual non-convex failures and the regression of `TestUnionAllManyOverlapping` (overlapping diamonds) are all **degenerate-position** cases — multiple vertices sharing a Y (the diamonds share y=0,±10; the minimal repro below has two clip vertices at y=1) so crossings land exactly on vertex scanlines and coincide with Top/LocalMin events. `buildIntersectList` uses the half-open beam `(botY, topY]` (Clipper2 clamps boundary crossings inward rather than dropping them), which fixed the simplest boundary cases but not the full vertex-coincident interaction with the maxima/minima/through-vertex handlers. That integration — process beam crossings, then re-derive which Top/LocalMin events still hold at the swapped positions — is the remaining work before this can merge.
+
+**Symptom.** The boolean engine is reliable only for inputs whose boundaries do not properly cross (disjoint, nested, touching) or cross at axis-aligned / special-position points. For general-position sloped crossings it is broadly wrong.
+
+**Evidence (differential test vs a Monte-Carlo area oracle, random *simple* CCW quad pairs, coords in [-1000,1000] so coincidences are negligible):**
+
+| proper crossings between A and B | wrong-result rate |
+|----------------------------------|-------------------|
+| 0 (disjoint / nested)            | 0.3%              |
+| 2                                | ~56%              |
+| 4                                | ~68%              |
+
+Convexity is nearly irrelevant (convex-convex ~49%, non-convex ~57%); the driver is the crossing count. The Monte-Carlo oracle is internally consistent (|A∪B|+|A∩B| ≈ |A|+|B|, |A⊕B| ≈ |A∪B|−|A∩B|) while the engine's areas are grossly off, so the fault is the engine, not the harness or fixed-point precision.
+
+**Minimal reproducer** (two convex quads, 2 crossings, no shared vertices):
+
+```
+a = (1,1),(-1,2),(0,-2),(2,0)     area 5.5
+b = (-2,1),(-5,0),(0,-3),(0,1)    area 11
+engine: Union area 11 (drops a entirely), Intersect 0
+truth:  Union ≈ 15.4,                      Intersect ≈ 1.13
+```
+
+A clip-level trace of this case shows **zero `EventIntersection`s processed** — the two crossings are never scheduled.
+
+**Root cause.** The sweep schedules crossings *incrementally*: `maybeScheduleIntersect` runs only when two edges become AEL-adjacent through a specific event (bot/local-min spawn, cursor advance, a prior intersection's post-swap neighbour check, horizontal promotion). When the relevant adjacency forms through an AEL rearrangement that does not trigger a fresh pairwise check, the crossing is silently lost. The §12.6.1 horizontal fix and the post-horizontal `rescanAdjacentIntersections` patch (commit "reschedule crossings after horizontal pass") each closed one narrow instance, but the disease is general: incremental scheduling cannot reliably enumerate the crossings in a scanbeam.
+
+**Fix: per-scanbeam intersection recompute (Clipper2's `DoIntersections`).** Stop scheduling crossings incrementally. Instead, for each scanbeam `(botY, topY)` — `botY` = the scanline just processed, `topY` = the next event scanline — recompute *all* crossings from the settled AEL and process them bottom-up:
+
+1. Every AEL edge present at `botY` spans the whole beam (its `Top.Y ≥ topY`, because every vertex Y is an event and `topY` is the next one). So enumerate edge pairs and keep those whose `Intersect` is a `ProperCross` with `botY < pt.Y < topY`. (Correctness-first: O(n²) per beam, matching the existing O(n³) preprocess; a later optimisation can use Clipper2's merge-sort inversion counter, `BuildIntersectList`.)
+2. Sort the crossing nodes by `(pt.Y, pt.X)`.
+3. Process bottom-up. The lowest crossing's two edges are AEL-adjacent; call `IntersectEdges` (which swaps, re-classifies, and emits). If rounding leaves a node's edges non-adjacent, apply Clipper2's `ProcessIntersectList` edit: advance to the next node whose edges *are* adjacent and process it first (`engine.cpp` `ProcessIntersectList`/`EdgesAdjacentInAEL`).
+
+Integration: in `run()`, call `doIntersections(prevY, y)` at the top of each scanline iteration (after the first), with the AEL still in `prevY` order, before `UpdateForScanline(y)` and the Top/LocalMin handlers. This subsumes both the incremental scheduler and the horizontal rescan, which are removed. `EventIntersection` is no longer enqueued.
+
+**Out of scope for this increment / remaining caveats.** Degenerate positions (shared vertices, vertex-on-edge T-junctions, collinear overlaps that survive preprocess) are a separate hardening task; the differential harness should be re-run with a *generic-position* filter to confirm the crossing-count failure rates collapse, then separately with degeneracies allowed to size the remaining work.

@@ -1,7 +1,7 @@
 package clip
 
 import (
-	"unsafe"
+	"sort"
 
 	"github.com/lestrrat-go/polyclip/fixed"
 )
@@ -95,16 +95,6 @@ type sweep struct {
 	trace  []TraceEvent
 	err    error
 
-	// pendingCross counts how many unconsumed EventIntersections are queued
-	// for each canonical (pointer-ordered) segment pair. It is incremented on
-	// schedule and decremented when the event is handled. The post-horizontal
-	// re-scan in [run] consults it to avoid enqueuing a SECOND copy of a
-	// crossing the incremental path already has pending: a duplicate would
-	// fire while the edges are adjacent and swap them back. The incremental
-	// scheduler itself does not consult it (the engine relies on its repeated
-	// adjacency-driven scheduling).
-	pendingCross map[[2]*Segment]int
-
 	// pendingHoriz holds bound-model ActiveEdges whose cursor currently sits
 	// on a horizontal segment, awaiting the horizontal pass ([doHorizontal]).
 	// They are flushed at the end of each scanline Y, AFTER every Top/LocalMin
@@ -122,13 +112,12 @@ type sweep struct {
 
 func newSweep(segs []Segment, op Operation) *sweep {
 	s := &sweep{
-		segs:         segs,
-		op:           op,
-		queue:        NewEventQueue(),
-		ael:          NewAEL(),
-		bySeg:        make(map[*Segment]*ActiveEdge, len(segs)),
-		minima:       make(map[fixed.Point]*LocalMin),
-		pendingCross: make(map[[2]*Segment]int),
+		segs:   segs,
+		op:     op,
+		queue:  NewEventQueue(),
+		ael:    NewAEL(),
+		bySeg:  make(map[*Segment]*ActiveEdge, len(segs)),
+		minima: make(map[fixed.Point]*LocalMin),
 	}
 	// Try the bound-model pre-pass first (DESIGN.md §12.7 / §12.10). On
 	// success it claims every segment of every bound — handleLocalMin
@@ -202,8 +191,20 @@ func claimAllSegments(claimed map[*Segment]struct{}, b *Bound) {
 }
 
 func (s *sweep) run() {
+	started := false
+	var prevY fixed.Coord
 	for s.queue.Len() > 0 {
 		y := s.queue.Peek().P.Y
+		// Resolve every edge crossing inside the scanbeam (prevY, y) from the
+		// settled AEL BEFORE handling this scanline's events (DESIGN.md §12.11).
+		// The AEL is still ordered for prevY here; doIntersections swaps the
+		// crossed edges so the order is correct for y's Top/LocalMin handlers.
+		// This is Clipper2's DoIntersections model and replaces incremental
+		// per-adjacency scheduling, which silently missed crossings whenever an
+		// adjacency formed without a fresh pairwise check.
+		if s.boundModel && started {
+			s.doIntersections(prevY, y)
+		}
 		// Collect every event at this scanline Y.
 		var evs []Event
 		for s.queue.Len() > 0 && s.queue.Peek().P.Y == y {
@@ -227,19 +228,93 @@ func (s *sweep) run() {
 		// Top/LocalMin events above. doHorizontal may promote a cursor onto a
 		// further horizontal at the same Y; it appends to pendingHoriz, so the
 		// loop drains until none remain. Per DESIGN.md §12.6 / §12.10.
-		hadHoriz := len(s.pendingHoriz) > 0
 		s.flushPendingHoriz(y)
-		// The horizontal pass may have advanced cursors and rearranged the
-		// AEL, creating new adjacencies whose crossings the per-event checks
-		// missed (a transient edge stood between them at check time). Re-scan
-		// the settled AEL so those crossings are scheduled before the sweep
-		// moves to the next scanline. Only needed when horizontals actually
-		// ran — without them the per-event scheduling already sees every
-		// adjacency as it forms.
-		if s.boundModel && hadHoriz {
-			s.rescanAdjacentIntersections(y)
+		prevY = y
+		started = true
+	}
+}
+
+// doIntersections resolves every edge crossing strictly inside the scanbeam
+// (botY, topY) from the current (botY-ordered) AEL, processing them bottom-up.
+// Port of Clipper2's DoIntersections / BuildIntersectList / ProcessIntersectList
+// (engine.cpp), per DESIGN.md §12.11. Every AEL edge spans the whole beam
+// (each vertex Y is an event and topY is the next one), so a pair crosses in
+// this beam iff its [Intersect] is a ProperCross with botY < pt.Y < topY.
+func (s *sweep) doIntersections(botY, topY fixed.Coord) {
+	nodes := s.buildIntersectList(botY, topY)
+	if len(nodes) == 0 {
+		return
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].pt.Y != nodes[j].pt.Y {
+			return nodes[i].pt.Y < nodes[j].pt.Y
+		}
+		return nodes[i].pt.X < nodes[j].pt.X
+	})
+	s.processIntersectList(nodes)
+}
+
+// intersectNode is one crossing pending in [sweep.doIntersections].
+type intersectNode struct {
+	a, b *ActiveEdge
+	pt   fixed.Point
+}
+
+// buildIntersectList enumerates all edge-pair crossings strictly inside
+// (botY, topY). O(n²) per beam (correctness-first; a merge-sort inversion
+// counter à la Clipper2 BuildIntersectList is the later optimisation).
+func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
+	var nodes []intersectNode
+	n := s.ael.Len()
+	for i := range n {
+		ei := s.ael.At(i)
+		for j := i + 1; j < n; j++ {
+			ej := s.ael.At(j)
+			res := Intersect(*ei.Seg, *ej.Seg)
+			if res.Kind != ProperCross {
+				continue
+			}
+			// Beam is (botY, topY]: a crossing at botY was resolved in the
+			// previous beam (as its topY); one at topY must be applied here,
+			// before topY's Top/LocalMin events (Clipper2 clamps boundary
+			// crossings into the beam rather than dropping them).
+			if res.P.Y <= botY || res.P.Y > topY {
+				continue
+			}
+			nodes = append(nodes, intersectNode{a: ei, b: ej, pt: res.P})
 		}
 	}
+	return nodes
+}
+
+// processIntersectList applies the (Y,X-sorted) crossings bottom-up. The
+// lowest crossing's edges are AEL-adjacent; if rounding leaves a node's edges
+// non-adjacent, advance to the next node whose edges ARE adjacent and process
+// it first (Clipper2 ProcessIntersectList's edit). [IntersectEdges] performs
+// the swap, reclassification, and output emission.
+func (s *sweep) processIntersectList(nodes []intersectNode) {
+	for i := range nodes {
+		if !s.edgesAdjacent(nodes[i]) {
+			k := i + 1
+			for k < len(nodes) && !s.edgesAdjacent(nodes[k]) {
+				k++
+			}
+			if k == len(nodes) {
+				// No adjacent node found (degenerate); skip to avoid a bad swap.
+				continue
+			}
+			nodes[i], nodes[k] = nodes[k], nodes[i]
+		}
+		IntersectEdges(s.ael, s.op, nodes[i].a, nodes[i].b, nodes[i].pt)
+	}
+}
+
+// edgesAdjacent reports whether the node's two edges are currently neighbours
+// in the AEL (a precondition for [IntersectEdges]).
+func (s *sweep) edgesAdjacent(nd intersectNode) bool {
+	ia := s.ael.IndexOf(nd.a)
+	ib := s.ael.IndexOf(nd.b)
+	return ia >= 0 && ib >= 0 && absInt(ia-ib) == 1
 }
 
 // handleScanlineBound processes all events at one scanline in Clipper2's beam
@@ -1167,10 +1242,10 @@ func (s *sweep) handleHorizMax(e Event) {
 	delete(s.bySeg, info.RightAdj)
 }
 
+// handleIntersection processes a queued EventIntersection. Only the legacy
+// per-edge fallback path enqueues these now; the bound model resolves crossings
+// per scanbeam via [sweep.doIntersections] (DESIGN.md §12.11).
 func (s *sweep) handleIntersection(e Event) {
-	if k := crossKey(e.SegA, e.SegB); s.pendingCross[k] > 0 {
-		s.pendingCross[k]--
-	}
 	aeA, okA := s.bySeg[e.SegA]
 	aeB, okB := s.bySeg[e.SegB]
 	if !okA || !okB {
@@ -1191,7 +1266,14 @@ func (s *sweep) handleIntersection(e Event) {
 	}
 }
 
+// maybeScheduleIntersect enqueues an EventIntersection for a crossing of two
+// adjacent edges above currY. It is the legacy fallback's incremental
+// scheduler; the bound model uses per-scanbeam [sweep.doIntersections] instead
+// and this is a no-op there (DESIGN.md §12.11).
 func (s *sweep) maybeScheduleIntersect(left, right *ActiveEdge, currY fixed.Coord) {
+	if s.boundModel {
+		return
+	}
 	res := Intersect(*left.Seg, *right.Seg)
 	if res.Kind != ProperCross {
 		// A Touch at an endpoint is the local-min/max event for that vertex
@@ -1204,39 +1286,10 @@ func (s *sweep) maybeScheduleIntersect(left, right *ActiveEdge, currY fixed.Coor
 	if res.P.Y <= currY {
 		return
 	}
-	s.pendingCross[crossKey(left.Seg, right.Seg)]++
 	s.queue.Push(Event{
 		Kind: EventIntersection,
 		P:    res.P,
 		SegA: left.Seg,
 		SegB: right.Seg,
 	})
-}
-
-// crossKey canonicalises a segment pair (order-independent) for the
-// [sweep.pendingCross] map.
-func crossKey(a, b *Segment) [2]*Segment {
-	if uintptr(unsafe.Pointer(a)) > uintptr(unsafe.Pointer(b)) {
-		a, b = b, a
-	}
-	return [2]*Segment{a, b}
-}
-
-// rescanAdjacentIntersections re-checks every adjacent AEL pair for a proper
-// crossing above scanline y and schedules any not already pending. The
-// incremental per-event scheduling can miss a crossing when a transient edge
-// (e.g. a coincident horizontal being walked) sits between two bounds at the
-// moment their neighbours are checked, then advances away to leave them
-// adjacent with no fresh check. Running this after the horizontal pass settles
-// the AEL closes that gap. The [sweep.pendingCross] guard ensures a crossing
-// the incremental path already queued is not enqueued twice (a duplicate would
-// fire while the pair is adjacent and swap it back).
-func (s *sweep) rescanAdjacentIntersections(y fixed.Coord) {
-	for i := 0; i+1 < s.ael.Len(); i++ {
-		l, r := s.ael.At(i), s.ael.At(i+1)
-		if s.pendingCross[crossKey(l.Seg, r.Seg)] > 0 {
-			continue
-		}
-		s.maybeScheduleIntersect(l, r, y)
-	}
 }

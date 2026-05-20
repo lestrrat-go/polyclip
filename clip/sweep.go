@@ -229,6 +229,14 @@ func (s *sweep) run() {
 		// further horizontal at the same Y; it appends to pendingHoriz, so the
 		// loop drains until none remain. Per DESIGN.md §12.6 / §12.10.
 		s.flushPendingHoriz(y)
+		// A bound that reached a shared vertex via a horizontal (its far
+		// endpoint coincides with another source's local-min/through vertex)
+		// is only settled into the AEL after the horizontal flush. doHorizontal
+		// deliberately does not cross edges sitting exactly at its far endpoint,
+		// so reconcile again now that every cursor at y has settled.
+		if s.boundModel {
+			s.reconcileSharedVertexCrossings(y)
+		}
 		prevY = y
 		started = true
 	}

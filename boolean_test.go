@@ -247,6 +247,32 @@ func TestUnionSharedVertexCrossing(t *testing.T) {
 	}
 }
 
+func TestUnionSharedVertexViaHorizontal(t *testing.T) {
+	// B's bottom horizontal (6,3)-(8,3) ends exactly at A's local-minimum
+	// vertex (8,3). doHorizontal does not cross edges at its far endpoint, and
+	// the far endpoint is only settled into the AEL after the horizontal flush,
+	// so the crossing between B's promoted bound and A's two local-min bounds
+	// was never dispatched — the ring threaded through (8,3) twice (a
+	// self-touch) and the union over-counted to 9.0. The post-flush
+	// reconcileSharedVertexCrossings pass dispatches it; the true union area is
+	// ~7.52 (DESIGN.md §12.11, track C).
+	a := Polygon{{8, 3}, {9, 5}, {1, 4}, {4, 4}}
+	b := Polygon{{6, 3}, {8, 3}, {10, 5}, {5, 4}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotArea := got.Area(); gotArea < 7.2 || gotArea > 7.8 {
+		t.Errorf("Union area %v outside expected band [7.2,7.8] (truth ~7.52; pre-fix bug was 9.0)", gotArea)
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

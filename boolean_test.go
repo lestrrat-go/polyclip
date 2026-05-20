@@ -415,12 +415,13 @@ func TestUnionAllManyDisjoint(t *testing.T) {
 }
 
 func TestUnionAllManyOverlapping(t *testing.T) {
-	t.Skip("WIP DoIntersections rework (DESIGN.md §12.11): the incremental " +
-		"wind-count rewrite (Classify + IntersectEdges aligned with Clipper2's " +
-		"wind_cnt/wind_cnt2 model) improved cumulative Union of these diamonds " +
-		"(475→489, truth 550) but did not close the gap. The remaining fault is " +
-		"the separate maxima/through-vertex coincidence handling in AddLocalMaxPoly " +
-		"/ advanceBoundCursor (shared y=10 peaks, y=7.5 valleys), not the wind drift.")
+	t.Skip("WIP general non-convex crossing-splice bug (DESIGN.md §12.11, " +
+		"re-diagnosed 2026-05-20). NOT a maxima/through-vertex coincidence: the " +
+		"failure reproduces at full general position (distinct scanlines, no " +
+		"coincidences) and on a minimal non-convex 'M' ∪ quad. An edge that crosses " +
+		"the other polygon twice is on the union boundary in two disjoint intervals; " +
+		"the engine builds the two ring fragments but splices them crosswise " +
+		"(wrong front/back orientation of the crossing-spawned AddLocalMinPoly ring).")
 	// Five horizontally-shifted diamonds. Diamonds have no horizontal
 	// edges so the bound model handles them cleanly even when shifted
 	// to share x-extents. UnionAll's tournament reduction must produce

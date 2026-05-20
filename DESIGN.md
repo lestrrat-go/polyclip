@@ -440,7 +440,7 @@ The phases are designed so each one produces a usable, testable artifact even if
 
 ### Phase 5 — Quality & speed
 - [x] `UnionAll` tournament reduction for `O(n log n)` Union calls instead of repeated pairwise.
-- [ ] `Clean()` implementation.
+- [x] `Clean()` implementation — duplicate / collinear vertex removal, small-ring/hole drop.
 - [ ] `Validate()` implementation.
 - [ ] Benchmarks; profile and optimise hot paths in the sweep.
 - [ ] Documentation pass: every public symbol has a Go doc comment with at least one example.

@@ -179,6 +179,89 @@ func TestMultiPolygonContains(t *testing.T) {
 	}
 }
 
+func TestCleanRemovesConsecutiveDuplicates(t *testing.T) {
+	in := MultiPolygon{ExPolygon{Outer: Polygon{
+		{0, 0}, {0, 0}, // exact duplicate
+		{10, 0},
+		{10, 0.0001}, // within tol
+		{10, 10},
+		{0, 10},
+	}}}
+	got := in.Clean(0.001, 0)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	if n := len(got[0].Outer); n != 4 {
+		t.Errorf("vertex count=%d want 4: %+v", n, got[0].Outer)
+	}
+}
+
+func TestCleanRemovesCollinear(t *testing.T) {
+	// Square with three extra collinear vertices on the bottom edge.
+	in := MultiPolygon{ExPolygon{Outer: Polygon{
+		{0, 0}, {2, 0}, {5, 0}, {8, 0}, {10, 0},
+		{10, 10}, {0, 10},
+	}}}
+	got := in.Clean(1e-9, 0)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	if n := len(got[0].Outer); n != 4 {
+		t.Errorf("vertex count=%d want 4 (square): %+v", n, got[0].Outer)
+	}
+}
+
+func TestCleanWrapAroundDuplicate(t *testing.T) {
+	// Closing duplicate (first vertex repeated at end) — common when callers
+	// store rings as closed paths.
+	in := MultiPolygon{ExPolygon{Outer: Polygon{
+		{0, 0}, {10, 0}, {10, 10}, {0, 10}, {0, 0},
+	}}}
+	got := in.Clean(0, 0)
+	if n := len(got[0].Outer); n != 4 {
+		t.Errorf("vertex count=%d want 4 (closing duplicate dropped)", n)
+	}
+}
+
+func TestCleanDropsTinyRing(t *testing.T) {
+	in := MultiPolygon{
+		ExPolygon{Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}},                     // area 100
+		ExPolygon{Outer: Polygon{{100, 100}, {100.1, 100}, {100.1, 100.1}, {100, 100.1}}}, // area 0.01
+	}
+	got := in.Clean(0, 1.0)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1 (tiny piece dropped)", len(got))
+	}
+}
+
+func TestCleanDropsTinyHole(t *testing.T) {
+	in := MultiPolygon{ExPolygon{
+		Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, // 100
+		Holes: []Polygon{
+			{{4, 4}, {4, 6}, {6, 6}, {6, 4}},             // CW hole, area 4
+			{{2, 2}, {2, 2.01}, {2.01, 2.01}, {2.01, 2}}, // tiny CW hole, ~0.0001
+		},
+	}}
+	got := in.Clean(0, 1.0)
+	if len(got) != 1 {
+		t.Fatalf("piece dropped unexpectedly")
+	}
+	if len(got[0].Holes) != 1 {
+		t.Errorf("holes=%d want 1 (tiny hole dropped)", len(got[0].Holes))
+	}
+}
+
+func TestCleanCollapseDegenerate(t *testing.T) {
+	// All vertices collinear → ring collapses to nothing.
+	in := MultiPolygon{ExPolygon{Outer: Polygon{
+		{0, 0}, {5, 0}, {10, 0}, {5, 0},
+	}}}
+	got := in.Clean(1e-9, 0)
+	if len(got) != 0 {
+		t.Errorf("degenerate ring not dropped: %+v", got)
+	}
+}
+
 // Sanity: signed-area sign should be consistent with cross-product winding.
 func TestSignedAreaSign(t *testing.T) {
 	// Generate a few random simple polygons (rotated squares) and check.

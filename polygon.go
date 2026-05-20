@@ -211,6 +211,117 @@ func pointOnSegmentEpsilon(a, b Point) float64 {
 	return eps * scale * scale
 }
 
+// Clean returns a copy of m with cosmetic artifacts removed:
+//
+//   - Consecutive vertices closer than vertexTol are deduplicated. The
+//     check wraps around: a final vertex that snaps onto the first is
+//     dropped too.
+//   - Interior vertices whose perpendicular distance from the line
+//     joining their immediate neighbours is at most vertexTol are
+//     removed. The pass repeats until stable, so chains of collinear
+//     vertices collapse to a single edge.
+//   - Rings whose absolute signed area is strictly less than minArea
+//     are dropped. If an ExPolygon's outer ring drops, the entire
+//     piece is omitted; a dropped hole leaves the outer intact.
+//
+// vertexTol and minArea must be non-negative; pass zero to disable
+// either check (with vertexTol=0 only exact duplicates are merged).
+// Clean is purely geometric — it does not run the boolean engine and
+// cannot resolve self-intersection. For that, run [Union] of m with
+// itself first.
+func (m MultiPolygon) Clean(vertexTol, minArea float64) MultiPolygon {
+	out := make(MultiPolygon, 0, len(m))
+	for _, ex := range m {
+		outer := cleanRing(ex.Outer, vertexTol)
+		if outer == nil || math.Abs(outer.SignedArea()) < minArea {
+			continue
+		}
+		cleaned := ExPolygon{Outer: outer}
+		for _, h := range ex.Holes {
+			holeC := cleanRing(h, vertexTol)
+			if holeC == nil || math.Abs(holeC.SignedArea()) < minArea {
+				continue
+			}
+			cleaned.Holes = append(cleaned.Holes, holeC)
+		}
+		out = append(out, cleaned)
+	}
+	return out
+}
+
+// cleanRing applies the consecutive-duplicate and collinear-vertex
+// passes from [MultiPolygon.Clean] to a single ring, returning nil if
+// fewer than 3 vertices remain.
+func cleanRing(ring Polygon, vertexTol float64) Polygon {
+	if len(ring) < 3 {
+		return nil
+	}
+	tol2 := vertexTol * vertexTol
+	deduped := make(Polygon, 0, len(ring))
+	for _, v := range ring {
+		if n := len(deduped); n > 0 {
+			last := deduped[n-1]
+			if dx, dy := v.X-last.X, v.Y-last.Y; dx*dx+dy*dy <= tol2 {
+				continue
+			}
+		}
+		deduped = append(deduped, v)
+	}
+	// Wrap-around dedup: collapse trailing copies of the first vertex.
+	for len(deduped) >= 2 {
+		first := deduped[0]
+		last := deduped[len(deduped)-1]
+		dx, dy := first.X-last.X, first.Y-last.Y
+		if dx*dx+dy*dy > tol2 {
+			break
+		}
+		deduped = deduped[:len(deduped)-1]
+	}
+	if len(deduped) < 3 {
+		return nil
+	}
+	// Iterate collinear removal until stable. One pass isn't enough: when
+	// a vertex is dropped its former neighbours may themselves become
+	// collinear with their new neighbours.
+	for {
+		n := len(deduped)
+		kept := make(Polygon, 0, n)
+		removed := false
+		for i := range n {
+			prev := deduped[(i-1+n)%n]
+			next := deduped[(i+1)%n]
+			if pointCollinear(prev, deduped[i], next, vertexTol) {
+				removed = true
+				continue
+			}
+			kept = append(kept, deduped[i])
+		}
+		deduped = kept
+		if !removed || len(deduped) < 3 {
+			break
+		}
+	}
+	if len(deduped) < 3 {
+		return nil
+	}
+	return deduped
+}
+
+// pointCollinear reports whether v lies within tol of the line through
+// a and b. When a == b, returns true only if v also coincides with that
+// point (within tol).
+func pointCollinear(a, v, b Point, tol float64) bool {
+	abx := b.X - a.X
+	aby := b.Y - a.Y
+	len2 := abx*abx + aby*aby
+	if len2 == 0 {
+		dx, dy := v.X-a.X, v.Y-a.Y
+		return dx*dx+dy*dy <= tol*tol
+	}
+	cross := abx*(v.Y-a.Y) - aby*(v.X-a.X)
+	return cross*cross <= tol*tol*len2
+}
+
 func pointOnRingBoundary(p Polygon, q Point) bool {
 	n := len(p)
 	for i := range n {

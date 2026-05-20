@@ -767,6 +767,14 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	// a post-swap reclassification can leave an edge non-contributing yet still
 	// hot, and its ring must still close/join (DESIGN.md §12.10.8 Rule 1).
 	if partner := s.maximaPartner(ae, maxPt); partner != nil {
+		// Resolve any edges lying strictly between ae and its maxima partner
+		// (a multi-edge confluence: another shape's bounds pass through maxPt
+		// here). Each is a genuine crossing — IntersectEdges dispatches it
+		// through the §12.5 table and reclassifies the between-edge, so its
+		// hot/contributing status is updated before the pair closes. After the
+		// loop ae and partner are AEL-adjacent. Port of Clipper2 DoMaxima's
+		// between-maxima loop (engine.cpp:2756, DESIGN.md §12.6.1 follow-up).
+		s.resolveBetweenMaxima(ae, partner, maxPt)
 		if ae.IsHotEdge() && partner.IsHotEdge() {
 			AddLocalMaxPoly(s.ael, ae, partner, maxPt)
 		}
@@ -864,21 +872,87 @@ func outrecOther(ae *ActiveEdge) *ActiveEdge {
 	return nil
 }
 
-// maximaPartner returns ae's local-maximum partner: an immediate AEL neighbour
-// whose bound also reaches its last segment at maxPt. Returns nil if neither
-// neighbour qualifies. Mirrors Clipper2's GetMaximaPair (the partner is
-// adjacent once all crossings below the maxima scanline have been resolved).
+// maximaPartner returns ae's local-maximum partner: the nearest AEL edge whose
+// bound, like ae's, reaches its last segment at maxPt. Returns nil if none
+// qualifies. Mirrors Clipper2's GetMaximaPair (engine.cpp:254), whose
+// vertex_top identity test we approximate with maxPt coincidence (valid for
+// non-self-intersecting input, where no two distinct maxima share a point).
+//
+// The partner need NOT be AEL-adjacent: at a multi-edge confluence another
+// ring's bounds may sit between the pair (the interleaved a-L,b-L,a-R,b-R
+// case where a's max and b's max differ). The search walks outward
+// symmetrically so it finds the partner on whichever side it landed,
+// regardless of which maxima edge triggered the close first.
 func (s *sweep) maximaPartner(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
 	i := s.ael.IndexOf(ae)
 	if i < 0 {
 		return nil
 	}
-	for _, cand := range []*ActiveEdge{s.ael.LeftOf(i), s.ael.RightOf(i)} {
-		if cand != nil && cand.Bound != nil && cand.IsBoundLast() && boundMaxPt(cand) == maxPt {
+	// Scan left first then right, preserving the original immediate-neighbour
+	// preference (left-first) when both sides qualify.
+	if p := s.scanMaximaPartner(ae, i, -1, maxPt); p != nil {
+		return p
+	}
+	return s.scanMaximaPartner(ae, i, +1, maxPt)
+}
+
+// scanMaximaPartner walks the AEL from index i in direction dir (+1 right,
+// -1 left) looking for ae's maxima partner. It accepts a non-adjacent partner
+// only across intermediate edges that all pass through the apex column
+// (X == maxPt.X at this scanline): a genuine confluence squeezes every
+// between-edge onto maxPt.X, whereas an unrelated edge that merely shares
+// maxPt with ae is reached across an off-column edge and is rejected. This is
+// what keeps [resolveBetweenMaxima]'s "all between-edges meet at maxPt"
+// invariant true.
+func (s *sweep) scanMaximaPartner(ae *ActiveEdge, i, dir int, maxPt fixed.Point) *ActiveEdge {
+	n := s.ael.Len()
+	for k := i + dir; k >= 0 && k < n; k += dir {
+		cand := s.ael.At(k)
+		if isMaximaPartner(ae, cand, maxPt) {
 			return cand
+		}
+		// cand is an intermediate edge; only continue past it if it lies on
+		// the apex column. Otherwise ae and any farther candidate are not a
+		// confluence pair.
+		if XAtY(cand.Seg, maxPt.Y) != maxPt.X {
+			return nil
 		}
 	}
 	return nil
+}
+
+// isMaximaPartner reports whether cand is a valid maxima partner of ae: a
+// distinct bound-last edge reaching maxPt.
+func isMaximaPartner(ae, cand *ActiveEdge, maxPt fixed.Point) bool {
+	return cand != nil && cand != ae && cand.Bound != nil &&
+		cand.IsBoundLast() && boundMaxPt(cand) == maxPt
+}
+
+// resolveBetweenMaxima crosses every edge lying strictly between ae and its
+// maxima partner, bubbling ae through them until the two are AEL-adjacent.
+// Each between-edge passes through maxPt at this scanline (it is squeezed
+// between two bounds converging on maxPt), so IntersectEdges is dispatched at
+// maxPt; it swaps ae past the between-edge and reclassifies both. See
+// closeBound for the rationale. Port of Clipper2 DoMaxima's between loop
+// (engine.cpp:2756-2766).
+func (s *sweep) resolveBetweenMaxima(ae, partner *ActiveEdge, maxPt fixed.Point) {
+	for {
+		i := s.ael.IndexOf(ae)
+		j := s.ael.IndexOf(partner)
+		if i < 0 || j < 0 || absInt(i-j) <= 1 {
+			return
+		}
+		var between *ActiveEdge
+		if i < j {
+			between = s.ael.RightOf(i)
+		} else {
+			between = s.ael.LeftOf(i)
+		}
+		if between == nil {
+			return
+		}
+		IntersectEdges(s.ael, s.op, ae, between, maxPt)
+	}
 }
 
 // boundMaxPt returns the local-maximum vertex of ae's bound, assuming ae's

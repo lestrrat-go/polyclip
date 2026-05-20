@@ -320,26 +320,22 @@ func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
 	}
 }
 
-// TestUnionCoincidentHorizConfluence is a KNOWN-FAILING regression captured
-// from FuzzUnion after the §12.6.1 DoHorizontal rework. Subject `a` and clip
-// `b` share a coincident bottom horizontal at y=-5 (diff-source, same
+// TestUnionCoincidentHorizConfluence is a multi-edge-confluence regression
+// captured from FuzzUnion after the §12.6.1 DoHorizontal rework. Subject `a`
+// and clip `b` share a coincident bottom horizontal at y=-5 (diff-source, same
 // direction), AND `a`'s local-maximum apex (-2,5) coincides exactly with `b`'s
-// top-left boundary vertex (-2,5) — a multi-edge confluence where four edges
-// meet at one point.
+// top-left boundary vertex (-2,5) — four bounds reach a local max here, forming
+// two same-coordinate maxima pairs (a's at (-2,5), b's at (8,5)) interleaved in
+// the AEL as a-L,b-L,a-R,b-R.
 //
-// At that confluence `b`'s left bound is correctly cold (interior to `a`) but
-// its trailing top horizontal stays cold even though it is the union's top
-// boundary: closeBound does not process the edges BETWEEN the maxima pair the
-// way Clipper2's DoMaxima (engine.cpp:2729) does, so the hot/contributing
-// status is never transferred across the confluence. Expected area 130
-// (pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5)); the engine currently drops
-// `b` and returns ~65.
-//
-// Fix path: port DoMaxima's between-maxima IntersectEdges loop into closeBound.
-// Tracked as a follow-up to the DoHorizontal rework. The pre-rework engine
-// produced 130 here via the (now-deleted) §11.7 synth-intersect mechanism.
+// Before the fix, closeBound only paired immediate AEL neighbours, so the
+// interleaved pairs were mis-handled: `b`'s trailing top horizontal stayed cold
+// (the hot/contributing status was never transferred across the confluence) and
+// the engine dropped `b`, returning ~65. The fix (DESIGN.md §12.6.1 follow-up)
+// makes maximaPartner scan the whole AEL and resolveBetweenMaxima cross the
+// between-edges via IntersectEdges, mirroring Clipper2's DoMaxima
+// (engine.cpp:2729). Expected area 130: pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5).
 func TestUnionCoincidentHorizConfluence(t *testing.T) {
-	t.Skip("known regression: multi-edge confluence + coincident horizontal; fix = port DoMaxima between-maxima processing into closeBound (DESIGN.md §12.6.1 follow-up)")
 	a := MultiPolygon{ExPolygon{Outer: Polygon{{-5, -5}, {5, -5}, {-2, 5}, {-5, 5}}}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{-2, -5}, {8, -5}, {8, 5}, {-2, 5}}}}
 	got, err := Union(a, b)

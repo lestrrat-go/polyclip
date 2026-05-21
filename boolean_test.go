@@ -591,6 +591,37 @@ func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
 	}
 }
 
+func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
+	// A's top horizontal (2,6)-(7,6) partially overlaps B's top horizontal
+	// (3,6)-(0,6) over x∈[2,3], interiors opposite. SplitOverlaps fragments A's
+	// horizontal into (2,6)-(3,6) + (3,6)-(7,6); at the overlap, B's bound ENDS
+	// (its local-max plateau) but A's bound CONTINUES collinearly to (7,6). This
+	// is a boundary EXIT, not a mutual cancellation: the opposite-side skip must
+	// NOT fire, or A's right bound never re-spawns and A's whole upper body is
+	// dropped (pre-fix Difference collapsed to 0.042 vs ~5.44). The discriminator
+	// is continuesCollinearHorizontal (DESIGN.md §12.11).
+	a := MultiPolygon{{Outer: Polygon{{4, 3}, {2, 6}, {7, 6}, {0, 8}}}}
+	b := MultiPolygon{{Outer: Polygon{{5, 3}, {3, 6}, {0, 6}, {3, 4}}}}
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 10.441667},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0.558333},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 5.441667},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.01 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

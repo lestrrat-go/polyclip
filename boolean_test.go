@@ -274,6 +274,33 @@ func TestUnionSharedVertexViaHorizontal(t *testing.T) {
 	}
 }
 
+func TestUnionOverlappingSharedVertexMismerge(t *testing.T) {
+	// A and B overlap and share exactly one vertex (10,4), which is A's local-max
+	// plateau right-end AND a through-vertex of B's right bound. A's right edge
+	// (8,0)->(10,4) reaches the shared vertex hot; B's right bound passes through
+	// it COLD (interior, having entered A at a lower crossing) and exits there.
+	// Before the fix A's maximum closed without handing its ring onto B's
+	// continuing edge (10,4)->(11,6), so B's entire upper triangle was dropped and
+	// the union collapsed to one malformed ring of area 14.4. handoffMaxThroughVertex
+	// dispatches the at-vertex crossing so hotness transfers to B's bound; the true
+	// union area is ~43.9 (DESIGN.md §12.11, overlapping shared-vertex mis-merge).
+	a := Polygon{{0, 4}, {7, 2}, {8, 0}, {10, 4}}
+	b := Polygon{{10, 4}, {11, 6}, {2, 12}, {7, 1}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotArea := got.Area(); gotArea < 43.5 || gotArea > 44.3 {
+		t.Errorf("Union area %v outside expected band [43.5,44.3] (truth ~43.9; pre-fix bug was 14.4)", gotArea)
+	}
+}
+
 func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	// A and B both reach their local MAXIMUM at the shared vertex (8,6) — four
 	// bounds (two per polygon) converging on one apex, with a cross-source

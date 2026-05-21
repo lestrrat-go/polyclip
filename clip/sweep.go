@@ -950,6 +950,7 @@ func (s *sweep) advanceBoundCursor(ae *ActiveEdge, currentTop fixed.Point) {
 // W-shape), they belong to different OutRecs that must be JOINED;
 // AddLocalMaxPoly handles both the same-ring close and the two-ring join.
 func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
+	s.handoffMaxThroughVertex(ae, maxPt)
 	// Case C (simultaneous maxima): the partner bound is adjacent in the AEL
 	// and reaches maxPt at the same scanline event. AddLocalMaxPoly closes the
 	// ring (same OutRec) or joins two rings (different OutRecs — e.g. the
@@ -1021,6 +1022,63 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	delete(s.bySeg, ae.Seg)
 	if left != nil && right != nil {
 		s.maybeScheduleIntersect(left, right, maxPt.Y)
+	}
+}
+
+// handoffMaxThroughVertex resolves the degenerate crossing where a HOT maximum
+// edge ae ends at a shared vertex maxPt that another source's bound passes
+// THROUGH (a through-vertex on the apex column). Below maxPt ae is the union
+// boundary; at maxPt ae terminates and the other bound's continuing edge takes
+// over the boundary. doIntersections cannot see this — ae ends at maxPt, so the
+// pair meet as a Touch on the beam boundary, not a ProperCross strictly inside —
+// and reconcileSharedVertexCrossings cannot either, because ae does not continue
+// above maxPt and so produces no AEL inversion. So dispatch the crossing here,
+// before ae's maximum closes, handing ae's hot ring onto the through edge via
+// IntersectEdges (DESIGN.md §12.11, overlapping shared-vertex mis-merge).
+//
+// Only an AEL-adjacent edge that (a) passes through maxPt (on the apex column),
+// (b) is NOT ae's maxima partner, and (c) CONTINUES above maxPt (is not itself a
+// bound-last maximum) qualifies. A bound-last edge ending at maxPt is a genuine
+// maximum handled by the partner / confluence logic, not a through-vertex.
+func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
+	// crossed guards against re-crossing the same edge: IntersectEdges swaps the
+	// pair's AEL positions, so a still-hot ae could otherwise oscillate across
+	// the same neighbour. Each through-edge is crossed at most once.
+	crossed := map[*ActiveEdge]struct{}{}
+	for ae.IsHotEdge() {
+		i := s.ael.IndexOf(ae)
+		if i < 0 {
+			return
+		}
+		var cand *ActiveEdge
+		for _, c := range []*ActiveEdge{s.ael.LeftOf(i), s.ael.RightOf(i)} {
+			if c == nil || c.IsBoundLast() || isMaximaPartner(ae, c, maxPt) {
+				continue
+			}
+			// Only a COLD through-edge qualifies. A cold edge is interior to ae's
+			// region just below the vertex and becomes boundary above it (it exits
+			// at the shared vertex), so ae's hot ring must hand off onto it. A HOT
+			// through-edge already carries its own ring on both sides of the
+			// vertex; crossing it here would double-handle and tangle the rings
+			// (it surfaces as a same-side AddLocalMaxPoly). Such a confluence is
+			// resolved by the maxima / between-maxima logic instead.
+			if c.IsHotEdge() {
+				continue
+			}
+			if _, done := crossed[c]; done {
+				continue
+			}
+			if XAtY(c.Seg, maxPt.Y) != maxPt.X {
+				continue
+			}
+			cand = c
+			break
+		}
+		if cand == nil {
+			return
+		}
+		crossed[cand] = struct{}{}
+		IntersectEdges(s.ael, s.op, ae, cand, maxPt)
 	}
 }
 

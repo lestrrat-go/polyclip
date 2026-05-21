@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+// Operation labels reused across boolean test cases.
+const (
+	opUnion      = "Union"
+	opIntersect  = "Intersect"
+	opDifference = "Difference"
+	opXor        = "Xor"
+)
+
 func sq(cx, cy, half float64) ExPolygon {
 	return ExPolygon{Outer: Polygon{
 		{cx - half, cy - half},
@@ -426,10 +434,10 @@ func TestSharedCollinearHorizontalEdge(t *testing.T) {
 		run  func() (MultiPolygon, error)
 		want float64
 	}{
-		{"Union", func() (MultiPolygon, error) { return Union(mpA, mpB) }, 6},
-		{"Intersect", func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
-		{"Difference", func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 4},
-		{"Xor", func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 6},
+		{opUnion, func() (MultiPolygon, error) { return Union(mpA, mpB) }, 6},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
+		{opDifference, func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 4},
+		{opXor, func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 6},
 	}
 	for _, c := range checks {
 		got, err := c.run()
@@ -519,10 +527,10 @@ func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
 		run  func() (MultiPolygon, error)
 		want float64
 	}{
-		{"Union", func() (MultiPolygon, error) { return Union(a, b) }, 8.5},
-		{"Intersect", func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
-		{"Difference", func() (MultiPolygon, error) { return Difference(a, b) }, 2.5},
-		{"Xor", func() (MultiPolygon, error) { return Xor(a, b) }, 8.5},
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 8.5},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.5},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 8.5},
 	}
 	for _, c := range checks {
 		got, err := c.run()
@@ -559,10 +567,10 @@ func TestBooleanSharedVertexNotNested(t *testing.T) {
 		run  func() (MultiPolygon, error)
 		want float64
 	}{
-		{"Union", func() (MultiPolygon, error) { return Union(mpA, mpB) }, 54},           // |A|+|B|, touch only
-		{"Difference", func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 18}, // = |A|
-		{"Intersect", func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
-		{"Xor", func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 54},
+		{opUnion, func() (MultiPolygon, error) { return Union(mpA, mpB) }, 54},           // |A|+|B|, touch only
+		{opDifference, func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 18}, // = |A|
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
+		{opXor, func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 54},
 	}
 	for _, c := range checks {
 		got, err := c.run()

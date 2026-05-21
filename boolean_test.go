@@ -442,6 +442,55 @@ func TestSharedCollinearHorizontalEdge(t *testing.T) {
 	}
 }
 
+func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
+	// Two simple quads whose top edges are collinear horizontals that PARTIALLY
+	// overlap. SplitOverlaps resolves the overlap into a fully-coincident
+	// different-source horizontal pair; the sweep then builds a cross-source
+	// output ring whose two hot edges terminate at DIFFERENT points joined by a
+	// horizontal top. closeBound's Case A/B handoff dropped one of those apex
+	// vertices, collapsing the ring to a degenerate two-point sliver — so the
+	// thin region was lost entirely (DESIGN.md §12.11). The fix emits the
+	// closing edge's own apex in Case B when it differs from both ring ends.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	type check struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}
+	// Repro 1: A's top (7,8)-(2,8) and B's top (6,8)-(1,8) overlap on x∈[2,6].
+	// A lies almost entirely inside B; the difference is a thin top-right
+	// triangle (6,6),(7,8),(6,8) of area ~0.99 that was dropped (got 0).
+	a1 := mk(Polygon{{3, 4}, {6, 6}, {7, 8}, {2, 8}})
+	b1 := mk(Polygon{{3, 0}, {6, 4}, {6, 8}, {1, 8}})
+	// Repro 2: A's top (8,3)-(3,3) and B's mid edge (4,3)-(8,3) overlap on
+	// x∈[4,8]. Union dropped B's whole upper region (got 6.75 vs ~21.74).
+	a2 := mk(Polygon{{1, 2}, {7, 1}, {8, 3}, {3, 3}})
+	b2 := mk(Polygon{{0, 2}, {4, 3}, {8, 3}, {2, 6}})
+	checks := []check{
+		{"r1/Union", func() (MultiPolygon, error) { return Union(a1, b1) }, 26.99},
+		{"r1/Intersect", func() (MultiPolygon, error) { return Intersect(a1, b1) }, 11.0},
+		{"r1/Difference", func() (MultiPolygon, error) { return Difference(a1, b1) }, 0.99},
+		{"r1/Xor", func() (MultiPolygon, error) { return Xor(a1, b1) }, 15.99},
+		{"r2/Union", func() (MultiPolygon, error) { return Union(a2, b2) }, 21.74},
+		{"r2/Intersect", func() (MultiPolygon, error) { return Intersect(a2, b2) }, 0.25},
+		{"r2/Difference", func() (MultiPolygon, error) { return Difference(a2, b2) }, 8.75},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.05 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

@@ -1021,9 +1021,26 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	coupled := outrecOther(ae)
 
 	// Case B: the coupled partner already ran Case A (it emitted maxPt and was
-	// removed from the AEL but left the coupling intact). Close the ring
-	// without re-emitting the vertex.
+	// removed from the AEL but left the coupling intact). Close the ring,
+	// emitting this edge's own apex first when it is a genuinely new vertex —
+	// distinct from both ends of the open chain (head and back OutPts).
+	//
+	// For a same-source plateau ae and the partner top out at the SAME apex, so
+	// Case A's vertex already sits at a ring end and emitting again would leave a
+	// zero-length edge — the guard skips it. But for a cross-source ring whose
+	// two hot edges terminate at DIFFERENT points joined by a horizontal top (a
+	// partial collinear-horizontal overlap that SplitOverlaps resolved into a
+	// coincident pair — e.g. one source's max edge ends left of the other's),
+	// this apex differs from both ends and must be emitted, or the ring
+	// collapses to a degenerate two-point sliver (DESIGN.md §12.11).
 	if coupled != nil && s.ael.IndexOf(coupled) < 0 {
+		if outrec := ae.Outrec; outrec != nil && outrec.Pts != nil {
+			head := outrec.Pts
+			tail := head.Next
+			if maxPt != head.P && maxPt != tail.P {
+				AddOutPt(ae, maxPt)
+			}
+		}
 		if outrec := ae.Outrec; outrec != nil {
 			outrec.FrontEdge = nil
 			outrec.BackEdge = nil

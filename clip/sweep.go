@@ -986,6 +986,21 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		return
 	}
 
+	// Plateau maximum whose other bound reaches maxPt via a horizontal that has
+	// not yet been traversed: defer. Clipper2 treats ae's vertex as INTERMEDIATE
+	// (the maxima vertex is the horizontal's far end) and closes the pair only
+	// when DoHorizontal reaches ae. Running the Case A deferred handoff here
+	// instead removes ae before the horizontal arrives; an intervening
+	// cross-source crossing on the horizontal then SwapOutrecs the coupled bound
+	// into another ring, so the pair never closes cleanly and the rings tangle
+	// (the hot-through shared-apex confluence, DESIGN.md §12.11). Leaving ae hot
+	// lets the horizontal's own closeBound pair with it via maximaPartner, and
+	// resolveBetweenMaxima crosses any between-edges (e.g. the other source's
+	// through-bound) at the apex first.
+	if s.plateauPartnerPending(ae, maxPt) {
+		return
+	}
+
 	// No simultaneous partner. The two bounds of this maximum arrive at
 	// different events — e.g. a flat top (local-max plateau) whose two
 	// ascending bounds reach the plateau ends as separate Top/horizontal
@@ -1095,6 +1110,31 @@ func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
 		crossed[cand] = struct{}{}
 		IntersectEdges(s.ael, s.op, ae, cand, maxPt)
 	}
+}
+
+// plateauPartnerPending reports whether ae's local maximum is a plateau whose
+// OTHER bound reaches maxPt via a horizontal that is still queued in
+// pendingHoriz (not yet traversed). ae's coupled OutRec partner is that bound;
+// if it currently sits on a horizontal whose far end is maxPt, the maximum is
+// closed later by the horizontal pass, so closeBound must not remove ae now.
+func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
+	if !ae.IsHotEdge() {
+		return false
+	}
+	coupled := outrecOther(ae)
+	if coupled == nil {
+		return false
+	}
+	for _, h := range s.pendingHoriz {
+		if h != coupled {
+			continue
+		}
+		if h.Bound == nil || !h.Seg.Horizontal() || h.Seg.Bot.Y != maxPt.Y {
+			return false
+		}
+		return boundHorizontalFarX(h.Bound, h.Seg) == maxPt.X
+	}
+	return false
 }
 
 // maximaFlanks returns the edges immediately outside the span occupied by the

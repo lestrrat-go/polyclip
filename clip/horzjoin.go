@@ -157,7 +157,7 @@ func (s *sweep) convertHorzSegsToJoins() {
 		return ha.leftOp.P.X < hb.leftOp.P.X
 	})
 
-	for i := 0; i < j-1; i++ {
+	for i := range j - 1 {
 		hs1 := segs[i]
 		for k := i + 1; k < j; k++ {
 			hs2 := segs[k]

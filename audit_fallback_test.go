@@ -32,10 +32,10 @@ func TestAuditFallbackPath(t *testing.T) {
 		name string
 		fn   func(a, b MultiPolygon) (MultiPolygon, error)
 	}{
-		{"Union", Union},
-		{"Intersect", Intersect},
-		{"Difference", Difference},
-		{"Xor", Xor},
+		{opUnion, Union},
+		{opIntersect, Intersect},
+		{opDifference, Difference},
+		{opXor, Xor},
 	}
 	fellBack := false
 	for _, c := range cases {

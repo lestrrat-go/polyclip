@@ -148,36 +148,49 @@ func AddLocalMinPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point, isNew bool) *
 //
 // Per DESIGN.md §12.4 / clipper.engine.cpp:1380.
 //
-// The ael parameter is accepted (and ignored) for symmetry with
-// [AddLocalMinPoly]; future increments will use it when implementing the
-// open-end recovery path.
-func AddLocalMaxPoly(_ *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
+// The ael parameter is used by the same-side recovery below to read the
+// geometric left/right order of the two edges at the maximum.
+func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 	if e1.IsFront() == e2.IsFront() {
 		if e1.Outrec == e2.Outrec {
 			// Same ring, same side — a genuine inconsistency; bail.
 			return nil
 		}
-		// Two different rings meeting same-side at a maximum. In Clipper2 this
-		// is unreachable for closed paths (SwapFrontBackSides is reserved for
-		// open ends; the closed-path branch is a hard error) — it means a
-		// crossing-spawned ring upstream got an inverted front/back orientation.
-		// AddLocalMinPoly resolving orientation from AEL position (DESIGN.md
-		// §12.11) and the shared-vertex crossing dispatch
-		// ([sweep.reconcileSharedVertexCrossings]) drove firings to ZERO for
-		// Union/Intersect/Difference over the simple-quad differential; the only
-		// op that still reaches here is Xor, and those firings belong to the
-		// separately-tracked Xor classification gap (DESIGN.md §12.11). Replacing
-		// this branch with `return nil` (Clipper2's hard-error) currently leaves
-		// the whole suite green and the differential wrong-rates unchanged, so
-		// the recovery is kept only as a safety net until the Xor track lands.
-		// Recover by reversing e2's ring sides so the polarities oppose, then
-		// join. This mirrors Clipper2's SwapFrontBackSides (engine.cpp:460), which
-		// ALSO advances the Pts head by one — the chain head is the front vertex
-		// (Pts) with the back at Pts.Next, so swapping which edge is front must
-		// move the head to keep [AddOutPt] and [JoinOutrecPaths] splicing on the
-		// correct ends. Omitting the head shift tangles the merged chain.
-		e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
-		e2.Outrec.Pts = e2.Outrec.Pts.Next
+		// Two different rings meeting same-side at a maximum: one ring's
+		// FrontEdge/BackEdge was inverted by an upstream cross-source ownership
+		// swap (SwapOutrecs / JoinOutrecPaths), so the FrontEdge==edge proxy no
+		// longer reflects the ring's true orientation. At a local maximum the
+		// geometry is unambiguous, though: in polyclip's mirror convention the
+		// RIGHT (higher AEL index) bound is its ring's FrontEdge and the LEFT
+		// bound is its BackEdge. Re-derive the correct sides from the AEL order
+		// and swap whichever ring disagrees — not always e2: the inverted ring
+		// can be either edge's, and swapping the already-correct ring was what
+		// tangled the merged chain (the d50048a workaround; see the vertex-on-edge
+		// same-side tangle in DESIGN.md §12.11). Reversing a ring's sides also
+		// advances the Pts head by one (the chain head is the front vertex with
+		// the back at Pts.Next), so swapping which edge is front must move the head
+		// to keep AddOutPt and JoinOutrecPaths splicing on the correct ends; this
+		// mirrors Clipper2's SwapFrontBackSides (engine.cpp:460).
+		swapSides := func(e *ActiveEdge) {
+			e.Outrec.FrontEdge, e.Outrec.BackEdge = e.Outrec.BackEdge, e.Outrec.FrontEdge
+			e.Outrec.Pts = e.Outrec.Pts.Next
+		}
+		i1, i2 := ael.IndexOf(e1), ael.IndexOf(e2)
+		if i1 < 0 || i2 < 0 {
+			// One edge already left the AEL (no reliable left/right): fall back to
+			// reversing e2, the historical recovery.
+			swapSides(e2)
+		} else {
+			left, right := e1, e2
+			if i1 > i2 {
+				left, right = e2, e1
+			}
+			if !right.IsFront() {
+				swapSides(right)
+			} else if left.IsFront() {
+				swapSides(left)
+			}
+		}
 	}
 	result := AddOutPt(e1, pt)
 	if e1.Outrec == e2.Outrec {

@@ -18,8 +18,9 @@ const (
 	IssueTooFewVertices IssueKind = iota
 	// IssueWrongWinding marks an outer ring with non-CCW orientation
 	// (signed area ≤ 0) or a hole ring with non-CW orientation
-	// (signed area ≥ 0). The boolean engine accepts either winding for
-	// outers — it normalises internally — but Offset and hole/outer
+	// (signed area ≥ 0). The boolean engine accepts either winding — it
+	// normalises each ring to the canonical orientation (CCW outer, CW
+	// hole) when collecting segments — but Offset and hole/outer
 	// distinctions in the public API rely on the documented
 	// convention.
 	IssueWrongWinding

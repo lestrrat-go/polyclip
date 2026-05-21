@@ -248,26 +248,38 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale) []clip.Segment {
 	var out []clip.Segment
 	for _, ex := range m {
-		appendRing(&out, ex.Outer, src, scale)
+		appendRing(&out, ex.Outer, src, scale, true)
 		for _, h := range ex.Holes {
-			appendRing(&out, h, src, scale)
+			appendRing(&out, h, src, scale, false)
 		}
 	}
 	return out
 }
 
-func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale) {
+// appendRing emits ring's edges as fixed-point segments. The sweep's winding
+// model derives each edge's WindDx from its direction (clip.signedContribution),
+// so it assumes a canonical input orientation: CCW outers, CW holes. Inputs
+// with the opposite winding invert WindDx for that source and misclassify
+// (e.g. a CW subject made Union/Xor under-count). Normalize here by walking the
+// ring in reverse when its signed area disagrees with wantCCW, so callers may
+// pass either orientation.
+func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale, wantCCW bool) {
 	n := len(ring)
 	if n < 3 {
 		return
 	}
+	reverse := (ring.SignedArea() < 0) == wantCCW
 	for i := range n {
 		j := i + 1
 		if j == n {
 			j = 0
 		}
-		a := scale.Snap(ring[i].X, ring[i].Y)
-		b := scale.Snap(ring[j].X, ring[j].Y)
+		ai, bi := i, j
+		if reverse {
+			ai, bi = n-1-i, n-1-j
+		}
+		a := scale.Snap(ring[ai].X, ring[ai].Y)
+		b := scale.Snap(ring[bi].X, ring[bi].Y)
 		seg := clip.NewSegment(a, b, src)
 		if seg.Degenerate() {
 			continue

@@ -131,6 +131,50 @@ func TestUnionOverlappingAxisAligned(t *testing.T) {
 	}
 }
 
+func TestInputOrientationNormalized(t *testing.T) {
+	// The sweep derives WindDx from edge direction, assuming canonical input
+	// orientation (CCW outer, CW hole). collectSegments normalizes either
+	// winding, so a CW (clockwise) input must produce the same result as the
+	// equivalent CCW input. Regression for the mixed-orientation undercount
+	// (CW subject + CCW clip gave Union 26 instead of 28).
+	ccwA := Polygon{{0, 0}, {4, 0}, {4, 4}, {0, 4}}
+	ccwB := Polygon{{2, 2}, {6, 2}, {6, 6}, {2, 6}}
+	rev := func(p Polygon) Polygon {
+		out := make(Polygon, len(p))
+		for i, pt := range p {
+			out[len(p)-1-i] = pt
+		}
+		return out
+	}
+	want := struct{ u, i, d, x float64 }{28, 4, 12, 24}
+	for _, tc := range []struct {
+		name string
+		a, b Polygon
+	}{
+		{"CCW/CCW", ccwA, ccwB},
+		{"CW/CW", rev(ccwA), rev(ccwB)},
+		{"CW/CCW", rev(ccwA), ccwB},
+		{"CCW/CW", ccwA, rev(ccwB)},
+	} {
+		a := MultiPolygon{{Outer: tc.a}}
+		b := MultiPolygon{{Outer: tc.b}}
+		u, _ := Union(a, b)
+		i, _ := Intersect(a, b)
+		d, _ := Difference(a, b)
+		x, _ := Xor(a, b)
+		const tol = 0.01
+		check := func(op string, got, exp float64) {
+			if got < exp-tol || got > exp+tol {
+				t.Errorf("%s %s = %.3f, want %.3f", tc.name, op, got, exp)
+			}
+		}
+		check("Union", u.Area(), want.u)
+		check("Intersect", i.Area(), want.i)
+		check("Difference", d.Area(), want.d)
+		check("Xor", x.Area(), want.x)
+	}
+}
+
 func TestUnionVerticallyStackedAxialSquares(t *testing.T) {
 	// Stacked vertically with shared horizontal edge at Y=5. The shared
 	// edge is diff-src opposite-direction (sq1 top goes R→L, sq2 bot goes

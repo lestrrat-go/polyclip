@@ -654,6 +654,40 @@ func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
 	}
 }
 
+func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
+	// A's bottom horizontal (6,5)-(8,5) and B's top horizontal (8,5)-(7,5)
+	// overlap over x∈[7,8] at y=5, interiors opposite (A above, B below), and
+	// share vertex (8,5). SplitOverlaps manufactures the coincident pair, but
+	// here NEITHER bound terminates at the overlap: A continues up to (2,8) and
+	// B continues up to (2,6), both with sloped edges. That is not a
+	// doubled-boundary cancellation — the two horizontals are live boundaries
+	// that each carry on. The opposite-side skip wrongly fired (sealing both
+	// rings along y=5) and dropped everything above, collapsing Union 16.52→4.69
+	// and Intersect 5.98→1.81. The skip now requires at least one IsBoundLast
+	// (DESIGN.md §12.11). Difference/Xor were already correct (Xor never skips).
+	a := MultiPolygon{{Outer: Polygon{{0, 3}, {6, 5}, {8, 5}, {2, 8}}}} // |A| = 16
+	b := MultiPolygon{{Outer: Polygon{{0, 4}, {8, 5}, {7, 5}, {2, 6}}}} // |B| = 6.5
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 16.5228},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 5.9772},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 10.0228},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 10.5456},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.01 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

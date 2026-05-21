@@ -1037,9 +1037,12 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 // IntersectEdges (DESIGN.md §12.11, overlapping shared-vertex mis-merge).
 //
 // Only an AEL-adjacent edge that (a) passes through maxPt (on the apex column),
-// (b) is NOT ae's maxima partner, and (c) CONTINUES above maxPt (is not itself a
-// bound-last maximum) qualifies. A bound-last edge ending at maxPt is a genuine
-// maximum handled by the partner / confluence logic, not a through-vertex.
+// (b) is NOT ae's maxima partner, and (c) CONTINUES strictly above maxPt — its
+// bound's ultimate apex is higher than maxPt — qualifies. An edge whose bound
+// tops out at maxPt is a genuine maximum handled by the partner / confluence
+// logic, not a through-vertex. Condition (c) is read from the bound's apex
+// rather than the cursor's current segment, because the cursor's position at a
+// confluence is timing-dependent (see [boundContinuesAbove]).
 func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
 	// crossed guards against re-crossing the same edge: IntersectEdges swaps the
 	// pair's AEL positions, so a still-hot ae could otherwise oscillate across
@@ -1052,7 +1055,19 @@ func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
 		}
 		var cand *ActiveEdge
 		for _, c := range []*ActiveEdge{s.ael.LeftOf(i), s.ael.RightOf(i)} {
-			if c == nil || c.IsBoundLast() || isMaximaPartner(ae, c, maxPt) {
+			// The candidate must CONTINUE strictly above maxPt — its bound's
+			// ultimate apex is higher than maxPt — so it passes THROUGH maxPt
+			// rather than terminating there. An edge whose bound tops out at
+			// maxPt is a genuine maximum (a same-source plateau partner or a
+			// cross-source co-maximum), handled by the partner / confluence logic.
+			//
+			// This is decided from the bound's apex, NOT from the cursor's current
+			// segment, because the cursor's position at maxPt is timing-dependent:
+			// the through-bound may still sit on the segment ENDING at maxPt (Top
+			// == maxPt) or may have already advanced onto the segment LEAVING it
+			// (Bot == maxPt). Both are the same through-vertex. (IsBoundLast and a
+			// current-segment Top test each get one of the two timings wrong.)
+			if c == nil || !boundContinuesAbove(c, maxPt) || isMaximaPartner(ae, c, maxPt) {
 				continue
 			}
 			// Only a COLD through-edge qualifies. A cold edge is interior to ae's
@@ -1213,6 +1228,21 @@ func (s *sweep) resolveBetweenMaxima(ae, partner *ActiveEdge, maxPt fixed.Point)
 		}
 		IntersectEdges(s.ael, s.op, ae, between, maxPt)
 	}
+}
+
+// boundContinuesAbove reports whether ae's bound tops out strictly above maxPt
+// — i.e. ae passes THROUGH maxPt rather than terminating there. It reads the
+// bound's final segment (its ultimate apex) so the answer does not depend on
+// where the cursor currently sits, which is timing-dependent at a confluence.
+func boundContinuesAbove(ae *ActiveEdge, maxPt fixed.Point) bool {
+	if ae.Bound == nil {
+		return false
+	}
+	last := ae.Bound.Last()
+	if last == nil {
+		return false
+	}
+	return last.Top.Y > maxPt.Y
 }
 
 // boundMaxPt returns the local-maximum vertex of ae's bound, assuming ae's

@@ -301,6 +301,37 @@ func TestUnionOverlappingSharedVertexMismerge(t *testing.T) {
 	}
 }
 
+func TestUnionThroughVertexBoundLastSegment(t *testing.T) {
+	// A and B overlap and share exactly one vertex (9,8): A's local-max plateau
+	// right-end (A's right bound (3,6)->(9,8) plus its top horizontal both end
+	// there) AND a through-vertex of B's right bound (3,7)->(9,8)->(5,11). B
+	// passes through (9,8) COLD, so A's terminating maximum must hand its ring
+	// onto B's continuing edge (9,8)->(5,11).
+	//
+	// This differs from TestUnionOverlappingSharedVertexMismerge in TIMING: by
+	// the time A's maximum closes, B's cursor has already advanced onto its FINAL
+	// segment (9,8)->(5,11). The old handoff test rejected any bound-last edge,
+	// so it skipped this through-edge and dropped B's upper triangle, collapsing
+	// the union to 14.75. The qualification now reads the bound's ultimate apex
+	// ((5,11), above (9,8)), which is independent of cursor position; truth ~23.23
+	// (DESIGN.md §12.11, through-vertex on a bound's last segment).
+	a := Polygon{{0, 8}, {5, 3}, {3, 6}, {9, 8}}
+	b := Polygon{{2, 9}, {3, 7}, {9, 8}, {5, 11}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotArea := got.Area(); gotArea < 23.0 || gotArea > 23.5 {
+		t.Errorf("Union area %v outside expected band [23.0,23.5] (truth ~23.23; pre-fix bug was 14.75)", gotArea)
+	}
+}
+
 func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	// A and B both reach their local MAXIMUM at the shared vertex (8,6) — four
 	// bounds (two per polygon) converging on one apex, with a cross-source

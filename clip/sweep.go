@@ -1147,7 +1147,7 @@ func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
 			if _, done := crossed[c]; done {
 				continue
 			}
-			if XAtY(c.Seg, maxPt.Y) != maxPt.X {
+			if !throughVertexOnColumn(c.Seg, maxPt) {
 				continue
 			}
 			cand = c
@@ -1317,6 +1317,27 @@ func (s *sweep) resolveBetweenMaxima(ae, partner *ActiveEdge, maxPt fixed.Point)
 		}
 		IntersectEdges(s.ael, s.op, ae, between, maxPt)
 	}
+}
+
+// throughVertexOnColumn reports whether seg passes through maxPt on the apex
+// column at maxPt.Y. For a sloped segment that is XAtY(seg, maxPt.Y) ==
+// maxPt.X. For a horizontal segment whose endpoint is the through-vertex (the
+// bound turns onto a horizontal at maxPt before continuing above), XAtY returns
+// the segment's Bot.X — the wrong end — so test instead that maxPt lies on the
+// horizontal's x-span at maxPt.Y (DESIGN.md §12.11, shared-vertex exit via a
+// horizontal).
+func throughVertexOnColumn(seg *Segment, maxPt fixed.Point) bool {
+	if !seg.Horizontal() {
+		return XAtY(seg, maxPt.Y) == maxPt.X
+	}
+	if seg.Bot.Y != maxPt.Y {
+		return false
+	}
+	lo, hi := seg.Bot.X, seg.Top.X
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return lo <= maxPt.X && maxPt.X <= hi
 }
 
 // boundContinuesAbove reports whether ae's bound tops out strictly above maxPt

@@ -583,6 +583,48 @@ func TestBooleanSharedVertexNotNested(t *testing.T) {
 	}
 }
 
+func TestSharedVertexExitViaHorizontal(t *testing.T) {
+	// B reaches its local MAX at the shared vertex (6,5); A passes THROUGH (6,5),
+	// turning there onto its top horizontal (6,5)-(5,5) before continuing up to
+	// its apex (1,7). A's local min (5,1) is interior to B, so A is cold below
+	// (6,5) and must become the union boundary (hot) above it — the hand-off
+	// dispatched at B's max by [sweep.handoffMaxThroughVertex].
+	//
+	// Pre-fix the hand-off rejected A's through-edge because A's cursor sat on
+	// its horizontal at the confluence: the apex-column test used XAtY, which
+	// returns a horizontal's Bot.X (5) rather than the through-vertex end (6),
+	// so the candidate failed and A never went hot. A's whole upper region was
+	// dropped (Union 16 vs 22.15, Difference 0 vs 6.17). The fix makes the
+	// apex-column test horizontal-aware (DESIGN.md §12.11).
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{5, 1}, {6, 5}, {5, 5}, {1, 7}}) // |A| = 10
+	b := mk(Polygon{{1, 1}, {7, 0}, {7, 3}, {6, 5}}) // |B| = 16
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 22.17},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 3.83},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 6.17},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 18.33},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.05 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

@@ -115,7 +115,8 @@ func dispatchIntersect(
 	// does not run the horz-join pass.
 	//
 	// The skip applies only when NEITHER bound continues collinearly past the
-	// overlap (continuesCollinearHorizontal). SplitOverlaps fragments a long
+	// overlap (continuesCollinearHorizontal) AND the pair is not a re-spawn
+	// handoff (respawnHandoffAtOverlap). SplitOverlaps fragments a long
 	// horizontal into pieces; when one bound's horizontal ends at the overlap
 	// (a local-max plateau) but the other continues past it, the coincident
 	// pair is a boundary EXIT, not a mutual cancellation — the continuing bound
@@ -126,7 +127,8 @@ func dispatchIntersect(
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
 		e1.Seg.Reversed != e2.Seg.Reversed &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
-		!continuesCollinearHorizontal(e1) && !continuesCollinearHorizontal(e2) {
+		!continuesCollinearHorizontal(e1) && !continuesCollinearHorizontal(e2) &&
+		!respawnHandoffAtOverlap(e1, e2) {
 		return nil
 	}
 
@@ -163,6 +165,28 @@ func continuesCollinearHorizontal(ae *ActiveEdge) bool {
 	}
 	ns := ae.Bound.Segs[next]
 	return ns.Horizontal() && ns.Bot.Y == ae.Seg.Bot.Y
+}
+
+// respawnHandoffAtOverlap reports whether a coincident opposite-side horizontal
+// pair is a boundary EXIT whose continuation leaves NON-horizontally (so
+// continuesCollinearHorizontal does not catch it). One bound terminates at the
+// overlap — its local-max plateau, IsBoundLast — while the other continues past
+// with a sloped or vertical segment; the terminating bound is hot and the
+// continuing bound is cold. Falling through to the one-hot dispatch then runs
+// AddOutPt+SwapOutrecs, transferring the hot ring onto the continuing cold bound
+// so it re-spawns — what the corner-exit case needs (A's top horizontal ends at
+// a shared apex where A turns vertical; DESIGN.md §12.11). When the continuing
+// bound is already hot (a genuine cancellation) the ring is already on the right
+// bound and the skip must fire, so this returns false there.
+func respawnHandoffAtOverlap(e1, e2 *ActiveEdge) bool {
+	l1, l2 := e1.IsBoundLast(), e2.IsBoundLast()
+	if l1 == l2 {
+		return false
+	}
+	if l1 {
+		return e1.IsHotEdge() && !e2.IsHotEdge()
+	}
+	return e2.IsHotEdge() && !e1.IsHotEdge()
 }
 
 func branchBothHot(

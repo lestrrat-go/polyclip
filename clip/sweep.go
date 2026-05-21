@@ -349,6 +349,18 @@ func (s *sweep) handleScanlineBound(evs []Event, y fixed.Coord) {
 		s.handleTop(e)
 		s.appendTrace(e, nil)
 	}
+	// Process the max/intermediate horizontals reached by this scanline's tops
+	// (queued by advanceBoundCursor / closeBound) BEFORE classifying this
+	// scanline's local minima. A local-max horizontal plateau must leave the
+	// AEL before a coincident other-source local min is classified, or the
+	// min's WindOther left-walk counts the closing plateau as if its source
+	// still continued above — misclassifying the min as non-contributing and
+	// dropping its ring (the shared-collinear-horizontal bug, DESIGN.md §12.11).
+	// This mirrors Clipper2's phasing: DoTopOfScanbeam + DoHorizontal at a
+	// scanline run before the NEXT iteration's InsertLocalMinimaIntoAEL at the
+	// same Y (engine.cpp:2127). Min (leading) horizontals are queued later, in
+	// the localMins loop below, and flushed by [run] after this returns.
+	s.flushPendingHoriz(y)
 	// Shared-vertex crossings: after every cursor has advanced through this
 	// scanline's vertices, two bounds that pass through the SAME vertex may
 	// have swapped left-right order there (one was left below the vertex and

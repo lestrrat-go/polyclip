@@ -394,6 +394,54 @@ func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	}
 }
 
+func TestSharedCollinearHorizontalEdge(t *testing.T) {
+	// A triangle sitting on a wider triangle, sharing a partial collinear
+	// HORIZONTAL edge with opposite interiors (A below the line y=2, B above),
+	// plus a T-junction at (2,2) where B's left endpoint lands in A's top edge.
+	// A = top edge horizontal (0,2)-(4,2), apex DOWN at (3,0), |A| = 4.
+	// B = bottom edge horizontal (2,2)-(4,2) ⊂ A's top, apex UP at (3,4), |B| = 2.
+	// They only touch along y=2 (no interior overlap), so Union/Xor = 6, Intersect
+	// = 0, Difference = 4.
+	//
+	// Pre-fix the engine dropped B's entire above-edge region from the Union
+	// (got 4.0 = just A). Root cause: A's local-MAX horizontal plateau was still
+	// in the AEL when B's coincident local MIN was classified, because horizontal
+	// maxima were flushed AFTER the scanline's local minima rather than before.
+	// B's WindOther left-walk counted the closing plateau as if A continued above,
+	// misclassifying B as non-contributing. The fix flushes top-reached
+	// horizontals before classifying local minima, matching Clipper2's
+	// DoTopOfScanbeam-before-next-InsertLocalMinima phasing (DESIGN.md §12.11).
+	a := Polygon{{0, 2}, {4, 2}, {3, 0}}
+	b := Polygon{{2, 2}, {4, 2}, {3, 4}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	mpA := MultiPolygon{{Outer: a}}
+	mpB := MultiPolygon{{Outer: b}}
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{"Union", func() (MultiPolygon, error) { return Union(mpA, mpB) }, 6},
+		{"Intersect", func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
+		{"Difference", func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 4},
+		{"Xor", func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 6},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if gotArea := got.Area(); math.Abs(gotArea-c.want) > 0.01 {
+			t.Errorf("%s area %v want %v", c.name, gotArea, c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

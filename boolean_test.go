@@ -622,6 +622,38 @@ func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
 	}
 }
 
+func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
+	// A's top horizontal (7,6)-(8,6) partially overlaps B's top horizontal
+	// (8,6)-(1,6) over x∈[7,8], interiors opposite. At the shared apex (8,6) B's
+	// bound ENDS (its local-max plateau) but A's bound CONTINUES — turning
+	// VERTICAL up to (8,8). Because the continuation is not horizontal,
+	// continuesCollinearHorizontal does not catch it; the opposite-side skip
+	// wrongly fired and A's upper region was dropped (pre-fix Difference 0.0 vs
+	// 2.80). respawnHandoffAtOverlap detects the ending(hot)/continuing(cold)
+	// handoff and falls through to the one-hot transfer so A re-spawns
+	// (DESIGN.md §12.11). Xor is a separate, unrelated class and is not asserted.
+	a := MultiPolygon{{Outer: Polygon{{7, 6}, {8, 6}, {8, 8}, {1, 3}}}}
+	b := MultiPolygon{{Outer: Polygon{{1, 2}, {2, 0}, {8, 6}, {1, 6}}}}
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 25.8},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 2.7},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.8},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.01 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

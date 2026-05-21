@@ -1,6 +1,7 @@
 package polyclip
 
 import (
+	"math"
 	"testing"
 )
 
@@ -296,6 +297,42 @@ func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	}
 	if gotArea := got.Area(); gotArea < 5.5 || gotArea > 5.85 {
 		t.Errorf("Union area %v outside expected band [5.5,5.85] (truth ~5.67; pre-fix bug was 1.333)", gotArea)
+	}
+}
+
+func TestBooleanSharedVertexNotNested(t *testing.T) {
+	// A and B are two simple quads that touch at EXACTLY one shared vertex
+	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep
+	// emits both as correct CCW outer rings; the bug was in postprocess
+	// (assembleResult's nested-outer demotion), which sampled the smaller ring's
+	// vertex centroid and tested boundary-inclusive containment. Here A's
+	// centroid lands exactly ON B's boundary edge, so Contains reported it inside
+	// and A was wrongly demoted to a HOLE of B — collapsing Union from 54 to 18.
+	// The fix samples a genuine interior point of the inner ring instead
+	// (DESIGN.md §12.11, shared-vertex nesting).
+	a := Polygon{{12, 8}, {9, 3}, {0, 6}, {9, 0}}  // |A| = 18
+	b := Polygon{{8, 4}, {12, 8}, {7, 10}, {0, 8}} // |B| = 36
+	mpA := MultiPolygon{{Outer: a}}
+	mpB := MultiPolygon{{Outer: b}}
+
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{"Union", func() (MultiPolygon, error) { return Union(mpA, mpB) }, 54},           // |A|+|B|, touch only
+		{"Difference", func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 18}, // = |A|
+		{"Intersect", func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
+		{"Xor", func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 54},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.5 {
+			t.Errorf("%s area %v want %v (no false nesting at shared vertex)", c.name, got.Area(), c.want)
+		}
 	}
 }
 

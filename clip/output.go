@@ -14,6 +14,11 @@ type OutPt struct {
 	Next   *OutPt
 	Prev   *OutPt
 	Outrec *OutRec
+
+	// horz marks this OutPt as the claimed left anchor of a horizontal
+	// segment during [sweep.convertHorzSegsToJoins] (Clipper2 OutPt::horz).
+	// Transient; nil outside that pass.
+	horz *horzSegment
 }
 
 // OutRec ("output record") is an output ring under construction or closed.

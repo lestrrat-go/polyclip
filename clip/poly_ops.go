@@ -99,6 +99,28 @@ func dispatchIntersect(
 	w1, w2 int,
 	samePolyType bool,
 ) *OutPt {
+	// A coincident collinear horizontal pair from different sources whose
+	// interiors lie on OPPOSITE sides (Seg.Reversed differs) overlaps rather
+	// than crosses transversally: the shared edge is interior and cancels
+	// (Union) or is one source's boundary (Difference/Intersect). It is NOT a
+	// crossing — any ring-op here (AddLocalMaxPoly merge, or AddOutPt+
+	// SwapOutrecs) prematurely closes a ring or transfers it onto the other
+	// source's coincident edge, dropping the hot bound's continuation. Do
+	// nothing (the caller still swaps AEL positions); each bound keeps building
+	// its own clean run, and [sweep.processHorzJoins] reconnects the two
+	// overlapping runs once the global ring topology is known. Same-side
+	// coincident pairs (Reversed equal) are a genuine doubled boundary where one
+	// edge is interior, and fall through to normal dispatch. Xor is excluded:
+	// its coincident pairs are resolved by the standard maximum handling and it
+	// does not run the horz-join pass. (DESIGN.md §12.11.)
+	if op != OpXor && !samePolyType &&
+		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
+		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
+		e1.Seg.Reversed != e2.Seg.Reversed &&
+		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) {
+		return nil
+	}
+
 	switch {
 	case e1Hot && e2Hot:
 		return branchBothHot(ael, op, e1, e2, pt, w1, w2, samePolyType)

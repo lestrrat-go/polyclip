@@ -3,6 +3,7 @@ package polyclip
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/lestrrat-go/polyclip/clip"
 	"github.com/lestrrat-go/polyclip/fixed"
@@ -286,6 +287,30 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	var outers []classified
 	var holes []classified
 
+	// ringInside reports whether inner is nested within outer. The sweep's
+	// output rings have pairwise-disjoint interiors (they partition the plane
+	// into in/out), so two rings are either disjoint or one strictly contains
+	// the other — never partially overlapping. Under that invariant, inner is
+	// nested in outer iff a point of inner's OPEN interior lies inside outer.
+	//
+	// The sample must be a genuine interior point of inner, not a vertex or the
+	// vertex centroid. When two rings merely touch, their shared vertices — and,
+	// for a collinear shared edge, even the vertex centroid — land ON the other
+	// ring's boundary, which Polygon.Contains counts as inside, wrongly nesting
+	// polygons that only touch (the shared-vertex bug, DESIGN.md §12.11).
+	// Conversely a hole emitted by the sweep can have ALL its vertices on the
+	// enclosing outer's boundary (e.g. the Xor overlap rectangle whose corners
+	// sit on the union outline), so a vertex-based test gives the opposite false
+	// negative. An interior point of inner avoids both: if inner is nested it is
+	// strictly inside outer; if the rings only touch it is strictly outside.
+	ringInside := func(inner, outer classified) bool {
+		pt, ok := interiorPoint(inner.poly)
+		if !ok {
+			return false
+		}
+		return outer.bbox.Contains(pt) && outer.poly.Contains(pt)
+	}
+
 	for _, r := range rings {
 		if r.Pts == nil {
 			continue
@@ -317,10 +342,9 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		if len(h.poly) == 0 {
 			continue
 		}
-		sample := h.poly[0]
 		var ownerArea float64
 		for i, o := range outers {
-			if !o.bbox.Contains(sample) || !o.poly.Contains(sample) {
+			if !ringInside(h, o) {
 				continue
 			}
 			a := o.poly.Area()
@@ -353,11 +377,6 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		if len(oi.poly) == 0 {
 			continue
 		}
-		// Sample with the centroid (average of vertices) — avoids
-		// boundary-vertex false positives when two polygons touch at a
-		// corner (sq1's vertex coincides with sq2's; that vertex would
-		// be reported as inside sq2 by Polygon.Contains).
-		sample := polyCentroid(oi.poly)
 		for j, oj := range outers {
 			if i == j || len(oj.poly) == 0 {
 				continue
@@ -368,7 +387,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 			if owners[j].area <= owners[i].area {
 				continue
 			}
-			if !oj.bbox.Contains(sample) || !oj.poly.Contains(sample) {
+			if !ringInside(oi, oj) {
 				continue
 			}
 			// oj contains oi. Track the SMALLEST containing outer.
@@ -459,19 +478,54 @@ func dedupConsecutive(pts []fixed.Point) []fixed.Point {
 	return out
 }
 
-// polyCentroid returns the average of the polygon's vertices — a point
-// guaranteed strictly inside a convex polygon and almost always inside a
-// well-formed concave polygon. Used as a containment-test sample point
-// where polygon vertices themselves would give boundary false-positives.
-func polyCentroid(p Polygon) Point {
-	if len(p) == 0 {
-		return Point{}
+// interiorPoint returns a point strictly inside the simple polygon p, and a
+// bool reporting success. It casts a horizontal ray through the polygon's
+// vertex-Y centroid, collects the edge crossings, and returns the midpoint of
+// the widest interior span. That point is guaranteed strictly inside p (it sits
+// between an entering and leaving crossing of a well-formed ring), independent
+// of whether p is convex — unlike the vertex centroid, which can fall outside a
+// concave ring or land on a neighbour's boundary. Used by nesting detection so
+// that two rings which merely touch are never reported as nested (DESIGN.md
+// §12.11). Returns false for degenerate rings (<3 vertices, or no interior span
+// found, e.g. zero area).
+func interiorPoint(p Polygon) (Point, bool) {
+	n := len(p)
+	if n < 3 {
+		return Point{}, false
 	}
-	var sx, sy float64
+	var sy float64
 	for _, v := range p {
-		sx += v.X
 		sy += v.Y
 	}
-	n := float64(len(p))
-	return Point{X: sx / n, Y: sy / n}
+	y := sy / float64(n)
+
+	var xs []float64
+	for i := range n {
+		a := p[i]
+		b := p[(i+1)%n]
+		// Half-open [min.Y, max.Y) crossing test: counts each edge once and
+		// avoids double-counting at shared vertices.
+		if (a.Y <= y) == (b.Y <= y) {
+			continue
+		}
+		t := (y - a.Y) / (b.Y - a.Y)
+		xs = append(xs, a.X+t*(b.X-a.X))
+	}
+	if len(xs) < 2 {
+		return Point{}, false
+	}
+	sort.Float64s(xs)
+
+	// Interior spans are the (0,1),(2,3),… pairs. Pick the widest so the
+	// midpoint sits well clear of both boundaries.
+	bestLo, bestHi, bestW := 0.0, 0.0, -1.0
+	for i := 0; i+1 < len(xs); i += 2 {
+		if w := xs[i+1] - xs[i]; w > bestW {
+			bestW, bestLo, bestHi = w, xs[i], xs[i+1]
+		}
+	}
+	if bestW <= 0 {
+		return Point{}, false
+	}
+	return Point{X: (bestLo + bestHi) / 2, Y: y}, true
 }

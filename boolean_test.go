@@ -332,6 +332,42 @@ func TestUnionThroughVertexBoundLastSegment(t *testing.T) {
 	}
 }
 
+func TestXorHotThroughSharedApexConfluence(t *testing.T) {
+	// Same inputs as TestUnionThroughVertexBoundLastSegment, but Xor — the
+	// hot-through shared-apex confluence. At the shared vertex (9,8) A reaches
+	// its local-max plateau (right bound (3,6)->(9,8) + top horizontal) while B's
+	// right bound passes through (9,8) HOT (it carries its own ring across the
+	// vertex). The correct Xor is two disjoint CCW rings — (A\B) area 8.25 and
+	// (B\A) area 11.75 — touching at (9,8) and the crossing (2.5,8) but NOT
+	// merged; total ~20.0.
+	//
+	// Pre-fix the sweep closed A's right bound (Case A deferred handoff) BEFORE
+	// the top horizontal traversed; the horizontal then crossed B's left bound
+	// and was SwapOutrecs'd into B's ring, leaving B's two bounds same-side at
+	// B's apex (5,11). AddLocalMaxPoly's same-side workaround reversed and joined
+	// the two rings into one self-touching ring that visited (9,8) three times,
+	// collapsing Xor to 0.25. The fix defers A's plateau maximum until the
+	// horizontal reaches it (Clipper2 treats A's right-bound vertex as
+	// intermediate), so the horizontal's closeBound pairs cleanly and
+	// resolveBetweenMaxima crosses B's hot through-bound at the apex (DESIGN.md
+	// §12.11, hot-through shared-apex confluence).
+	a := Polygon{{0, 8}, {5, 3}, {3, 6}, {9, 8}}
+	b := Polygon{{2, 9}, {3, 7}, {9, 8}, {5, 11}}
+	if !a.IsCCW() {
+		a.Reverse()
+	}
+	if !b.IsCCW() {
+		b.Reverse()
+	}
+	got, err := Xor(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotArea := got.Area(); gotArea < 19.7 || gotArea > 20.3 {
+		t.Errorf("Xor area %v outside expected band [19.7,20.3] (truth ~20.0; pre-fix bug was 0.25)", gotArea)
+	}
+}
+
 func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	// A and B both reach their local MAXIMUM at the shared vertex (8,6) — four
 	// bounds (two per polygon) converging on one apex, with a cross-source

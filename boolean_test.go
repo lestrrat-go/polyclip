@@ -732,6 +732,49 @@ func TestSharedVertexExitViaHorizontal(t *testing.T) {
 	}
 }
 
+func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
+	// Two of A's vertices, (2,2) and (5,5), lie exactly on B's diagonal edge
+	// (0,0)-(7,7). SplitTJunctions splits that edge at both, and the resulting
+	// cross-source crossings reorder ring ownership so that at B's apex (7,7) the
+	// two B bounds arrive on the SAME side (both back) of different rings — the
+	// d50048a same-side AddLocalMaxPoly collision. The recovery used to reverse a
+	// fixed edge (e2), which here was the already-correctly-oriented ring, leaving
+	// a self-touching ring whose sub-loops cancel (Xor 13.2 vs truth 14.53).
+	//
+	// The fix re-derives front/back from the AEL order at the maximum (right bound
+	// = FrontEdge in polyclip's mirror) and reverses the genuinely-inverted ring
+	// (DESIGN.md §12.11). Validated against a Monte-Carlo area oracle, NOT
+	// Clipper2 — Clipper2 is itself wrong on this tiny-integer degenerate input
+	// (its Xor = 13.5). U/I/D were already correct and must stay so.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{2, 2}, {7, 2}, {5, 5}, {3, 5}})
+	b := mk(Polygon{{0, 0}, {7, 7}, {3, 4}, {2, 6}})
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 16.767},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 2.233},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 8.267},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 14.533},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

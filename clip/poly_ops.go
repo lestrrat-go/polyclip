@@ -112,12 +112,21 @@ func dispatchIntersect(
 	// coincident pairs (Reversed equal) are a genuine doubled boundary where one
 	// edge is interior, and fall through to normal dispatch. Xor is excluded:
 	// its coincident pairs are resolved by the standard maximum handling and it
-	// does not run the horz-join pass. (DESIGN.md §12.11.)
+	// does not run the horz-join pass.
+	//
+	// The skip applies only when NEITHER bound continues collinearly past the
+	// overlap (continuesCollinearHorizontal). SplitOverlaps fragments a long
+	// horizontal into pieces; when one bound's horizontal ends at the overlap
+	// (a local-max plateau) but the other continues past it, the coincident
+	// pair is a boundary EXIT, not a mutual cancellation — the continuing bound
+	// must re-spawn via the normal one-hot transfer, so do NOT skip there.
+	// (DESIGN.md §12.11.)
 	if op != OpXor && !samePolyType &&
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
 		e1.Seg.Reversed != e2.Seg.Reversed &&
-		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) {
+		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
+		!continuesCollinearHorizontal(e1) && !continuesCollinearHorizontal(e2) {
 		return nil
 	}
 
@@ -135,6 +144,25 @@ func dispatchIntersect(
 	default:
 		return branchNeitherHot(ael, op, e1, e2, pt, w1, w2, samePolyType)
 	}
+}
+
+// continuesCollinearHorizontal reports whether ae's bound continues past its
+// current horizontal segment with another collinear horizontal segment at the
+// same Y. SplitOverlaps fragments a long horizontal that partially overlaps a
+// different-source horizontal into adjacent pieces; when one source's bound
+// continues collinearly beyond the coincident overlap while the other's bound
+// ends there, the coincident pair is not a mutual cancellation but a boundary
+// EXIT — the continuing bound must re-spawn (normal dispatch), not be skipped.
+func continuesCollinearHorizontal(ae *ActiveEdge) bool {
+	if ae.Bound == nil {
+		return false
+	}
+	next := ae.EdgeIdx + 1
+	if next >= len(ae.Bound.Segs) {
+		return false
+	}
+	ns := ae.Bound.Segs[next]
+	return ns.Horizontal() && ns.Bot.Y == ae.Seg.Bot.Y
 }
 
 func branchBothHot(

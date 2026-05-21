@@ -114,19 +114,25 @@ func dispatchIntersect(
 	// its coincident pairs are resolved by the standard maximum handling and it
 	// does not run the horz-join pass.
 	//
-	// The skip applies only when NEITHER bound continues collinearly past the
-	// overlap (continuesCollinearHorizontal) AND the pair is not a re-spawn
-	// handoff (respawnHandoffAtOverlap). SplitOverlaps fragments a long
-	// horizontal into pieces; when one bound's horizontal ends at the overlap
-	// (a local-max plateau) but the other continues past it, the coincident
-	// pair is a boundary EXIT, not a mutual cancellation — the continuing bound
-	// must re-spawn via the normal one-hot transfer, so do NOT skip there.
-	// (DESIGN.md §12.11.)
+	// The skip applies only when at least one bound terminates at the overlap
+	// (IsBoundLast — a local-max plateau), NEITHER bound continues collinearly
+	// past the overlap (continuesCollinearHorizontal) AND the pair is not a
+	// re-spawn handoff (respawnHandoffAtOverlap). A genuine doubled-boundary
+	// cancellation has one polygon's bound turning at the shared edge (its
+	// plateau ends there); when BOTH bounds continue past the overlap with
+	// sloped/vertical edges the coincident horizontals are two live boundaries
+	// that each carry on — crossing them normally is required, so do NOT skip.
+	// SplitOverlaps fragments a long horizontal into pieces; when one bound's
+	// horizontal ends at the overlap but the other continues past it, the
+	// coincident pair is a boundary EXIT, not a mutual cancellation — the
+	// continuing bound must re-spawn via the normal one-hot transfer, so do NOT
+	// skip there either. (DESIGN.md §12.11.)
 	if op != OpXor && !samePolyType &&
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
 		e1.Seg.Reversed != e2.Seg.Reversed &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
+		(e1.IsBoundLast() || e2.IsBoundLast()) &&
 		!continuesCollinearHorizontal(e1) && !continuesCollinearHorizontal(e2) &&
 		!respawnHandoffAtOverlap(e1, e2) {
 		return nil

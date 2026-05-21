@@ -491,6 +491,54 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 	}
 }
 
+func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
+	// Two quads sharing a collinear horizontal edge with their interiors on
+	// OPPOSITE sides: A's bottom edge (4,4)-(5,4) (A above) coincides over x∈[4,5]
+	// with B's top edge (5,4)-(2,4) (B below). The shared edge is interior to the
+	// union and must cancel, with the two rings joined at the overlap endpoints
+	// into a single outline.
+	//
+	// Pre-fix, [IntersectEdges] crossed the coincident pair: both-hot it fired
+	// AddLocalMaxPoly (dropping A's continuation to apex (1,7) — Union got 6.0
+	// vs 8.5); one-hot (Difference) it ran AddOutPt+SwapOutrecs, transferring A's
+	// ring onto B's cold edge and collapsing it (got 0 vs 2.5). The fix detects a
+	// coincident, opposite-interior (Seg.Reversed differs), positive-overlap
+	// horizontal pair as a NON-crossing: it skips any ring-op and lets
+	// [sweep.processHorzJoins] reconnect the two runs (DESIGN.md §12.11). Matches
+	// Clipper2, which emits one ring [(1,7)(4,4)(2,4)(0,2)(3,2)(5,4)(7,3)].
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{4, 4}, {5, 4}, {7, 3}, {1, 7}})
+	b := mk(Polygon{{0, 2}, {3, 2}, {5, 4}, {2, 4}})
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{"Union", func() (MultiPolygon, error) { return Union(a, b) }, 8.5},
+		{"Intersect", func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
+		{"Difference", func() (MultiPolygon, error) { return Difference(a, b) }, 2.5},
+		{"Xor", func() (MultiPolygon, error) { return Xor(a, b) }, 8.5},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.01 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+	// Union must be a single merged ring, not two touching rings.
+	if got, _ := Union(a, b); len(got) != 1 {
+		t.Errorf("Union: got %d rings, want 1 merged ring", len(got))
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

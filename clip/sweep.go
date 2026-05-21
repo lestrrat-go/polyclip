@@ -102,6 +102,13 @@ type sweep struct {
 	// DESIGN.md §12.6 / §12.10). Cleared by [flushPendingHoriz].
 	pendingHoriz []*ActiveEdge
 
+	// horzSegList accumulates trial horizontal-join anchors emitted during the
+	// current scanline's horizontal pass; horzJoinList accumulates the
+	// confirmed joins built from them at end-of-scanline. See [horzjoin.go] /
+	// Clipper2 horz_seg_list_ / horz_join_list_ (DESIGN.md §12.11).
+	horzSegList  []*horzSegment
+	horzJoinList []horzJoin
+
 	// boundModel is true when [BuildLocalMinima] succeeded and every segment
 	// is claimed by a bound — the scanline is then processed in Clipper2's
 	// beam phases (intersections, then ALL tops, then ALL local minima, then
@@ -237,8 +244,21 @@ func (s *sweep) run() {
 		if s.boundModel {
 			s.reconcileSharedVertexCrossings(y)
 		}
+		// End of this scanline's horizontal processing: pair overlapping
+		// opposite-direction horizontal runs into deferred joins, then clear
+		// the trial list (Clipper2 ExecuteInternal, engine.cpp:2132). Xor does
+		// not use the horz-join pass (its coincident horizontals are resolved by
+		// the standard maximum handling).
+		if s.op != OpXor && len(s.horzSegList) > 0 {
+			s.convertHorzSegsToJoins()
+		}
 		prevY = y
 		started = true
+	}
+	// Splice every deferred horizontal join now that the global ring topology
+	// is settled (Clipper2 ExecuteInternal's final ProcessHorzJoins, eng:2143).
+	if s.op != OpXor {
+		s.processHorzJoins()
 	}
 }
 
@@ -1348,6 +1368,12 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 		// it again here can duplicate the vertex when an intervening ring-join
 		// (a shared local maximum) has moved the chain head, so doHorizontal
 		// only emits crossings and the far endpoint.
+		//
+		// Register the near endpoint as a trial horizontal-join anchor
+		// (Clipper2 DoHorizontal's leading AddTrialHorzJoin, engine.cpp:2567).
+		if s.op != OpXor && horz.IsHotEdge() {
+			s.addTrialHorzJoin(getLastOp(horz))
+		}
 
 		// Walk and intersect every edge strictly inside the span.
 		for {
@@ -1380,6 +1406,12 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 			pt := fixed.Point{X: eX, Y: y}
 			IntersectEdges(s.ael, s.op, horz, e, pt)
 			horz.CurrX = eX
+			// The op IntersectEdges just emitted for the horizontal is a trial
+			// join anchor (Clipper2 AddTrialHorzJoin(GetLastOp(horz)),
+			// engine.cpp:2657). horz may have gone cold (its ring closed), so guard.
+			if s.op != OpXor && horz.IsHotEdge() {
+				s.addTrialHorzJoin(getLastOp(horz))
+			}
 		}
 
 		// Reached the far end. If this horizontal is the bound's last
@@ -1391,7 +1423,12 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 
 		// Emit the far endpoint, then promote the cursor in place.
 		if horz.IsHotEdge() {
-			AddOutPt(horz, fixed.Point{X: farX, Y: y})
+			op := AddOutPt(horz, fixed.Point{X: farX, Y: y})
+			// Far endpoint of an intermediate horizontal is a trial join anchor
+			// (Clipper2 DoHorizontal's intermediate AddTrialHorzJoin, eng:2691).
+			if s.op != OpXor {
+				s.addTrialHorzJoin(op)
+			}
 		}
 		delete(s.bySeg, horz.Seg)
 		horz.EdgeIdx++

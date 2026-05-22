@@ -989,7 +989,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	// central peak of a W-shape). FRONT edge passed first by convention so the
 	// local-max vertex prepends to Pts. Gated on IsHotEdge (not Contributing):
 	// a post-swap reclassification can leave an edge non-contributing yet still
-	// hot, and its ring must still close/join (DESIGN.md §12.10.8 Rule 1).
+	// hot, and its ring must still close/join (DESIGN.md §12.10.7 Rule 1).
 	if partner := s.maximaPartner(ae, maxPt); partner != nil {
 		// Resolve any edges lying strictly between ae and its maxima partner
 		// (a multi-edge confluence: another shape's bounds pass through maxPt

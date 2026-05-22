@@ -89,6 +89,17 @@ func onCollinearSegment(s Segment, p fixed.Point) bool {
 // caller has verified that the segments cross strictly, so the determinant
 // denominator is non-zero. The result is rounded to the integer grid.
 func properIntersection(a, b Segment) fixed.Point {
+	// Order the two segments deterministically so the rounded crossing point
+	// does not depend on the caller's argument order. The point is computed by
+	// parametrising along a, and float rounding of a+t*dir differs from
+	// b+u*dir for the same geometric crossing. doIntersections can compute the
+	// same crossing in two adjacent beams with the segments in swapped AEL
+	// order (the crossing itself swaps them); an order-dependent result lets the
+	// second value land one unit past the beam boundary, escaping the
+	// already-handled guard and dispatching the crossing twice (DESIGN.md §12.11).
+	if segCanonLess(b, a) {
+		a, b = b, a
+	}
 	ax := float64(int64(a.Top.X) - int64(a.Bot.X))
 	ay := float64(int64(a.Top.Y) - int64(a.Bot.Y))
 	bx := float64(int64(b.Top.X) - int64(b.Bot.X))
@@ -151,6 +162,22 @@ func collinearOverlap(a, b Segment) IntersectResult {
 		q = b.Top
 	}
 	return IntersectResult{Kind: CollinearOverlap, P: p, Q: q}
+}
+
+// segCanonLess orders two segments by their (Bot, Top) endpoints lexically.
+// Used to canonicalise the argument order of [properIntersection] so its
+// rounded result is independent of caller order.
+func segCanonLess(a, b Segment) bool {
+	if a.Bot.X != b.Bot.X {
+		return a.Bot.X < b.Bot.X
+	}
+	if a.Bot.Y != b.Bot.Y {
+		return a.Bot.Y < b.Bot.Y
+	}
+	if a.Top.X != b.Top.X {
+		return a.Top.X < b.Top.X
+	}
+	return a.Top.Y < b.Top.Y
 }
 
 func minCoord(a, b fixed.Coord) fixed.Coord {

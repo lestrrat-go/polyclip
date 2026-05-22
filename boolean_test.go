@@ -1397,6 +1397,45 @@ func TestCollinearMidVertexSimplified(t *testing.T) {
 	}
 }
 
+func TestCrossingSnapsOrderIndependently(t *testing.T) {
+	// Seed FuzzIntersect/ff9aee9b909462b0. A's bottom edge (-10,-10)-(48,48)
+	// lies on y=x and crosses B's vertical edge x=3 at the lattice point (3,3).
+	// The proper-crossing point was computed by parametrising along the FIRST
+	// argument of properIntersection, so the same geometric crossing rounded to
+	// two grid points one unit apart depending on argument order. doIntersections
+	// computed that crossing in two adjacent beams with the edges in swapped AEL
+	// order (the crossing itself swaps them); the second value escaped the
+	// already-handled "<= botY" beam guard, so the crossing was dispatched twice
+	// and the second dispatch undid the first — leaving A's diagonal on the wrong
+	// ring above (3,3). Union collapsed 2516.89->147.86 and Intersect bloated
+	// 351.11->1380.49 (X was unaffected because it ignores WindOther). Ordering
+	// the two segments canonically in properIntersection makes the rounded point
+	// independent of caller order, so the guard reliably suppresses the second
+	// dispatch (DESIGN.md §12.11). Areas validated against a Monte-Carlo oracle
+	// (U=I+X, D=|A|-I, X=U-I all hold), NOT Clipper2.
+	a := makeQuad(-10, -10, 48, 48, 10, 40, -10, 65)
+	b := makeQuad(-3, 53, 3, -114, 3, 99, -36, 3)
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 2516.885291},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 351.114709},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 1268.885291},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 2165.770582},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestSimplifyCollinearRing(t *testing.T) {
 	// Unit-level: collinear-through vertices removed, real corners and rings
 	// with a repeated vertex preserved.

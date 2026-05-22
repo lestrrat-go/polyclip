@@ -27,6 +27,32 @@ func TestIntersectProperCross(t *testing.T) {
 	}
 }
 
+func TestIntersectProperCrossOrderIndependent(t *testing.T) {
+	// The proper-crossing point is parametrised along the first argument, so
+	// float rounding of a+t*dir vs b+u*dir can land the same geometric crossing
+	// on grid points one unit apart depending on argument order. doIntersections
+	// computes the same crossing in adjacent beams with the edges swapped; an
+	// order-dependent result escapes the beam's already-handled guard and gets
+	// dispatched twice (FuzzIntersect/ff9aee9b909462b0). properIntersection now
+	// orders its arguments canonically, so the result must be identical both ways.
+	cases := [][2]Segment{
+		{seg(0, 0, 10, 10), seg(0, 10, 10, 0)},
+		{seg(-10, -7, 48, 51), seg(3, -114, 3, 99)},
+		{seg(-100, 3, 100, 7), seg(1, -50, -3, 60)},
+		{seg(-7, -3, 11, 41), seg(-30, 5, 22, -9)},
+	}
+	for i, c := range cases {
+		ab := Intersect(c[0], c[1])
+		ba := Intersect(c[1], c[0])
+		if ab.Kind != ProperCross || ba.Kind != ProperCross {
+			t.Fatalf("case %d: not a proper cross (%v,%v)", i, ab.Kind, ba.Kind)
+		}
+		if ab.P != ba.P {
+			t.Errorf("case %d: order-dependent crossing %+v vs %+v", i, ab.P, ba.P)
+		}
+	}
+}
+
 func TestIntersectTouchAtEndpoint(t *testing.T) {
 	a := seg(0, 0, 10, 0)
 	b := seg(5, 0, 5, 10)

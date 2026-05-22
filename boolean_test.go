@@ -869,6 +869,52 @@ func TestXorVertexOnEdgeApexMerge(t *testing.T) {
 	}
 }
 
+func TestUnionNotchTipOnHorizontalEdge(t *testing.T) {
+	// A's vertex (6,5) is a concave-notch local maximum: A's two lower edges
+	// (3,3)-(6,5) and (7,3)-(6,5) both end at (6,5), where A's source CLOSES a
+	// maximum. B's horizontal edge (5,5)-(8,5) passes exactly through (6,5)
+	// (SplitTJunctions splits it there). For Union, A's notch edges are hot, so
+	// at the apex closeBound ran handoffMaxThroughVertex FIRST and saw B's cold
+	// horizontal piece as a through-edge "continuing above" — it crossed A's hot
+	// edge with it via IntersectEdges, whose SwapOutrecs moved A's ring onto the
+	// horizontal, leaving A's edge cold so the genuine maximum (A's two edges)
+	// never closed. The result shattered (Union 3.38 vs 14.29). I/D/X were
+	// already correct because A's notch edges are not hot there.
+	//
+	// The fix: handoffMaxThroughVertex returns early when ae has a same-source
+	// maxima partner at maxPt — a genuine maximum is closed by the maximaPartner/
+	// resolveBetweenMaxima path, which crosses true between-edges itself; the
+	// standalone hand-off is only for a vertex-on-edge EXIT with no such partner
+	// (DESIGN.md §12.11). Validated against a Monte-Carlo area oracle.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{6, 5}, {7, 3}, {7, 8}, {3, 3}}) // |A| = 6
+	b := mk(Polygon{{8, 5}, {2, 6}, {3, 0}, {5, 5}}) // |B| = 10
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 14.2879},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 1.7121},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 4.2879},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 12.5758},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 	// B's vertices (2,2) and (3,3) lie on A's diagonal edge y=x. The bound that
 	// maxes out at a shared through-vertex must close its cross-source ring when

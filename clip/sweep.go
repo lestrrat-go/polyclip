@@ -1147,6 +1147,19 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 // rather than the cursor's current segment, because the cursor's position at a
 // confluence is timing-dependent (see [boundContinuesAbove]).
 func (s *sweep) handoffMaxThroughVertex(ae *ActiveEdge, maxPt fixed.Point) {
+	// A genuine same-source maximum partner at maxPt means ae's source CLOSES a
+	// maximum here (e.g. a concave-notch tip, both A-edges ending at maxPt) — the
+	// boundary does not hand off to another bound, it turns around. The
+	// maximaPartner / resolveBetweenMaxima path in closeBound handles such a
+	// closure, crossing any genuine between-edges itself. Handing off first would
+	// SwapOutrecs ae's hot ring onto a through-edge that merely PASSES THROUGH the
+	// apex (e.g. the other source's horizontal edge crossing the notch tip),
+	// leaving ae cold so the maximum never closes and the rings tangle (DESIGN.md
+	// §12.11, notch-tip on a crossing horizontal). The handoff is only for a true
+	// vertex-on-edge EXIT where ae's source has no second edge ending at maxPt.
+	if s.maximaPartner(ae, maxPt) != nil {
+		return
+	}
 	// crossed guards against re-crossing the same edge: IntersectEdges swaps the
 	// pair's AEL positions, so a still-hot ae could otherwise oscillate across
 	// the same neighbour. Each through-edge is crossed at most once.

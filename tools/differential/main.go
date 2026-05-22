@@ -40,6 +40,7 @@ type genMode int
 const (
 	genRandom     genMode = iota // two independent random quads
 	genDegenerate                // B forced to share a degeneracy with A
+	genHole                      // A is a square with a hole; B touches the hole
 )
 
 type scenario struct {
@@ -80,6 +81,16 @@ var scenarios = []scenario{
 		seeds: 6, pairs: 3000, samples: 60000, tol: 0.6,
 		mode: genDegenerate, checkMC: true, checkIdentity: true,
 	},
+	// Holes: A is an [0,ext] square with a random CW hole; B is a quad that
+	// frequently touches or crosses the hole boundary (forced-degenerate
+	// against the hole ring). Exercises the hole-nesting path (interiorPoint /
+	// ringInside / hole-vs-outer classification) that the quad-only scenarios
+	// never reach.
+	{
+		name: "holes", ext: 12,
+		seeds: 6, pairs: 3000, samples: 60000, tol: 0.6,
+		mode: genHole, checkMC: true, checkIdentity: true,
+	},
 }
 
 func main() {
@@ -97,8 +108,100 @@ func main() {
 
 type fail struct {
 	op        string
-	a, b      polyclip.Polygon
+	a, b      polyclip.MultiPolygon
 	got, want float64
+}
+
+// genPair builds an (A, B) input pair for the scenario's mode. It returns
+// ok=false when a valid pair couldn't be built (caller skips the iteration).
+// The genRandom/genDegenerate rng call sequences are kept identical to the
+// original inline code so those scenarios' pair streams don't shift.
+func genPair(rng *rand.Rand, sc scenario) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
+	switch sc.mode {
+	case genRandom:
+		a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: randQuad(rng, sc.ext)}}
+		b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: randQuad(rng, sc.ext)}}
+		return a, b, true
+	case genDegenerate:
+		ra := randQuad(rng, sc.ext)
+		rb, ok := forceDegenerate(rng, sc.ext, ra, rng.Intn(3))
+		if !ok {
+			return nil, nil, false
+		}
+		a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: ra}}
+		b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rb}}
+		return a, b, true
+	case genHole:
+		return genHolePair(rng, sc.ext)
+	}
+	return nil, nil, false
+}
+
+// genHolePair returns A = an [0,ext] square with a single random CW hole, and
+// B = a quad that (half the time) is forced to share a degeneracy with the
+// hole ring so it touches or crosses the hole boundary. Both inputs are
+// Validate()-checked, so only well-formed MultiPolygons reach the engine.
+func genHolePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
+	e := float64(ext)
+	outer := polyclip.Polygon{{X: 0, Y: 0}, {X: e, Y: 0}, {X: e, Y: e}, {X: 0, Y: e}}
+	hole := innerQuad(rng, ext)
+	if hole == nil {
+		return nil, nil, false
+	}
+	a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: outer, Holes: []polyclip.Polygon{hole}}}
+
+	var rb polyclip.Polygon
+	if rng.Intn(2) == 0 {
+		var ok bool
+		if rb, ok = forceDegenerate(rng, ext, hole, rng.Intn(3)); !ok {
+			return nil, nil, false
+		}
+	} else {
+		rb = randQuad(rng, ext)
+	}
+	b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rb}}
+
+	if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
+		return nil, nil, false
+	}
+	return a, b, true
+}
+
+// innerQuad returns a simple CW quad of 4 distinct lattice points strictly
+// inside the [0,ext] square (coords in [3,ext-3]), suitable as a hole. Returns
+// nil when ext is too small or no valid quad was found in a bounded number of
+// attempts.
+func innerQuad(rng *rand.Rand, ext int) polyclip.Polygon {
+	lo, hi := 3, ext-3
+	if hi-lo < 2 {
+		return nil
+	}
+	for range 60 {
+		pts := make([]polyclip.Point, 4)
+		seen := map[[2]int]struct{}{}
+		ok := true
+		for i := range 4 {
+			x, y := lo+rng.Intn(hi-lo+1), lo+rng.Intn(hi-lo+1)
+			if _, dup := seen[[2]int{x, y}]; dup {
+				ok = false
+				break
+			}
+			seen[[2]int{x, y}] = struct{}{}
+			pts[i] = polyclip.Point{X: float64(x), Y: float64(y)}
+		}
+		if !ok {
+			continue
+		}
+		ring := polyclip.Polygon{pts[0], pts[1], pts[2], pts[3]}
+		if !validQuad(ring) {
+			continue
+		}
+		if ring.IsCCW() { // a hole must be CW
+			ring.Reverse()
+		}
+		return ring
+	}
+	return nil
 }
 
 func run(sc scenario) {
@@ -110,18 +213,10 @@ func run(sc scenario) {
 		// change) doesn't shift the pair stream between runs.
 		mcRng := rand.New(rand.NewSource(int64(seed)*104729 + 3))
 		for range sc.pairs {
-			ra := randQuad(rng, sc.ext)
-			var rb polyclip.Polygon
-			if sc.mode == genDegenerate {
-				var ok bool
-				if rb, ok = forceDegenerate(rng, sc.ext, ra, rng.Intn(3)); !ok {
-					continue
-				}
-			} else {
-				rb = randQuad(rng, sc.ext)
+			a, b, ok := genPair(rng, sc)
+			if !ok {
+				continue
 			}
-			a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: ra}}
-			b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rb}}
 			if !a.BoundingBox().Intersects(b.BoundingBox()) {
 				continue
 			}
@@ -138,7 +233,7 @@ func run(sc scenario) {
 			uA, iA, dA, xA := gu.Area(), gi.Area(), gd.Area(), gx.Area()
 			check := func(op string, got, want float64) {
 				if math.Abs(got-want) > sc.tol {
-					fails = append(fails, fail{op, ra, rb, got, want})
+					fails = append(fails, fail{op, a, b, got, want})
 				}
 			}
 			if sc.checkMC {

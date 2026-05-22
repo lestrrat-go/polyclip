@@ -1631,3 +1631,88 @@ func TestUnionAllDoesNotMutateInput(t *testing.T) {
 		}
 	}
 }
+
+func TestBooleanInputHoleIslandNesting(t *testing.T) {
+	// A is a 10x10 square with a centered 6x6 hole (area 64). B is a 2x2 square
+	// entirely inside that hole (area 4). The union's three boundary rings are
+	// the square (CCW, depth 0 -> filled), the 6x6 hole (CW, depth 1 -> hole of
+	// the square), and B (CCW, depth 2 -> a filled ISLAND that sits in the hole,
+	// hence its own top-level ExPolygon, not a hole). assembleResult computed
+	// nesting depth among outer rings only, so it saw B as directly inside the
+	// square (depth 1) and wrongly demoted it to a hole, dropping the real 6x6
+	// hole (Union/Xor 96 instead of 68). It now builds the containment forest
+	// over ALL rings (DESIGN.md §11.9). Values are exact (axis-aligned).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []Polygon{{{X: 2, Y: 2}, {X: 2, Y: 8}, {X: 8, Y: 8}, {X: 8, Y: 2}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 4, Y: 6}}}}
+
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 68},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 64},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 68},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+
+	// The union must keep the island as a SEPARATE top-level piece, and the
+	// square must keep its 6x6 hole — exactly two pieces, one holed, one not.
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	if len(u) != 2 {
+		t.Fatalf("union pieces = %d, want 2 (square+hole, island)", len(u))
+	}
+	holed, island := 0, 0
+	for _, ex := range u {
+		switch len(ex.Holes) {
+		case 1:
+			holed++
+		case 0:
+			island++
+		}
+	}
+	if holed != 1 || island != 1 {
+		t.Errorf("union pieces: holed=%d island=%d, want 1 and 1", holed, island)
+	}
+}
+
+func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
+	// A and B are the SAME quad with vertices rotated by one position, so the
+	// mpolyEqual idempotency short-circuit (which compares vertex order) does
+	// NOT fire and the engine runs. The sweep emits the region twice — once CCW
+	// and once CW (coincident boundaries) — which must cancel to zero area.
+	// assembleResult's containment forest treats two equal-area coincident
+	// rings as outer+hole via an orientation tie-break (DESIGN.md §11.9); a
+	// strict larger-area rule alone left both as filled outers (area doubled).
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 11}, {X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}, {X: 7, Y: 11}}}}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	if d.Area() > 0.02 {
+		t.Errorf("Difference area %v want 0", d.Area())
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	if x.Area() > 0.02 {
+		t.Errorf("Xor area %v want 0", x.Area())
+	}
+}

@@ -3,6 +3,7 @@ package polyclip
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/lestrrat-go/polyclip/clip"
@@ -348,9 +349,9 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	type classified struct {
 		poly Polygon
 		bbox BBox
+		area float64 // absolute (unsigned) area
 	}
-	var outers []classified
-	var holes []classified
+	var rings2 []classified
 
 	// ringInside reports whether inner is nested within outer. The sweep's
 	// output rings have pairwise-disjoint interiors (they partition the plane
@@ -399,131 +400,95 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 			for i, fp := range fixedPts {
 				poly[i].X, poly[i].Y = scale.Unsnap(fp)
 			}
-			c := classified{poly: poly, bbox: poly.BoundingBox()}
-			if poly.SignedArea() > 0 {
-				outers = append(outers, c)
-			} else {
-				holes = append(holes, c)
-			}
+			rings2 = append(rings2, classified{
+				poly: poly, bbox: poly.BoundingBox(),
+				area: math.Abs(poly.SignedArea()),
+			})
 		}
 	}
 
-	// First pass: resolve hole→outer ownership. CW rings (negative signed
-	// area) with no enclosing outer are not actually holes — they came out
-	// of the sweep in CW direction (typical of Intersect / Difference /
-	// Xor where the cycle's Front/Back assignment differs from Union's).
-	// Reverse them and promote to outers (DESIGN.md §11.9 + §12.10).
-	holeOwners := make([]int, len(holes))
-	for hi, h := range holes {
-		holeOwners[hi] = -1
-		if len(h.poly) == 0 {
+	// Containment forest over ALL rings, regardless of orientation. The sweep's
+	// output rings have pairwise-disjoint interiors, so any two are either
+	// disjoint or one strictly contains the other. parent[i] is the smallest
+	// ring containing ring i (its immediate container), or -1 if i is
+	// top-level. The sweep's own CCW/CW orientation is NOT used to classify
+	// outer-vs-hole: it is locally meaningful but does not encode nesting depth
+	// (an island inside a hole is CCW yet must become a filled top-level piece;
+	// an Intersect cycle can emit a sole region CW). Depth parity is the only
+	// reliable signal — see DESIGN.md §11.9 / §12.10.
+	//
+	// canContain reports whether j may be i's container. A strictly larger ring
+	// can. Two coincident rings have EQUAL area and mutually contain each other
+	// (same boundary; e.g. Difference/Xor of identical inputs emits the region
+	// once CCW and once CW, which must cancel to zero area): the tie is broken
+	// by orientation — the filled (CCW) ring is the parent, the hole (CW) ring
+	// the child — so the pair nests as outer+hole and cancels.
+	canContain := func(j, i int) bool {
+		if rings2[j].area > rings2[i].area {
+			return true
+		}
+		return rings2[j].area == rings2[i].area &&
+			rings2[j].poly.SignedArea() > 0 && rings2[i].poly.SignedArea() < 0
+	}
+	parent := make([]int, len(rings2))
+	for i := range rings2 {
+		parent[i] = -1
+		if len(rings2[i].poly) == 0 {
 			continue
 		}
-		var ownerArea float64
-		for i, o := range outers {
-			if !ringInside(h, o) {
+		for j := range rings2 {
+			if i == j || len(rings2[j].poly) == 0 {
 				continue
 			}
-			a := o.poly.Area()
-			if holeOwners[hi] == -1 || a < ownerArea {
-				holeOwners[hi] = i
-				ownerArea = a
-			}
-		}
-		if holeOwners[hi] < 0 {
-			holes[hi].poly.Reverse()
-			outers = append(outers, holes[hi])
-			holes[hi] = classified{}
-		}
-	}
-
-	// Nested-outer demotion: when the sweep emits both an outer ring and
-	// an inner ring as CCW (e.g. Difference outer-minus-inner produces
-	// both rings CCW because our FrontEdge convention doesn't naturally
-	// reverse for holes), the inner-most must be demoted to a hole of
-	// its enclosing outer. Detect by point-in-polygon containment.
-	type outerOwner struct {
-		idx  int // -1 if this outer is top-level; else index of containing outer
-		area float64
-	}
-	owners := make([]outerOwner, len(outers))
-	for i := range outers {
-		owners[i] = outerOwner{idx: -1, area: outers[i].poly.Area()}
-	}
-	for i, oi := range outers {
-		if len(oi.poly) == 0 {
-			continue
-		}
-		for j, oj := range outers {
-			if i == j || len(oj.poly) == 0 {
+			if !canContain(j, i) {
 				continue
 			}
-			// Only the LARGER polygon can contain the smaller — protects
-			// against mutual-containment false positives when both rings
-			// share a centroid (concentric polygons).
-			if owners[j].area <= owners[i].area {
+			if !ringInside(rings2[i], rings2[j]) {
 				continue
 			}
-			if !ringInside(oi, oj) {
-				continue
-			}
-			// oj contains oi. Track the SMALLEST containing outer.
-			if owners[i].idx == -1 || owners[j].area < owners[owners[i].idx].area {
-				owners[i].idx = j
+			// Prefer the smallest container; among equal-area coincident
+			// containers any is fine (there is normally just one).
+			if parent[i] == -1 || rings2[j].area < rings2[parent[i]].area {
+				parent[i] = j
 			}
 		}
 	}
 
-	// Determine nesting depth via parent chain. Even depth = outer; odd = hole.
+	// depth(i) = number of rings strictly containing i. Even depth = a filled
+	// region (the outer of an ExPolygon); odd depth = a hole. A hole's parent
+	// has depth one less, so it is always an even-depth filled ring — attach
+	// the hole directly to it. A filled ring at depth ≥ 2 (an island inside a
+	// hole) is a top-level ExPolygon of its own (MultiPolygon is flat).
 	depth := func(i int) int {
 		d := 0
-		for owners[i].idx != -1 {
-			i = owners[i].idx
+		for parent[i] != -1 {
+			i = parent[i]
 			d++
 		}
 		return d
 	}
 
-	resultOuters := make([]int, 0, len(outers))
-	for i := range outers {
-		if depth(i)%2 == 0 {
-			resultOuters = append(resultOuters, i)
-		} else {
-			// Demote to a hole of its parent outer. Reverse direction.
-			outers[i].poly.Reverse()
-		}
-	}
-
-	idxMap := make(map[int]int, len(resultOuters))
-	result := make(MultiPolygon, len(resultOuters))
-	for k, i := range resultOuters {
-		idxMap[i] = k
-		result[k] = ExPolygon{Outer: outers[i].poly}
-	}
-	// Attach demoted outers as holes of their parents.
-	for i := range outers {
-		if depth(i)%2 == 0 {
+	idxMap := make(map[int]int, len(rings2))
+	var result MultiPolygon
+	for i := range rings2 {
+		if len(rings2[i].poly) == 0 || depth(i)%2 != 0 {
 			continue
 		}
-		// Find the nearest outer ancestor (parent with even depth).
-		ancestor := owners[i].idx
-		for ancestor != -1 && depth(ancestor)%2 != 0 {
-			ancestor = owners[ancestor].idx
+		if rings2[i].poly.SignedArea() < 0 { // a filled ring must be CCW
+			rings2[i].poly.Reverse()
 		}
-		if ancestor < 0 {
-			continue
-		}
-		if k, ok := idxMap[ancestor]; ok {
-			result[k].Holes = append(result[k].Holes, outers[i].poly)
-		}
+		idxMap[i] = len(result)
+		result = append(result, ExPolygon{Outer: rings2[i].poly})
 	}
-	// Attach explicit CW holes.
-	for hi, owner := range holeOwners {
-		if owner < 0 || holes[hi].poly == nil {
+	for i := range rings2 {
+		if len(rings2[i].poly) == 0 || depth(i)%2 == 0 {
 			continue
 		}
-		if k, ok := idxMap[owner]; ok {
-			result[k].Holes = append(result[k].Holes, holes[hi].poly)
+		if rings2[i].poly.SignedArea() > 0 { // a hole must be CW
+			rings2[i].poly.Reverse()
+		}
+		if k, ok := idxMap[parent[i]]; ok {
+			result[k].Holes = append(result[k].Holes, rings2[i].poly)
 		}
 	}
 

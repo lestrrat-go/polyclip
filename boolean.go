@@ -327,19 +327,31 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		if r.Pts == nil {
 			continue
 		}
-		fixedPts := dedupConsecutive(r.Points())
-		if len(fixedPts) < 3 {
+		base := dedupConsecutive(r.Points())
+		if len(base) < 3 {
 			continue
 		}
-		poly := make(Polygon, len(fixedPts))
-		for i, fp := range fixedPts {
-			poly[i].X, poly[i].Y = scale.Unsnap(fp)
-		}
-		c := classified{poly: poly, bbox: poly.BoundingBox()}
-		if poly.SignedArea() > 0 {
-			outers = append(outers, c)
-		} else {
-			holes = append(holes, c)
+		// A ring that revisits a vertex is self-touching — two boundary loops
+		// meeting at a shared point, produced when an input vertex lies on the
+		// other source's edge (vertex-on-edge degeneracy) or when the sweep
+		// merges rings at a same-side maximum (AddLocalMaxPoly's figure-8 pinch).
+		// Decompose into simple loops so each is classified independently; a
+		// single self-touching cycle would yield a wrong net shoelace area.
+		// Simple rings have no repeats and pass through unchanged.
+		for _, fixedPts := range splitSelfTouchingRings(base) {
+			if len(fixedPts) < 3 {
+				continue
+			}
+			poly := make(Polygon, len(fixedPts))
+			for i, fp := range fixedPts {
+				poly[i].X, poly[i].Y = scale.Unsnap(fp)
+			}
+			c := classified{poly: poly, bbox: poly.BoundingBox()}
+			if poly.SignedArea() > 0 {
+				outers = append(outers, c)
+			} else {
+				holes = append(holes, c)
+			}
 		}
 	}
 
@@ -472,6 +484,35 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 // one ring side) and again when AddLocalMaxPoly closes the ring on the other
 // side — leaving a zero-length edge. Clipper2 strips these in its output
 // stage (BuildPath); this is the equivalent cleanup.
+// splitSelfTouchingRings decomposes a closed ring whose vertex list repeats a
+// vertex into simple loops. Walking the vertices, whenever the walk returns to
+// a vertex already on the open path, the run since that vertex forms a closed
+// sub-loop and is split off; the shared vertex stays on the continuing path.
+// The result loops are each simple (no internal repeats). A ring with no
+// repeated vertex returns as a single loop unchanged.
+func splitSelfTouchingRings(pts []fixed.Point) [][]fixed.Point {
+	var loops [][]fixed.Point
+	stack := make([]fixed.Point, 0, len(pts))
+	at := make(map[fixed.Point]int, len(pts))
+	for _, p := range pts {
+		if j, ok := at[p]; ok {
+			loop := make([]fixed.Point, len(stack)-j)
+			copy(loop, stack[j:])
+			loops = append(loops, loop)
+			for k := j; k < len(stack); k++ {
+				delete(at, stack[k])
+			}
+			stack = stack[:j]
+		}
+		stack = append(stack, p)
+		at[p] = len(stack) - 1
+	}
+	if len(stack) > 0 {
+		loops = append(loops, stack)
+	}
+	return loops
+}
+
 func dedupConsecutive(pts []fixed.Point) []fixed.Point {
 	if len(pts) < 2 {
 		return pts

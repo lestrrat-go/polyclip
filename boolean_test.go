@@ -809,6 +809,102 @@ func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
 	}
 }
 
+func TestXorVertexOnEdgeApexMerge(t *testing.T) {
+	// Vertex-on-edge degeneracy where the bottom-up sweep builds two interleaved
+	// rings that meet SAME-side at a maximum apex. The d50048a relabel+join
+	// recovery folds the apex into a degenerate spike (the apex triangle's area
+	// is lost): X-midvtx Xor was 8.94 vs truth 10.28, X-sharedvtx Xor 4.6 vs
+	// 14.10. AddLocalMaxPoly now merges the two terminal rings as a figure-8
+	// pinch at the apex and assembleResult's splitSelfTouchingRings decomposes
+	// the self-touching walk into the correct simple rings (DESIGN.md §12.11).
+	// Validated against a Monte-Carlo oracle (Xor == Union-Intersect), NOT
+	// Clipper2, which rounds these fractional intersections at native scale.
+	// U/I/D were already correct and must stay so.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	cases := []struct {
+		name         string
+		a, b         Polygon
+		wantU, wantI float64
+		wantD, wantX float64
+	}{
+		{
+			// A's vertex (6,6) lies on B's edge (8,7)-(4,5); the apex triangle
+			// (8,7),(6,6),(5.333,4.333) was collapsing to a spike.
+			"midvtx",
+			Polygon{{4, 1}, {6, 6}, {3, 6}, {0, 6}}, Polygon{{2, 4}, {3, 2}, {8, 7}, {4, 5}},
+			16.3889, 6.1111, 8.8889, 10.2778,
+		},
+		{
+			"sharedvtx",
+			Polygon{{4, 1}, {7, 3}, {5, 4}, {4, 3}}, Polygon{{3, 4}, {5, 4}, {7, 2}, {8, 8}},
+			14.8000, 0.7000, 3.8000, 14.1000,
+		},
+	}
+	for _, c := range cases {
+		a, b := mk(c.a), mk(c.b)
+		checks := []struct {
+			op   string
+			run  func() (MultiPolygon, error)
+			want float64
+		}{
+			{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, c.wantU},
+			{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, c.wantI},
+			{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, c.wantD},
+			{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, c.wantX},
+		}
+		for _, ck := range checks {
+			got, err := ck.run()
+			if err != nil {
+				t.Fatalf("%s/%s: unexpected error: %v", c.name, ck.op, err)
+			}
+			if math.Abs(got.Area()-ck.want) > 0.02 {
+				t.Errorf("%s/%s area %v want %v", c.name, ck.op, got.Area(), ck.want)
+			}
+		}
+	}
+}
+
+func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
+	// B's vertices (2,2) and (3,3) lie on A's diagonal edge y=x. The bound that
+	// maxes out at a shared through-vertex must close its cross-source ring when
+	// the coupled (continuing) bound becomes non-contributing above the vertex;
+	// otherwise the continuing edge drags a spurious sub-loop in and the
+	// Intersect region cancels (was 2.97 vs truth 1.47). Validated vs a
+	// Monte-Carlo oracle (DESIGN.md §12.11). U/D/X already correct.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{0, 0}, {4, 4}, {8, 5}, {1, 8}})
+	b := mk(Polygon{{2, 2}, {5, 2}, {3, 3}, {0, 3}})
+	checks := []struct {
+		op   string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 25.0331},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 1.4669},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 22.0331},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 23.5662},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.op, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.op, got.Area(), c.want)
+		}
+	}
+}
+
 func TestUnionDisjointDiamonds(t *testing.T) {
 	// Disjoint inputs with the engine-path check (bboxes touch lightly).
 	a := MultiPolygon{diamond(0, 0, 5)}

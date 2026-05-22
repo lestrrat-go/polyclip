@@ -690,6 +690,40 @@ func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
 	}
 }
 
+func TestSharedVertexCollinearHorizontalSimplified(t *testing.T) {
+	// A's top edge (0,5)-(3,5) is coincident with B's top edge along y=5, and
+	// B carries a redundant collinear vertex (2,5) on that edge: (3,5),(2,5),(1,5)
+	// are collinear. The shared apex (3,5) is B's local maximum AND A's
+	// through-vertex. Before input simplification the extra collinear vertex made
+	// the bound model treat (2,5) as a spurious turn, so a coincident-horizontal
+	// piece was crossed mid-plateau via AddLocalMaxPoly, closing both rings early
+	// — Union collapsed to 3.5 (< |A|). simplifyCollinearRing removes the
+	// redundant vertex (a geometric no-op), and the sweep then handles the clean
+	// shared-apex correctly. A and B only touch along y=5 (I = 0), so the exact
+	// truth is U=|A|+|B|, D=|A|, X=|A|+|B| (DESIGN.md §12.11).
+	a := MultiPolygon{{Outer: Polygon{{0, 0}, {0, 5}, {3, 5}, {-1, 6}}}} // |A| = 4
+	b := MultiPolygon{{Outer: Polygon{{2, 5}, {1, 5}, {1, 1}, {3, 5}}}}  // |B| = 4, (2,5) collinear
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 8},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 4},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 8},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 1e-9 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// A and B are two simple quads that touch at EXACTLY one shared vertex
 	// (12,8) and are otherwise disjoint — neither is inside the other. The sweep

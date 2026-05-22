@@ -1470,6 +1470,58 @@ func TestCrossingSnapsOrderIndependently(t *testing.T) {
 	}
 }
 
+func TestTouchingAlongHorizontalEdgeNotNested(t *testing.T) {
+	// Two polygons that touch only along a full shared horizontal edge — A
+	// below, B above — are disjoint-but-adjacent (I=0), so Union/Xor must
+	// emit two sibling outer rings, not nest one inside the other. The sweep
+	// emits B's ring CW (typical of the non-Union FrontEdge convention); the
+	// hole→outer promotion then reverses it IF it has no enclosing outer. That
+	// hinges on interiorPoint sampling B's open interior. When B's mean Y
+	// equals the shared edge's Y, the scanline ran along the shared horizontal
+	// and returned a boundary point that Polygon.Contains read as inside A,
+	// wrongly nesting B as a hole and collapsing Union 43->19 (DESIGN.md
+	// §12.11). interiorPoint now samples strictly between distinct vertex Ys.
+	a := makeQuad(8, 1, 12, 9, 6, 9, 5, 6)
+	b := makeQuad(6, 9, 12, 9, 2, 11, 4, 7)
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 43},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 31},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 43},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
+func TestInteriorPointAvoidsHorizontalEdge(t *testing.T) {
+	// interiorPoint must return a strictly-interior point even when the
+	// vertex-mean Y coincides with a horizontal edge. For this quad the mean
+	// Y is 9 — exactly the (6,9)-(12,9) top edge — and the old code returned
+	// (7.5,9), a point ON that edge.
+	p := Polygon{{12, 9}, {6, 9}, {4, 7}, {2, 11}}
+	pt, ok := interiorPoint(p)
+	if !ok {
+		t.Fatal("interiorPoint returned !ok for a valid quad")
+	}
+	if pointOnRingBoundary(p, pt) {
+		t.Errorf("interiorPoint %v lies on the ring boundary", pt)
+	}
+	if !p.Contains(pt) {
+		t.Errorf("interiorPoint %v not inside its own ring", pt)
+	}
+}
+
 func TestSimplifyCollinearRing(t *testing.T) {
 	// Unit-level: collinear-through vertices removed, real corners and rings
 	// with a repeated vertex preserved.

@@ -599,11 +599,28 @@ func interiorPoint(p Polygon) (Point, bool) {
 	if n < 3 {
 		return Point{}, false
 	}
-	var sy float64
-	for _, v := range p {
-		sy += v.Y
+	// Choose the scanline Y strictly between two adjacent distinct vertex Ys
+	// (the widest gap), so it grazes no vertex and runs along no horizontal
+	// edge. A Y equal to a vertex — e.g. the mean coinciding with a horizontal
+	// edge the ring shares with another — makes the "interior" span run along
+	// the ring's own boundary, returning a boundary point that Polygon.Contains
+	// treats as inside the other ring and wrongly nests touching polygons
+	// (DESIGN.md §12.11).
+	ys := make([]float64, n)
+	for i, v := range p {
+		ys[i] = v.Y
 	}
-	y := sy / float64(n)
+	sort.Float64s(ys)
+	gapLo, gap := 0.0, 0.0
+	for i := 0; i+1 < n; i++ {
+		if g := ys[i+1] - ys[i]; g > gap {
+			gap, gapLo = g, ys[i]
+		}
+	}
+	if gap <= 0 {
+		return Point{}, false // degenerate: all vertices share one Y
+	}
+	y := gapLo + gap/2
 
 	var xs []float64
 	for i := range n {

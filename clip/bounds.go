@@ -139,6 +139,16 @@ func traceRing(start *Segment, byStart map[fixed.Point][]*Segment, visited map[*
 		if next == start {
 			return ring, nil
 		}
+		// pickNextSegment may return an already-visited candidate (it includes
+		// them so this loop can detect closure via next == start above). A
+		// visited segment that is NOT start means the chain has stepped into a
+		// segment already consumed by this or another ring — a self-touching or
+		// self-intersecting input where no simple ring closes. Without this
+		// check the walk follows a non-start sub-cycle forever, growing ring
+		// without bound until the process exhausts memory and the OS kills it.
+		if _, seen := visited[next]; seen {
+			return nil, fmt.Errorf("%w: chain revisits %v before closing the ring started at %v", ErrOpenRing, next.Start(), start.Start())
+		}
 		visited[next] = struct{}{}
 		ring = append(ring, next)
 		cur = next

@@ -156,29 +156,62 @@ func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 			// Same ring, same side — a genuine inconsistency; bail.
 			return nil
 		}
-		// Two different rings meeting same-side at a maximum: one ring's
-		// FrontEdge/BackEdge was inverted by an upstream cross-source ownership
-		// swap (SwapOutrecs / JoinOutrecPaths), so the FrontEdge==edge proxy no
-		// longer reflects the ring's true orientation. At a local maximum the
-		// geometry is unambiguous, though: in polyclip's mirror convention the
-		// RIGHT (higher AEL index) bound is its ring's FrontEdge and the LEFT
-		// bound is its BackEdge. Re-derive the correct sides from the AEL order
-		// and swap whichever ring disagrees — not always e2: the inverted ring
-		// can be either edge's, and swapping the already-correct ring was what
-		// tangled the merged chain (the d50048a workaround; see the vertex-on-edge
-		// same-side tangle in DESIGN.md §12.11). Reversing a ring's sides also
-		// advances the Pts head by one (the chain head is the front vertex with
-		// the back at Pts.Next), so swapping which edge is front must move the head
-		// to keep AddOutPt and JoinOutrecPaths splicing on the correct ends; this
-		// mirrors Clipper2's SwapFrontBackSides (engine.cpp:460).
+		// Two different rings meeting SAME-side at a maximum. This is the
+		// vertex-on-edge degeneracy (DESIGN.md §12.11): polyclip's bottom-up
+		// sweep builds two interleaved rings where a top-down sweep would build
+		// several disjoint ones, and they arrive at the apex both-front. A
+		// front/back-relabel + JoinOutrecPaths cannot splice two same-front
+		// chains without folding the apex into a degenerate out-and-back spike
+		// (the apex's true neighbours — e.g. the two edges of the apex triangle —
+		// collapse onto one point), losing that region's area.
+		//
+		// Instead, merge the two cycles as a figure-8 PINCH at the apex: emit the
+		// apex on each ring, then cross-link the two apex OutPts so the two cycles
+		// become ONE self-touching walk that revisits the apex. assembleResult's
+		// splitSelfTouchingRings then decomposes the merged walk back into the
+		// correct simple rings at every revisited vertex. No orientation guess is
+		// needed — the decomposition is read off the geometry afterwards.
+		//
+		// This is only valid when neither ring has a CONTINUING other edge — i.e.
+		// each ring's other side has already left the AEL (a terminal maximum
+		// where both ends meet, the vertex-on-edge apex case): the figure-8 closes
+		// both rings completely. If either ring still has an active other edge in
+		// the AEL (a JOIN that keeps the merged ring open — e.g. the
+		// tunnel/different-polytype cases), that edge must keep ownership and a
+		// live Pts chain, so fall back to the relabel + JoinOutrecPaths path.
+		continuing := func(e *ActiveEdge) bool {
+			o := otherEdge(e)
+			return o != nil && ael.IndexOf(o) >= 0
+		}
+		if !continuing(e1) && !continuing(e2) {
+			op1 := AddOutPt(e1, pt)
+			op2 := AddOutPt(e2, pt)
+			n1, n2 := op1.Next, op2.Next
+			op1.Next, n2.Prev = n2, op1
+			op2.Next, n1.Prev = n1, op2
+			or1, or2 := e1.Outrec, e2.Outrec
+			for p := op1.Next; ; p = p.Next {
+				p.Outrec = or1
+				if p == op1 {
+					break
+				}
+			}
+			or1.Pts = op1
+			or1.FrontEdge, or1.BackEdge = nil, nil
+			or2.FrontEdge, or2.BackEdge = nil, nil
+			or2.Pts = nil
+			e1.Outrec, e2.Outrec = nil, nil
+			return op1
+		}
+		// Fallback recovery for same-side JOINs with a continuing edge: relabel
+		// the inverted ring's sides (mirror of Clipper2 SwapFrontBackSides) so the
+		// subsequent JoinOutrecPaths splices on the correct ends.
 		swapSides := func(e *ActiveEdge) {
 			e.Outrec.FrontEdge, e.Outrec.BackEdge = e.Outrec.BackEdge, e.Outrec.FrontEdge
 			e.Outrec.Pts = e.Outrec.Pts.Next
 		}
 		i1, i2 := ael.IndexOf(e1), ael.IndexOf(e2)
 		if i1 < 0 || i2 < 0 {
-			// One edge already left the AEL (no reliable left/right): fall back to
-			// reversing e2, the historical recovery.
 			swapSides(e2)
 		} else {
 			left, right := e1, e2
@@ -314,4 +347,20 @@ func getPrevHotEdge(ael *AEL, ae *ActiveEdge) *ActiveEdge {
 // (clipper.engine.cpp:455).
 func outrecIsAscending(hotEdge *ActiveEdge) bool {
 	return hotEdge.Outrec.FrontEdge == hotEdge
+}
+
+// otherEdge returns e's ring's OTHER active edge (the one that is not e), or
+// nil if that side has already closed or e is not coupled as a side.
+func otherEdge(e *ActiveEdge) *ActiveEdge {
+	or := e.Outrec
+	if or == nil {
+		return nil
+	}
+	if or.FrontEdge == e {
+		return or.BackEdge
+	}
+	if or.BackEdge == e {
+		return or.FrontEdge
+	}
+	return nil
 }

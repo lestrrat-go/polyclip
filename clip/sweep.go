@@ -1033,6 +1033,45 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		return
 	}
 
+	// Cross-source ring self-closure at a through-vertex. ae's bound maxes out
+	// at maxPt, and its OWN ring's other edge (coupled) is a DIFFERENT-source hot
+	// edge that passes THROUGH maxPt and continues strictly above (a vertex of
+	// ae's source lies on the through-edge, or vice versa — SplitTJunctions made
+	// it a shared vertex). The two edges are the two open ends of the same ring
+	// meeting at maxPt.
+	//
+	// Whether the ring CLOSES here depends on the op-region ABOVE maxPt, which is
+	// not visible from the local winding (identical in the close and keep cases).
+	// ae's source departs at maxPt; reclassify coupled against the AEL with ae
+	// removed to see its winding above. If coupled is then NON-contributing the
+	// op-region ends at maxPt, so the ring must close and coupled continues as a
+	// COLD edge. Without this close, coupled keeps ae's ring open and its upward
+	// continuation drags a spurious sub-loop in, tangling the ring so the true
+	// region cancels (DESIGN.md §12.11, vertex-on-edge Intersect tangle). If
+	// coupled stays contributing above (e.g. an Xor A-only region continues
+	// upward), the region does NOT end here — fall through to the normal handoff
+	// so coupled keeps building.
+	if coupled := outrecOther(ae); coupled != nil && coupled.IsHotEdge() &&
+		coupled.Outrec == ae.Outrec && coupled.Seg.Src != ae.Seg.Src &&
+		boundContinuesAbove(coupled, maxPt) && throughVertexOnColumn(coupled.Seg, maxPt) {
+		savedWS, savedWO, savedC := coupled.WindSelf, coupled.WindOther, coupled.Contributing
+		iAe := s.ael.IndexOf(ae)
+		left, right := s.maximaFlanks(ae)
+		s.ael.Remove(ae)
+		Classify(s.ael, coupled, s.op)
+		contribAbove := coupled.Contributing
+		coupled.WindSelf, coupled.WindOther, coupled.Contributing = savedWS, savedWO, savedC
+		if !contribAbove {
+			AddLocalMaxPoly(s.ael, ae, coupled, maxPt)
+			delete(s.bySeg, ae.Seg)
+			if left != nil && right != nil && left != coupled && right != coupled {
+				s.maybeScheduleIntersect(left, right, maxPt.Y)
+			}
+			return
+		}
+		s.ael.InsertAt(iAe, ae)
+	}
+
 	// No simultaneous partner. The two bounds of this maximum arrive at
 	// different events — e.g. a flat top (local-max plateau) whose two
 	// ascending bounds reach the plateau ends as separate Top/horizontal

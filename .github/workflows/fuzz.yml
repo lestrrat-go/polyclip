@@ -1,0 +1,36 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 3 * * 3' # Weekly on Wednesday at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      fuzz-time:
+        description: 'Duration per fuzz target (e.g. 5m, 10m)'
+        required: false
+        default: '5m'
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzUnion, FuzzIntersect, FuzzDifference, FuzzXor]
+    name: "Fuzz ${{ matrix.target }}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Restore fuzz cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-${{ matrix.target }}-
+      - name: Run fuzz target
+        env:
+          FUZZTIME: ${{ github.event.inputs.fuzz-time || '5m' }}
+        run: go test . -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime "$FUZZTIME"

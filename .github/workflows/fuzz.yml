@@ -34,3 +34,10 @@ jobs:
         env:
           FUZZTIME: ${{ github.event.inputs.fuzz-time || '5m' }}
         run: go test . -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime "$FUZZTIME"
+      - name: Upload failing corpus
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.target }}-corpus
+          path: testdata/fuzz/
+          if-no-files-found: ignore

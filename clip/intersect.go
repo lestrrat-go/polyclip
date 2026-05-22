@@ -133,21 +133,24 @@ func collinearOverlap(a, b Segment) IntersectResult {
 	if ylo > yhi {
 		return IntersectResult{Kind: NoCrossing}
 	}
-	p := fixed.Point{X: xAtY(a, ylo), Y: ylo}
+	// The overlap endpoints are always exact input endpoints (the inner two of
+	// the four collinear endpoints), so take their coordinates directly. Using
+	// xAtY here re-projects onto the line and ROUNDS, which can place the split
+	// point a few fixed-point units off the shared line — manufacturing a
+	// spurious tiny horizontal sliver that SplitOverlaps can never resolve,
+	// looping forever and growing the segment slice without bound.
+	p := a.Bot // endpoint achieving ylo (the higher of the two Bot.Y)
+	if b.Bot.Y > a.Bot.Y {
+		p = b.Bot
+	}
 	if ylo == yhi {
 		return IntersectResult{Kind: Touch, P: p}
 	}
-	q := fixed.Point{X: xAtY(a, yhi), Y: yhi}
+	q := a.Top // endpoint achieving yhi (the lower of the two Top.Y)
+	if b.Top.Y < a.Top.Y {
+		q = b.Top
+	}
 	return IntersectResult{Kind: CollinearOverlap, P: p, Q: q}
-}
-
-// xAtY returns the X coordinate of segment s at scanline Y == y, rounded to
-// the integer grid. s must be non-horizontal.
-func xAtY(s Segment, y fixed.Coord) fixed.Coord {
-	dy := float64(int64(s.Top.Y) - int64(s.Bot.Y))
-	dx := float64(int64(s.Top.X) - int64(s.Bot.X))
-	t := float64(int64(y)-int64(s.Bot.Y)) / dy
-	return fixed.Coord(math.Round(float64(s.Bot.X) + t*dx))
 }
 
 func minCoord(a, b fixed.Coord) fixed.Coord {

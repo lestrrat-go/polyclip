@@ -1296,6 +1296,43 @@ func TestUnionAllManyOverlapping(t *testing.T) {
 	}
 }
 
+func TestSplitOverlapsCollinearSpikeNoHang(t *testing.T) {
+	// A is a "spike" quad: (-10,-10),(67,67),(10,10) are collinear on y=x, so
+	// edge (-10,-10)-(67,67) and edge (67,67)-(10,10) overlap collinearly. The
+	// overlap's lower endpoint is exactly the vertex (10,10) after snapping, but
+	// collinearOverlap used to RE-PROJECT it via xAtY, which rounded it a few
+	// fixed-point units off the shared line. SplitOverlaps then cut at the
+	// off-line point, manufacturing a spurious tiny horizontal sliver it could
+	// never resolve -> the fixed-point loop spun forever, growing the segment
+	// slice without bound (a CI-wedging infinite loop / OOM). The fix takes the
+	// overlap endpoints directly from the exact input endpoints. Originally
+	// FuzzDifference/a84b6e584bd0aa6b. Guard: the op merely completes (the
+	// package test timeout catches a regression hang) and stays area-bounded.
+	a := MultiPolygon{ExPolygon{Outer: Polygon{
+		{-10, -10}, {67, 67}, {10, 10}, {-99, 10},
+	}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{
+		{-3, -3}, {3, -3}, {3, 76}, {-3, 3},
+	}}}
+	for _, tc := range []struct {
+		name string
+		fn   func(MultiPolygon, MultiPolygon) (MultiPolygon, error)
+	}{
+		{opUnion, Union},
+		{opIntersect, Intersect},
+		{opDifference, Difference},
+		{opXor, Xor},
+	} {
+		got, err := tc.fn(a, b)
+		if err != nil && err != ErrHorizontalNotSupported {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if err == nil && got.Area() < -1e-6 {
+			t.Errorf("%s: negative area %g", tc.name, got.Area())
+		}
+	}
+}
+
 func TestUnionAllDoesNotMutateInput(t *testing.T) {
 	// Tournament reduction overwrites entries between rounds; ensure the
 	// caller's slice is untouched.

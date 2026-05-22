@@ -3,6 +3,8 @@ package polyclip
 import (
 	"math"
 	"testing"
+
+	"github.com/lestrrat-go/polyclip/fixed"
 )
 
 // Operation labels reused across boolean test cases.
@@ -1329,6 +1331,91 @@ func TestSplitOverlapsCollinearSpikeNoHang(t *testing.T) {
 		}
 		if err == nil && got.Area() < -1e-6 {
 			t.Errorf("%s: negative area %g", tc.name, got.Area())
+		}
+	}
+}
+
+func TestCollinearMidVertexSimplified(t *testing.T) {
+	// A ring with a vertex lying exactly on the straight line between its
+	// neighbours (a redundant collinear-through vertex) mis-built its output
+	// rings: the bound model treats the extra segment's shared endpoint as a
+	// turn/maximum of its bound. When that collinear vertex sat on a flat-top
+	// max plateau whose end touched the other polygon's edge (a vertex-on-edge
+	// confluence), the sweep produced overlapping or dropped rings.
+	//
+	//   - Union seed FuzzUnion/a61d9e1c973bf217: B's top is (-7,5),(-19,5),(-33,5)
+	//     — (-19,5) is collinear on y=5. Union under-counted 369.50 (truth ~563)
+	//     and Difference 213.50 (truth ~407); A's body dropped.
+	//   - Xor seed FuzzXor/28f7e421c4b5068b: A's top is (5,5),(-5,5),(-14,5) —
+	//     (-5,5) is collinear on y=5, and A's plateau corner (5,5) lies on B's
+	//     vertical edge x=5. Xor over-counted 4182.50 (truth ~2522) as two
+	//     overlapping outer rings.
+	//
+	// The fix removes collinear-through vertices from each input ring before the
+	// sweep (boolean.go appendRing / simplifyCollinearRing) — an exact geometric
+	// no-op for a simple polygon. Areas validated against a Monte-Carlo oracle
+	// (and the identities U=I+X, D=|A|-I, X=U-I all hold), NOT Clipper2. The
+	// expected values are the now-correct engine outputs.
+	cases := []struct {
+		name       string
+		a, b       MultiPolygon
+		u, i, d, x float64
+	}{
+		{
+			"union-seed",
+			makeQuad(143, -5, 5, 7, 9, 5, -60, 5),
+			makeQuad(-7, 5, -19, 5, -33, 5, 5, -7),
+			563.502298, 51.497702, 407.502298, 512.004597,
+		},
+		{
+			"xor-seed",
+			makeQuad(-14, 5, 97, -70, 5, 5, -5, 5),
+			makeQuad(5, -34, 15, 49, 105, 107, 5, 73),
+			2572.196625, 45.303375, 667.196625, 2526.893249,
+		},
+	}
+	for _, tc := range cases {
+		checks := []struct {
+			name string
+			run  func() (MultiPolygon, error)
+			want float64
+		}{
+			{opUnion, func() (MultiPolygon, error) { return Union(tc.a, tc.b) }, tc.u},
+			{opIntersect, func() (MultiPolygon, error) { return Intersect(tc.a, tc.b) }, tc.i},
+			{opDifference, func() (MultiPolygon, error) { return Difference(tc.a, tc.b) }, tc.d},
+			{opXor, func() (MultiPolygon, error) { return Xor(tc.a, tc.b) }, tc.x},
+		}
+		for _, c := range checks {
+			got, err := c.run()
+			if err != nil {
+				t.Fatalf("%s/%s: unexpected error: %v", tc.name, c.name, err)
+			}
+			if math.Abs(got.Area()-c.want) > 0.02 {
+				t.Errorf("%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
+			}
+		}
+	}
+}
+
+func TestSimplifyCollinearRing(t *testing.T) {
+	// Unit-level: collinear-through vertices removed, real corners and rings
+	// with a repeated vertex preserved.
+	p := func(x, y int64) fixed.Point { return fixed.Point{X: fixed.Coord(x), Y: fixed.Coord(y)} }
+	cases := []struct {
+		name string
+		in   []fixed.Point
+		want int
+	}{
+		{"square no collinear", []fixed.Point{p(0, 0), p(4, 0), p(4, 4), p(0, 4)}, 4},
+		{"one collinear on edge", []fixed.Point{p(0, 0), p(2, 0), p(4, 0), p(4, 4), p(0, 4)}, 4},
+		{"run of collinear", []fixed.Point{p(0, 0), p(1, 0), p(2, 0), p(3, 0), p(4, 0), p(4, 4), p(0, 4)}, 4},
+		{"collinear at wrap", []fixed.Point{p(2, 0), p(4, 0), p(4, 4), p(0, 4), p(0, 0)}, 4},
+		{"triangle", []fixed.Point{p(0, 0), p(4, 0), p(2, 4)}, 3},
+	}
+	for _, c := range cases {
+		got := simplifyCollinearRing(c.in)
+		if len(got) != c.want {
+			t.Errorf("%s: got %d verts %v, want %d", c.name, len(got), got, c.want)
 		}
 	}
 }

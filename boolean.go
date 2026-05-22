@@ -263,29 +263,82 @@ func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale) []clip.
 // (e.g. a CW subject made Union/Xor under-count). Normalize here by walking the
 // ring in reverse when its signed area disagrees with wantCCW, so callers may
 // pass either orientation.
+//
+// Collinear-through vertices (a vertex exactly on the straight line between its
+// neighbours) are removed before emitting segments. They are geometrically
+// redundant, but the bound model treats the extra segment's shared endpoint as
+// a turn/maximum of its bound, so a flat-topped ring with a collinear vertex on
+// the top edge mis-builds its rings (the collinear-mid-vertex degeneracy,
+// DESIGN.md §12.11). Removal happens here, on the INPUT ring, before
+// [clip.SplitOverlaps] / [clip.SplitTJunctions] introduce their own (intended)
+// collinear split vertices at crossings.
 func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale, wantCCW bool) {
 	n := len(ring)
 	if n < 3 {
 		return
 	}
 	reverse := (ring.SignedArea() < 0) == wantCCW
+	pts := make([]fixed.Point, 0, n)
 	for i := range n {
+		k := i
+		if reverse {
+			k = n - 1 - i
+		}
+		p := scale.Snap(ring[k].X, ring[k].Y)
+		if len(pts) > 0 && pts[len(pts)-1] == p {
+			continue
+		}
+		pts = append(pts, p)
+	}
+	// Drop a wrap-around duplicate (first == last) so simplifyCollinearRing never
+	// sees a zero-length neighbour, which Orient2D reads as collinear and would
+	// wrongly delete a real corner of a ring with a repeated vertex.
+	for len(pts) >= 2 && pts[0] == pts[len(pts)-1] {
+		pts = pts[:len(pts)-1]
+	}
+	pts = simplifyCollinearRing(pts)
+	m := len(pts)
+	if m < 3 {
+		return
+	}
+	for i := range m {
 		j := i + 1
-		if j == n {
+		if j == m {
 			j = 0
 		}
-		ai, bi := i, j
-		if reverse {
-			ai, bi = n-1-i, n-1-j
-		}
-		a := scale.Snap(ring[ai].X, ring[ai].Y)
-		b := scale.Snap(ring[bi].X, ring[bi].Y)
-		seg := clip.NewSegment(a, b, src)
+		seg := clip.NewSegment(pts[i], pts[j], src)
 		if seg.Degenerate() {
 			continue
 		}
 		*dst = append(*dst, seg)
 	}
+}
+
+// simplifyCollinearRing removes vertices that lie exactly on the straight line
+// between their cyclic neighbours from a closed ring of grid points. For a
+// simple (non-self-intersecting) polygon every collinear vertex is a redundant
+// through-vertex, so removal is an exact geometric no-op. The pass repeats to
+// collapse runs of three or more collinear vertices down to the two endpoints.
+// Consecutive duplicate points (including the wrap) are assumed already removed
+// by the caller.
+func simplifyCollinearRing(pts []fixed.Point) []fixed.Point {
+	for len(pts) >= 3 {
+		n := len(pts)
+		kept := make([]fixed.Point, 0, n)
+		for i := range n {
+			prev := pts[(i-1+n)%n]
+			next := pts[(i+1)%n]
+			if fixed.Orient2D(prev, pts[i], next) == 0 {
+				continue
+			}
+			kept = append(kept, pts[i])
+		}
+		if len(kept) == n {
+			return pts
+		}
+		pts = kept
+	}
+	return pts
 }
 
 // assembleResult converts the sweep's closed output rings into a user-space

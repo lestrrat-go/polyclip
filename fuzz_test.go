@@ -13,9 +13,10 @@ import (
 //  - error (if any) is the documented ErrHorizontalNotSupported only.
 //  - Area sanity bounds appropriate for the op.
 //
-// Inputs that produce degenerate polygons (zero or near-zero area) are
-// skipped — we don't promise behavior on those, and skipping prevents the
-// fuzzer from chasing them.
+// Inputs that produce degenerate polygons (zero or near-zero area) or
+// self-intersecting rings are skipped — the engine's contract is simple
+// polygons (see [Polygon] doc), so the area invariants below don't hold
+// for them, and skipping prevents the fuzzer from chasing them.
 
 const fuzzAreaEps = 1e-6
 
@@ -37,6 +38,13 @@ func nonDegenerate(m MultiPolygon) bool {
 			return false
 		}
 		if !ex.Outer.IsCCW() {
+			return false
+		}
+		// A self-intersecting (bowtie) ring violates the simple-polygon
+		// contract: SignedArea/Area no longer equal the true covered area,
+		// so the op area bounds below are meaningless. Reuse the engine's
+		// own definition of self-intersection.
+		if _, _, ok := ringSelfIntersection(ex.Outer); ok {
 			return false
 		}
 	}

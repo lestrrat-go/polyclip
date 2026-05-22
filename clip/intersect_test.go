@@ -129,6 +129,35 @@ func TestIntersectCollinearVertical(t *testing.T) {
 	}
 }
 
+// TestIntersectCollinearOverlapExactEndpoints guards against the reprojection
+// rounding that previously made SplitOverlaps spin forever (DESIGN.md §11
+// preprocess). These two segments lie on the same near-diagonal line at the
+// fixed-point scale; the overlap's lower endpoint must be returned as b's
+// actual Bot vertex, not an X recomputed by interpolation (which rounded to a
+// neighbouring grid point and produced a 32-unit backwards sliver). The exact
+// coordinates are the snapped edges of the FuzzDifference antenna repro.
+func TestIntersectCollinearOverlapExactEndpoints(t *testing.T) {
+	a := Segment{
+		Bot: fixed.Point{X: 54043195528445952, Y: -387309567953862656},
+		Top: fixed.Point{X: 747597538143502336, Y: 306244774661193728},
+	}
+	b := Segment{
+		Bot: fixed.Point{X: 234187180623265792, Y: -207165582859042816},
+		Top: fixed.Point{X: 747597538143502336, Y: 306244774661193728},
+	}
+	r := Intersect(a, b)
+	if r.Kind != CollinearOverlap {
+		t.Fatalf("Kind: %v want CollinearOverlap", r.Kind)
+	}
+	// The inner pair: b.Bot (higher bottom) and the shared Top.
+	if r.P != b.Bot {
+		t.Errorf("P: %v want b.Bot %v (reprojected, not exact)", r.P, b.Bot)
+	}
+	if r.Q != a.Top {
+		t.Errorf("Q: %v want shared Top %v", r.Q, a.Top)
+	}
+}
+
 func TestIntersectCollinearContained(t *testing.T) {
 	a := seg(0, 0, 10, 0)
 	b := seg(3, 0, 7, 0)

@@ -128,26 +128,32 @@ func collinearOverlap(a, b Segment) IntersectResult {
 		}
 	}
 
-	ylo := maxCoord(a.Bot.Y, b.Bot.Y)
-	yhi := minCoord(a.Top.Y, b.Top.Y)
-	if ylo > yhi {
+	// The overlap interval's endpoints are always two of the four (collinear)
+	// input endpoints — the "inner" pair: the higher of the two bottoms and
+	// the lower of the two tops. Select those actual vertices rather than
+	// recomputing X via xAtY: although all four points are exactly collinear,
+	// xAtY interpolates in float64 and rounds, which can place the result a
+	// grid step off the true vertex. Such a shifted endpoint yields a spurious
+	// sub-segment whose far end no longer coincides with the vertex it was
+	// derived from, and SplitOverlaps then re-splits it without end (the pair
+	// is never recognised as fully coincident). Segments are canonical, so
+	// non-horizontal segments have Bot.Y < Top.Y; collinearity makes equal Y
+	// imply an identical point, so ties need no special handling.
+	p := a.Bot
+	if b.Bot.Y > p.Y {
+		p = b.Bot
+	}
+	q := a.Top
+	if b.Top.Y < q.Y {
+		q = b.Top
+	}
+	if p.Y > q.Y {
 		return IntersectResult{Kind: NoCrossing}
 	}
-	p := fixed.Point{X: xAtY(a, ylo), Y: ylo}
-	if ylo == yhi {
+	if p.Y == q.Y {
 		return IntersectResult{Kind: Touch, P: p}
 	}
-	q := fixed.Point{X: xAtY(a, yhi), Y: yhi}
 	return IntersectResult{Kind: CollinearOverlap, P: p, Q: q}
-}
-
-// xAtY returns the X coordinate of segment s at scanline Y == y, rounded to
-// the integer grid. s must be non-horizontal.
-func xAtY(s Segment, y fixed.Coord) fixed.Coord {
-	dy := float64(int64(s.Top.Y) - int64(s.Bot.Y))
-	dx := float64(int64(s.Top.X) - int64(s.Bot.X))
-	t := float64(int64(y)-int64(s.Bot.Y)) / dy
-	return fixed.Coord(math.Round(float64(s.Bot.X) + t*dx))
 }
 
 func minCoord(a, b fixed.Coord) fixed.Coord {

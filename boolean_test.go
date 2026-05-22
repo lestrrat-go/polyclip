@@ -962,6 +962,76 @@ func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
 	}
 }
 
+func TestSharedVertexConcaveMaxThroughHorizontal(t *testing.T) {
+	// A's vertex (7,6) is a through-vertex where A turns from the ascending edge
+	// (3,3)-(7,6) onto its top HORIZONTAL (7,6)-(6,6). That same point is B's
+	// concave-vertex local MAXIMUM: B's two edges (4,5)-(7,6) and (8,4)-(7,6) both
+	// end there. A's through-edge sits AEL-between B's two max edges. Because A had
+	// already advanced onto its horizontal, scanMaximaPartner's apex-column test
+	// (XAtY, which returns a horizontal's Bot.X — the wrong end) bailed, so B's two
+	// max edges never paired; resolveBetweenMaxima never crossed A's through-edge,
+	// so A's WindOther stayed 0 (stale "outside B") as it entered B's interior
+	// across the concave vertex. For Union/Difference (where contribution depends
+	// on WindOther) A's body then dropped: U collapsed 13.22->2.66, D 11.22->0.78.
+	// Intersect/Xor were correct (Xor ignores WindOther).
+	//
+	// The fix: scanMaximaPartner ADDITIONALLY accepts a horizontal between-edge
+	// that spans the apex column (throughVertexOnColumn) AND whose bound continues
+	// strictly above maxPt (boundContinuesAbove) — a genuine through-vertex. The
+	// extra continues-above guard is essential: a horizontal that itself tops out
+	// at the apex is part of a coincident max-plateau and must NOT widen pairing
+	// (that broad form regressed coincident-horizontal cases). The clause is purely
+	// additive so it never removes a previously-paired confluence (DESIGN.md
+	// §12.11). Validated against a Monte-Carlo area oracle (all of U=X+I, D=|A|-I,
+	// X=U-I hold), NOT Clipper2.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	cases := []struct {
+		name       string
+		a, b       Polygon
+		u, i, d, x float64
+	}{
+		{
+			"family1",
+			Polygon{{3, 3}, {7, 6}, {6, 6}, {1, 8}}, // |A| = 12
+			Polygon{{7, 7}, {4, 5}, {7, 6}, {8, 4}}, // |B| = 2, shared vtx (7,6)
+			13.2188, 0.7812, 11.2188, 12.4375,
+		},
+		{
+			"family2",
+			Polygon{{6, 5}, {3, 4}, {1, 7}, {4, 0}}, // |A| = 9
+			Polygon{{4, 5}, {0, 7}, {3, 2}, {6, 5}}, // |B| = 10, shared vtx (6,5)
+			14.4068, 4.5932, 4.4068, 9.8136,
+		},
+	}
+	for _, tc := range cases {
+		a, b := mk(tc.a), mk(tc.b)
+		checks := []struct {
+			name string
+			run  func() (MultiPolygon, error)
+			want float64
+		}{
+			{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, tc.u},
+			{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, tc.i},
+			{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, tc.d},
+			{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, tc.x},
+		}
+		for _, c := range checks {
+			got, err := c.run()
+			if err != nil {
+				t.Fatalf("%s/%s: unexpected error: %v", tc.name, c.name, err)
+			}
+			if math.Abs(got.Area()-c.want) > 0.02 {
+				t.Errorf("%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
+			}
+		}
+	}
+}
+
 func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 	// B's vertices (2,2) and (3,3) lie on A's diagonal edge y=x. The bound that
 	// maxes out at a shared through-vertex must close its cross-source ring when

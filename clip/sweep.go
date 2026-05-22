@@ -1338,8 +1338,21 @@ func (s *sweep) scanMaximaPartner(ae *ActiveEdge, i, dir int, maxPt fixed.Point)
 		}
 		// cand is an intermediate edge; only continue past it if it lies on
 		// the apex column. Otherwise ae and any farther candidate are not a
-		// confluence pair.
-		if XAtY(cand.Seg, maxPt.Y) != maxPt.X {
+		// confluence pair. The base test is XAtY == maxPt.X. ADDITIONALLY accept
+		// a between-edge that has turned onto a HORIZONTAL at the apex and whose
+		// bound passes THROUGH maxPt continuing strictly above — a genuine
+		// through-vertex (another source's bound crossing a concave shared-vertex
+		// maximum). XAtY returns a horizontal's Bot.X (the wrong end), so that
+		// case fails the base test; throughVertexOnColumn tests the apex lies on
+		// the horizontal's span. The extra boundContinuesAbove guard is essential:
+		// a horizontal that itself tops out here is part of a coincident
+		// max-plateau, NOT a through-edge, and must not widen pairing across it
+		// (DESIGN.md §12.11). This clause is purely additive — it never rejects a
+		// between-edge the base test already accepted.
+		onColumn := XAtY(cand.Seg, maxPt.Y) == maxPt.X ||
+			(cand.Seg.Horizontal() && throughVertexOnColumn(cand.Seg, maxPt) &&
+				boundContinuesAbove(cand, maxPt))
+		if !onColumn {
 			return nil
 		}
 	}

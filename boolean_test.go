@@ -915,6 +915,53 @@ func TestUnionNotchTipOnHorizontalEdge(t *testing.T) {
 	}
 }
 
+func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
+	// B's local-max plateau (0,4)-(4,4) is coincident with A's MID-bound
+	// horizontal (2,4)-(8,4) over x in [2,4] (A continues up to (8,4) then its
+	// apex (0,8)). After SplitOverlaps the plateau is cut at (2,4); its piece
+	// (2,4)-(4,4) tops out at (4,4). closeBound's plateauPartnerPending wrongly
+	// DEFERRED that maximum because the coupled partner (A's continuing
+	// horizontal) was still pending — but a continuing horizontal never closes
+	// the deferred edge, so B's plateau edge stayed HOT in the AEL up to A's apex
+	// (0,8), where it sat between A's two bounds and blocked maximaPartner from
+	// pairing them. A's maximum then closed as two independent Case-A/B handoffs,
+	// emitting two OVERLAPPING outer rings (membership correct, but Area()
+	// double-counted the ~4 overlap): Xor was 25.37 vs truth 21.38.
+	//
+	// The fix: plateauPartnerPending defers only when the coupled horizontal
+	// partner itself tops out at maxPt (a genuine shared-plateau max); if it
+	// CONTINUES above maxPt the deferral is dropped so the maximum closes here
+	// (DESIGN.md §12.11). Validated against a Monte-Carlo oracle (Xor == U-I),
+	// NOT Clipper2. U/I/D were already correct and must stay so.
+	mk := func(p Polygon) MultiPolygon {
+		if !p.IsCCW() {
+			p.Reverse()
+		}
+		return MultiPolygon{{Outer: p}}
+	}
+	a := mk(Polygon{{0, 8}, {3, 0}, {2, 4}, {8, 4}}) // |A| = 14
+	b := mk(Polygon{{0, 4}, {1, 1}, {5, 3}, {4, 4}}) // |B| = 9
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 22.1871},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0.8129},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 13.1871},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 21.3743},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 	// B's vertices (2,2) and (3,3) lie on A's diagonal edge y=x. The bound that
 	// maxes out at a shared through-vertex must close its cross-source ring when

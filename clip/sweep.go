@@ -1233,6 +1233,16 @@ func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
 		if h.Bound == nil || !h.Seg.Horizontal() || h.Seg.Bot.Y != maxPt.Y {
 			return false
 		}
+		// Defer only when the coupled horizontal genuinely tops out at maxPt — a
+		// real shared-plateau maximum the horizontal's own closeBound will close.
+		// If that partner CONTINUES above maxPt (it is a mid-bound horizontal of
+		// another source that merely passes through the apex), its doHorizontal
+		// promotes the cursor past maxPt and never closes ae, stranding ae hot in
+		// the AEL where it blocks a higher maximum's partner pairing (DESIGN.md
+		// §12.11, coincident max-plateau over a continuing horizontal).
+		if boundContinuesAbove(h, maxPt) {
+			return false
+		}
 		return boundHorizontalFarX(h.Bound, h.Seg) == maxPt.X
 	}
 	return false

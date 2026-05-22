@@ -207,10 +207,25 @@ func branchBothHot(
 	if w1 > 1 || w2 > 1 || (!samePolyType && op != OpXor) {
 		return AddLocalMaxPoly(ael, e1, e2, pt)
 	}
+	// Coincident horizontal hot edges (identical Bot and Top) do not cross
+	// transversally — they are a doubled boundary running along the same
+	// segment, produced when two sources' top plateaus overlap (SplitOverlaps
+	// fragments them into matching pieces). The tunnel branch below assumes a
+	// point-crossing; applying it here joins one ring into the other and
+	// respawns a degenerate apex spike, collapsing a coincident-plateau Xor
+	// result (e.g. A=(5,9),(3,3),(12,9),(7,9), B=(12,9),(10,9),(2,10),(6,3):
+	// Xor 21.15 vs 16.60, the intersection-hole dropped its apex; DESIGN.md
+	// §12.11). Fall through to the interleave instead: each ring keeps its own
+	// chain along the shared edge and they swap AEL ownership. Restricted to
+	// Xor — the other ops route coincident pairs through the opposite-side
+	// skip in dispatchIntersect above.
+	coincidentHoriz := op == OpXor &&
+		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
+		e1.Seg.Bot == e2.Seg.Bot && e1.Seg.Top == e2.Seg.Top
 	// Tunnel case: at the intersection, two rings touch at a single point
 	// (one closes, an immediately new one opens). Clipper2 detects this
 	// with IsFront(e1) || same OutRec — see §12.5.
-	if e1.IsFront() || e1.Outrec == e2.Outrec {
+	if !coincidentHoriz && (e1.IsFront() || e1.Outrec == e2.Outrec) {
 		result := AddLocalMaxPoly(ael, e1, e2, pt)
 		AddLocalMinPoly(ael, e1, e2, pt, false)
 		return result

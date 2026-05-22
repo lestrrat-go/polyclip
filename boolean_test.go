@@ -1522,6 +1522,40 @@ func TestInteriorPointAvoidsHorizontalEdge(t *testing.T) {
 	}
 }
 
+func TestXorCoincidentPlateauKeepsApex(t *testing.T) {
+	// Two polygons whose top plateaus overlap and share the right apex (12,9):
+	// A's top (12,9)-(7,9)-(5,9) and B's top (12,9)-(10,9) coincide over
+	// [10,12]@y=9. The overlap is a doubled boundary (both interiors below),
+	// not a transversal crossing. branchBothHot's tunnel branch treated the
+	// coincident plateau pieces as a point-crossing, joining the intersection
+	// ring into the union ring and respawning a degenerate apex spike — the
+	// Xor hole lost its (12,9) apex triangle and over-counted (21.15 vs 16.60).
+	// Coincident horizontal hot edges now interleave instead (DESIGN.md
+	// §12.11). Values validated against a Monte-Carlo oracle (and U=I+X,
+	// D=|A|-I, X=U-I all hold), NOT Clipper2.
+	a := makeQuad(5, 9, 3, 3, 12, 9, 7, 9)
+	b := makeQuad(12, 9, 10, 9, 2, 10, 6, 3)
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 34.801471},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 18.198529},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.801471},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 16.602941},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestSimplifyCollinearRing(t *testing.T) {
 	// Unit-level: collinear-through vertices removed, real corners and rings
 	// with a repeated vertex preserved.

@@ -203,6 +203,42 @@ func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 			e1.Outrec, e2.Outrec = nil, nil
 			return op1
 		}
+		// Exactly one ring continues, and both maximum edges are FRONT: the
+		// terminal ring is a complete loop while the continuing ring survives on
+		// its BACK edge. The relabel + JoinOutrecPaths path below folds the apex
+		// into a degenerate out-and-back spike here (the same-front splice
+		// collapses the apex triangle, dropping its area — DESIGN.md §12.11,
+		// vertex-on-edge apex under a continuing bound). Instead splice the
+		// terminal loop into the continuing ring as a self-touching detour at the
+		// apex (the figure-8 cross-link), but KEEP the continuing ring's back edge
+		// and its growing tip: set Pts to the terminal apex node so Pts.Next is the
+		// continuing back edge's tip (preserved by the cross-link). The merged
+		// walk revisits the apex; splitSelfTouchingRings decomposes it later.
+		c1, c2 := continuing(e1), continuing(e2)
+		if c1 != c2 && e1.IsFront() && e2.IsFront() {
+			cont, term := e1, e2
+			if c2 {
+				cont, term = e2, e1
+			}
+			opC := AddOutPt(cont, pt)
+			opT := AddOutPt(term, pt)
+			nC, nT := opC.Next, opT.Next
+			opC.Next, nT.Prev = nT, opC
+			opT.Next, nC.Prev = nC, opT
+			orC, orT := cont.Outrec, term.Outrec
+			for p := opC; ; p = p.Next {
+				p.Outrec = orC
+				if p.Next == opC {
+					break
+				}
+			}
+			orC.Pts = opT // Pts.Next == nC == continuing back edge's tip
+			orC.FrontEdge = nil
+			orT.FrontEdge, orT.BackEdge = nil, nil
+			orT.Pts = nil
+			cont.Outrec, term.Outrec = nil, nil
+			return opC
+		}
 		// Fallback recovery for same-side JOINs with a continuing edge: relabel
 		// the inverted ring's sides (mirror of Clipper2 SwapFrontBackSides) so the
 		// subsequent JoinOutrecPaths splices on the correct ends.

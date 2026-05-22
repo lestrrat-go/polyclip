@@ -1556,6 +1556,41 @@ func TestXorCoincidentPlateauKeepsApex(t *testing.T) {
 	}
 }
 
+func TestXorVertexOnEdgeApexKeepsCorner(t *testing.T) {
+	// B's plateau apex (9.5,7) — where B's horizontal top meets its right edge —
+	// lies exactly ON A's edge (12,8)-(7,6) (slope 0.4 passes through it). The
+	// Xor corner of A right of B, the triangle (12,8)-(9.5,7)-(8.255,5.617), was
+	// dropped: at A's apex (12,8) the triangle ring (terminal) and the larger A
+	// ring (still building up its left edge to (5,10)) meet SAME-side, and
+	// AddLocalMaxPoly's relabel+JoinOutrecPaths folded the apex into a degenerate
+	// out-and-back spike, losing the corner (X 15.46 vs 16.57, idX violated).
+	// AddLocalMaxPoly now splices the terminal loop into the continuing ring as a
+	// self-touching detour, preserving the continuing back edge's tip (DESIGN.md
+	// §12.11). Values validated against a Monte-Carlo oracle (U=I+X, D=|A|-I,
+	// X=U-I all hold), NOT Clipper2.
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 1}, {X: 12, Y: 8}, {X: 7, Y: 6}, {X: 5, Y: 10}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 9.5, Y: 7}, {X: 8, Y: 7}, {X: 3, Y: 7}, {X: 5, Y: 2}}}}
+	checks := []struct {
+		name string
+		run  func() (MultiPolygon, error)
+		want float64
+	}{
+		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 28.159420},
+		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 11.590580},
+		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 11.909420},
+		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 16.568841},
+	}
+	for _, c := range checks {
+		got, err := c.run()
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.name, err)
+		}
+		if math.Abs(got.Area()-c.want) > 0.02 {
+			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
+		}
+	}
+}
+
 func TestSimplifyCollinearRing(t *testing.T) {
 	// Unit-level: collinear-through vertices removed, real corners and rings
 	// with a repeated vertex preserved.

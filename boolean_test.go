@@ -1877,6 +1877,42 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputDifferenceClipApexSameSideJoin(t *testing.T) {
+	// A is a 12x12 square with a hole [[6,6],[6,9],[9,9],[7,3]] (vertical left edge,
+	// horizontal top at y=9). B [[5,12],[4,0],[9,10],[5,8]] is a non-convex clip with
+	// a notch peak at (9,10). In Difference, two output regions outside B's two edges
+	// meet at the clip apex (9,10) arriving BOTH-BACK; AddLocalMaxPoly's same-side
+	// figure-8 splice only handled the both-FRONT case, so the both-back join fell to
+	// the relabel+JoinOutrecPaths path, which reversed a sub-chain and emitted a
+	// GEOMETRICALLY self-crossing ring (no repeated vertex, so splitSelfTouchingRings
+	// could not fix it) whose figure-8 shoelace under-counted — Difference collapsed
+	// to 94.35 vs the correct ~122.07. The new both-BACK figure-8 mirror in
+	// AddLocalMaxPoly splices it as a clean self-touching detour (DESIGN.md §12.11).
+	//
+	// NOTE: a separate, smaller residual (~1.5) remains in B's notch region near
+	// (7,9)/(9,10) (tracked in memory as the next target); this test guards the
+	// catastrophic-collapse fix via a lower bound, not the exact identity.
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 6, Y: 6}, {X: 6, Y: 9}, {X: 9, Y: 9}, {X: 7, Y: 3}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 12}, {X: 4, Y: 0}, {X: 9, Y: 10}, {X: 5, Y: 8}}}}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	want := a.Area() - i.Area() // D = A - I, ~122.07
+	// The catastrophic self-crossing collapse dropped ~28 (got 94.35). Assert the
+	// tangle is gone: D must be within ~2 of the identity (was off by ~28).
+	if math.Abs(d.Area()-want) > 2.0 {
+		t.Errorf("difference area %v collapsed (want ~%v, tolerance documents the small notch residual)", d.Area(), want)
+	}
+}
+
 func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) {
 	// A is a 12x12 square with a triangular hole (input [[5,4],[3,3],[5,5],[8,5]]
 	// simplifies to (3,3),(5,5),(8,5)) whose flat TOP (5,5)-(8,5) is COINCIDENT

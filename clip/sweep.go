@@ -1243,7 +1243,26 @@ func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
 		if boundContinuesAbove(h, maxPt) {
 			return false
 		}
-		return boundHorizontalFarX(h.Bound, h.Seg) == maxPt.X
+		// The coupled partner's current plateau segment must end exactly at maxPt
+		// (otherwise it is nowhere near closing here).
+		if boundHorizontalFarX(h.Bound, h.Seg) != maxPt.X {
+			return false
+		}
+		// When maxPt is the partner's terminal apex it tops out exactly here and
+		// its own closeBound closes the shared ring — defer.
+		if apex, ok := boundApex(h.Bound); ok && apex == maxPt {
+			return true
+		}
+		// Otherwise the partner's plateau merely PASSES THROUGH maxPt and continues
+		// to an apex further along (e.g. a hole's top split into T-junction
+		// fragments). Deferring is only safe when the partner borders the OTHER
+		// source here (WindOther != 0): the shared cross-source ring is genuine and
+		// the partner's eventual close carries ae's ring with it. When the partner
+		// is a pure single-source boundary (WindOther == 0) the coupling to ae is
+		// incidental — the partner closes its own same-source ring at its apex and
+		// ae is orphaned, stranding it hot in the AEL where a later horizontal
+		// crosses it and drops a region (the holed-input coincident-plateau bug).
+		return h.WindOther != 0
 	}
 	return false
 }
@@ -1428,6 +1447,21 @@ func boundContinuesAbove(ae *ActiveEdge, maxPt fixed.Point) bool {
 		return false
 	}
 	return last.Top.Y > maxPt.Y
+}
+
+// boundApex returns the terminal (local-maximum) vertex of bound b: the far
+// endpoint of its last segment as traversed. For a bound ending in a trailing
+// horizontal it is that horizontal's far X at the plateau Y; otherwise the last
+// segment's Top. Returns ok=false for an empty bound.
+func boundApex(b *Bound) (fixed.Point, bool) {
+	last := b.Last()
+	if last == nil {
+		return fixed.Point{}, false
+	}
+	if last.Horizontal() {
+		return fixed.Point{X: boundHorizontalFarX(b, last), Y: last.Bot.Y}, true
+	}
+	return last.Top, true
 }
 
 // boundMaxPt returns the local-maximum vertex of ae's bound, assuming ae's

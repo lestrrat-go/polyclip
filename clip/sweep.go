@@ -1350,6 +1350,23 @@ func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
 	return false
 }
 
+// nextSegHorizontalAt reports whether ae's NEXT bound segment is a horizontal at
+// Y — i.e. ae's bound turns onto a horizontal plateau at Y just past its current
+// segment. Used to reject the cross-source plateau defer when the coupled edge
+// continues onto a shared (coincident A/B) top horizontal rather than passing
+// through as a lone sloped/vertical through-edge.
+func nextSegHorizontalAt(ae *ActiveEdge, y fixed.Coord) bool {
+	if ae.Bound == nil {
+		return false
+	}
+	ni := ae.EdgeIdx + 1
+	if ni >= len(ae.Bound.Segs) {
+		return false
+	}
+	ns := ae.Bound.Segs[ni]
+	return ns.Horizontal() && ns.Bot.Y == y
+}
+
 // plateauMaxPartnerPending reports whether ae's GEOMETRIC maxima partner — a
 // same-source bound whose apex is also maxPt — will reach maxPt only after
 // traversing a trailing horizontal plateau not yet swept this scanline. Unlike
@@ -1375,22 +1392,25 @@ func (s *sweep) plateauMaxPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool
 	// e.g. region B bounded by the subject square's edge and the subject hole's
 	// edges). A CROSS-source coupling — ae rode onto the other source's bound at a
 	// crossing — is admitted ONLY when that coupled edge is sloped/vertical,
-	// CONTINUES strictly above maxPt, and is NOT on the apex column at maxPt.Y. Then
-	// maxPt is genuinely ae's own bound apex and deferring lets doHorizontal's
-	// plateau reconnect ae's ring — the Intersect hole-notch where the ring rides
-	// the hole's left bound up to the apex while coupled to the clip edge that
-	// climbs on (hole [[9,7],[7,6],[5,5],[4,7]] B [[7,8],[2,7],[0,1],[10,10]], I
-	// 7.3→15.3). The three exclusions reject a COINCIDENT-PLATEAU confluence, where
-	// two sources share a top edge: there the coupled edge is itself the shared
-	// horizontal, or tops out at maxPt, or sits on the apex column — and that
-	// confluence is closed by the cross-source maximum machinery; deferring it
-	// mis-times the close and drops area (DESIGN.md §12.11).
+	// CONTINUES strictly above maxPt, and PASSES THROUGH maxPt as a lone through-edge
+	// (its next segment is NOT a horizontal at maxPt.Y). Then maxPt is genuinely ae's
+	// own bound apex and deferring lets doHorizontal's plateau close it, re-crossing
+	// the coupled through-edge so its winding drops correctly above — the Intersect
+	// hole-notch / clip-apex cases where the ring rides one bound up to the apex
+	// while coupled to a cross-source edge that climbs on (hole [[9,7],[7,6],[5,5],
+	// [4,7]] B [[7,8],[2,7],[0,1],[10,10]] I 7.3→15.3; hole [[3,3],[3,8],[3,7],[8,7]]
+	// B [[5.5,5],[2,5],[8,1],[10,2]] I 15.4→10.4). The exclusions reject a
+	// COINCIDENT-PLATEAU confluence where two sources SHARE a top edge: there the
+	// coupled edge is itself the shared horizontal, tops out at maxPt, or turns onto
+	// the shared horizontal at maxPt.Y — that confluence is closed by the cross-source
+	// maximum machinery, and deferring mis-times the close and drops area (DESIGN.md
+	// §12.11).
 	other := outrecOther(ae)
 	if other == nil {
 		return false
 	}
 	if other.Seg.Src != ae.Seg.Src &&
-		(other.Seg.Horizontal() || !boundContinuesAbove(other, maxPt) || XAtY(other.Seg, maxPt.Y) == maxPt.X) {
+		(other.Seg.Horizontal() || !boundContinuesAbove(other, maxPt) || nextSegHorizontalAt(other, maxPt.Y)) {
 		return false
 	}
 	for i := range s.ael.Len() {

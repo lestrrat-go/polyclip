@@ -2029,6 +2029,61 @@ func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
+	// Intersect where the clip's apex coincides with a point a subject hole edge
+	// passes through. The intersection ring rides the hole hypotenuse, and at the
+	// clip apex (5.5,5) — where both clip top edges close, one via an unswept
+	// horizontal — the hypotenuse's clip-winding must drop so the ring closes there.
+	// closeBound used to close only the clip edge while the hypotenuse continued up
+	// into the hole interior, emitting the hole's upper triangle as a spurious
+	// filled ring (I 15.4 vs ~10.4). plateauMaxPartnerPending now defers the clip
+	// apex when its cross-source coupled through-edge passes through (not onto a
+	// shared horizontal), so doHorizontal's plateau closes it correctly. The deg1
+	// sibling below (two quads sharing a top edge) must NOT defer and stays correct.
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 8}, {X: 3, Y: 7}, {X: 8, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5.5, Y: 5}, {X: 2, Y: 5}, {X: 8, Y: 1}, {X: 10, Y: 2}}}}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	u, _ := Union(a, b)
+	d, _ := Difference(a, b)
+	x, _ := Xor(a, b)
+	aA, bA := a.Area(), b.Area()
+	iA := i.Area()
+	if iA > 11.5 {
+		t.Errorf("intersect %v over-counted (want ~10.4) — spurious hole-interior ring", iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, u.Area(), aA + bA - iA},
+		{identD, d.Area(), aA - iA},
+		{identX, x.Area(), u.Area() - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+
+	// Sibling that must NOT trigger the cross-source defer: two quads sharing a top
+	// edge (no holes). Difference must stay correct (the defer here would drop area).
+	a2 := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 2}, {X: 12, Y: 8}, {X: 8, Y: 8}, {X: 6, Y: 8}}}}
+	b2 := MultiPolygon{ExPolygon{Outer: Polygon{{X: 8, Y: 8}, {X: 5, Y: 11}, {X: 1, Y: 1}, {X: 12, Y: 8}}}}
+	d2, err := Difference(a2, b2)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	i2, _ := Intersect(a2, b2)
+	if math.Abs(d2.Area()-(a2.Area()-i2.Area())) > 0.02 {
+		t.Errorf("shared-top D=A-I: got %v want %v", d2.Area(), a2.Area()-i2.Area())
+	}
+}
+
 func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
 	// Intersect where a clip quad pokes into a subject hole and the hole's top is a
 	// horizontal plateau. The intersection ring rides the hole's left bound up to

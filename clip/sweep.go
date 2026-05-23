@@ -425,6 +425,18 @@ func (s *sweep) reconcileSharedVertexCrossings(y fixed.Coord) {
 			if l.CurrX != r.CurrX || !s.ael.Less(r, l) {
 				continue
 			}
+			// Only a genuine through-vertex crossing AT this scanline belongs to
+			// reconcile. When the two edges instead properly cross STRICTLY ABOVE
+			// y, their CurrX merely coincide here by grid rounding (the crossing
+			// rounds to y+ε just past the beam top, so doIntersections deferred it
+			// to the next beam, where it will be applied). Crossing it here too
+			// would double-dispatch it — once as a phantom local-min opening a
+			// zero-area ring, then again as the real crossing — dropping a whole
+			// region (holed/non-convex large-coord inputs). Leave it to the next
+			// beam's doIntersections.
+			if res := Intersect(*l.Seg, *r.Seg); res.Kind == ProperCross && res.P.Y > y {
+				continue
+			}
 			IntersectEdges(s.ael, s.op, l, r, fixed.Point{X: l.CurrX, Y: y})
 			swapped = true
 		}

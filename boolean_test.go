@@ -1632,6 +1632,75 @@ func TestUnionAllDoesNotMutateInput(t *testing.T) {
 	}
 }
 
+func TestBooleanNearScanlineCrossingNoDoubleDispatch(t *testing.T) {
+	// Eight fuzz-discovered inputs (simple non-convex quads, large coords) where
+	// an edge crossing rounds to y+ε just past a scanbeam top. doIntersections
+	// correctly defers it to the next beam, but reconcileSharedVertexCrossings —
+	// seeing the two edges share a rounded CurrX at the scanline — also crossed
+	// it, double-dispatching the same crossing as a phantom local-min then the
+	// real crossing. That opened+closed a zero-area ring and dropped a whole
+	// region (Union collapsing below max(a,b), Difference/Xor exceeding their
+	// bounds). reconcile now skips a pair that genuinely ProperCrosses above y.
+	// Each input is checked against the op's area invariant (the bound the fuzz
+	// corpus reported violated).
+	q := func(c ...float64) MultiPolygon {
+		return MultiPolygon{ExPolygon{Outer: Polygon{
+			{X: c[0], Y: c[1]}, {X: c[2], Y: c[3]}, {X: c[4], Y: c[5]}, {X: c[6], Y: c[7]},
+		}}}
+	}
+	cases := []struct {
+		name string
+		a, b MultiPolygon
+	}{
+		{"U-3e7c", q(85, 25, -59, 88, -65, 5, -5, 60), q(5, 5, 15, 5, 15, 15, 5, 83)},
+		{"U-4ca9", q(-5, 2, 61, 8, -31, 50, 24, -66), q(-1, 29, 15, -75, 15, 124, -31, 74)},
+		{"I-ad5d", q(-93, 144, 5, -117, 5, 86, -5, -8), q(-115, 77, 25, -20, 25, 5, 15, -1)},
+		{"I-c5e2", q(-10, -10, 10, -10, 10, -10, -10, 10), q(-42, -3, 3, -28, 3, 50, -3, 3)},
+		{"D-43f7", q(5, 59, 5, 82, 5, -16, 146, -57), q(-69, 25, 116, -25, 25, 5, 38, 124)},
+		{"D-b3c6", q(5, 59, 5, 82, 5, -16, 146, -57), q(-69, 25, 116, -25, 25, 5, 38, 103)},
+		{"X-279f", q(30, -56, 10, 47, -51, 10, -6, 16), q(-3, -5, -2, 32, 70, 3, -3, 82)},
+		{"X-9614", q(30, -56, 10, 47, -51, 10, -6, 16), q(-3, -18, 51, 118, 3, 3, -3, 82)},
+	}
+	const eps = 1e-6
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			aA, bA := tc.a.Area(), tc.b.Area()
+			u, err := Union(tc.a, tc.b)
+			if err != nil {
+				t.Fatalf("union: %v", err)
+			}
+			i, _ := Intersect(tc.a, tc.b)
+			d, _ := Difference(tc.a, tc.b)
+			x, _ := Xor(tc.a, tc.b)
+			uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+			// Per-op area invariants (the fuzz bounds the corpus violated).
+			lo := math.Max(aA, bA)
+			if uA < lo-eps || uA > aA+bA+eps {
+				t.Errorf("Union %g not in [max(a,b)=%g, a+b=%g]", uA, lo, aA+bA)
+			}
+			if iA > math.Min(aA, bA)+eps || iA < -eps {
+				t.Errorf("Intersect %g not in [0, min(a,b)=%g]", iA, math.Min(aA, bA))
+			}
+			if dA > aA+eps || dA < -eps {
+				t.Errorf("Difference %g not in [0, a=%g]", dA, aA)
+			}
+			if xA > aA+bA+eps || xA < -eps {
+				t.Errorf("Xor %g not in [0, a+b=%g]", xA, aA+bA)
+			}
+			// Noise-free set identities.
+			if math.Abs(uA-(aA+bA-iA)) > 0.02 {
+				t.Errorf("U=A+B-I violated: U=%g A+B-I=%g", uA, aA+bA-iA)
+			}
+			if math.Abs(dA-(aA-iA)) > 0.02 {
+				t.Errorf("D=A-I violated: D=%g A-I=%g", dA, aA-iA)
+			}
+			if math.Abs(xA-(uA-iA)) > 0.02 {
+				t.Errorf("X=U-I violated: X=%g U-I=%g", xA, uA-iA)
+			}
+		})
+	}
+}
+
 func TestBooleanInputHoleIslandNesting(t *testing.T) {
 	// A is a 10x10 square with a centered 6x6 hole (area 64). B is a 2x2 square
 	// entirely inside that hole (area 4). The union's three boundary rings are

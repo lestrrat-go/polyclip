@@ -130,7 +130,7 @@ func dispatchIntersect(
 	if op != OpXor && !samePolyType &&
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
-		e1.Seg.Reversed != e2.Seg.Reversed &&
+		(e1.Seg.Reversed != e2.Seg.Reversed || sameSideHotContinuesColdEnds(e1, e2)) &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
 		(e1.IsBoundLast() || e2.IsBoundLast()) &&
 		!collinearContinuationBlocksSkip(e1) && !collinearContinuationBlocksSkip(e2) &&
@@ -187,6 +187,37 @@ func continuesCollinearHorizontal(ae *ActiveEdge) bool {
 // positive ring instead of a hole (DESIGN.md §12.11).
 func collinearContinuationBlocksSkip(ae *ActiveEdge) bool {
 	return continuesCollinearHorizontal(ae) && !ae.IsHotEdge()
+}
+
+// sameSideHotContinuesColdEnds reports whether a coincident horizontal pair
+// whose Reversed flags AGREE (so the opposite-side test misses it) is
+// nonetheless a redundant doubled boundary that must be skipped. That holds when
+// one bound is HOT and continues collinearly PAST the overlap while the other is
+// COLD and ends AT the overlap (bound-last): the cold edge is the interior
+// doubling and the hot bound is the live boundary that must keep its run. The
+// one-hot SwapOutrecs would instead transfer the hot ring onto the cold dead-end
+// edge and collapse it — the Intersect (5,5) confluence where a subject hole's
+// top horizontal coincides with the clip's CONTINUING bottom edge, dropping the
+// whole intersection (DESIGN.md §12.11). The Reversed flag does not encode the
+// true interior side for two coincident horizontals here, so this geometric
+// hot-continues/cold-ends test stands in for it. Mirrors the COLD-only carve-out
+// in [collinearContinuationBlocksSkip] for the opposite-side path.
+func sameSideHotContinuesColdEnds(e1, e2 *ActiveEdge) bool {
+	hotEnds := func(hot, cold *ActiveEdge) bool {
+		// The hot bound must PASS THROUGH the overlap: its ultimate apex is
+		// strictly above the horizontal's Y, so the coincident horizontal is a
+		// mid-bound pass-through, not the bound's terminal top plateau. When the
+		// hot bound itself TOPS OUT at the plateau (apex Y == overlap Y), the
+		// coincident pair is a genuine cross-source top confluence that the normal
+		// dispatch must build (closeBound's Case A/B), NOT skip — skipping there
+		// drops the thin overlap region (TestCoincidentHorizontalOverlapClosesRing,
+		// TestIntersectOverlappingAxisAligned).
+		throughY := fixed.Point{Y: hot.Seg.Bot.Y}
+		return hot.IsHotEdge() && continuesCollinearHorizontal(hot) &&
+			boundContinuesAbove(hot, throughY) &&
+			!cold.IsHotEdge() && cold.IsBoundLast()
+	}
+	return hotEnds(e1, e2) || hotEnds(e2, e1)
 }
 
 // respawnHandoffAtOverlap reports whether a coincident opposite-side horizontal

@@ -1877,6 +1877,64 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) {
+	// A is a 12x12 square with a triangular hole (input [[5,4],[3,3],[5,5],[8,5]]
+	// simplifies to (3,3),(5,5),(8,5)) whose flat TOP (5,5)-(8,5) is COINCIDENT
+	// with a CONTINUING edge of B: B's vertex (5,5) equals the hole apex, and B's
+	// bottom edge (5,5)->(12,5) (split to (5,5)->(8,5) at the hole's (8,5)) runs
+	// along the same horizontal while B's bound carries on UP to its apex (5,10).
+	// At the (5,5) confluence the Intersect region's ring correctly hands off onto
+	// B's continuing right bound, but the coincident pair (B's hot continuing
+	// horizontal vs the hole's cold dead-end top) has EQUAL Reversed flags, so the
+	// opposite-side skip missed it and the one-hot SwapOutrecs transferred the
+	// region ring onto the cold dead-end hole-top — collapsing it to a degenerate
+	// 2-pt ring, so Intersect returned 0 instead of ~21 (and U/D/X identities all
+	// broke off that I=0). sameSideHotContinuesColdEnds now also skips a same-side
+	// coincident pair when the hot bound passes THROUGH the overlap (apex strictly
+	// above) while the cold bound ends there (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 4}, {X: 3, Y: 3}, {X: 5, Y: 5}, {X: 8, Y: 5}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 5}, {X: 12, Y: 5}, {X: 5, Y: 10}, {X: 3.5, Y: 3.25}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Intersect must not have collapsed (the bug returned 0 instead of ~21).
+	if iA < 18 {
+		t.Errorf("intersect area %v collapsed (want ~21)", iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{"U=A+B-I", uA, aA + bA - iA},
+		{"D=A-I", dA, aA - iA},
+		{"X=U-I", xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 	// A is a 12x12 square with a triangular hole whose TOP edge is a horizontal
 	// at y=9 ((5,9)-(9,9)); the input hole [[5,4],[5,9],[9,9],[5,7]] has a

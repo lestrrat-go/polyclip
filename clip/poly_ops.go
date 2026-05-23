@@ -143,11 +143,15 @@ func dispatchIntersect(
 		return branchBothHot(ael, op, e1, e2, pt, w1, w2, samePolyType)
 	case e1Hot:
 		result := AddOutPt(e1, pt)
-		SwapOutrecs(e1, e2)
+		if !coldDeadEndAtHotThrough(e1, e2, pt) {
+			SwapOutrecs(e1, e2)
+		}
 		return result
 	case e2Hot:
 		result := AddOutPt(e2, pt)
-		SwapOutrecs(e1, e2)
+		if !coldDeadEndAtHotThrough(e2, e1, pt) {
+			SwapOutrecs(e1, e2)
+		}
 		return result
 	default:
 		return branchNeitherHot(ael, op, e1, e2, pt, w1, w2, samePolyType)
@@ -187,6 +191,47 @@ func continuesCollinearHorizontal(ae *ActiveEdge) bool {
 // positive ring instead of a hole (DESIGN.md §12.11).
 func collinearContinuationBlocksSkip(ae *ActiveEdge) bool {
 	return continuesCollinearHorizontal(ae) && !ae.IsHotEdge()
+}
+
+// coldDeadEndAtHotThrough reports whether a one-hot crossing is a HOT bound
+// passing THROUGH pt while a COLD bound DEAD-ENDS at pt — in which case the
+// one-hot SwapOutrecs must be suppressed. The cold edge is bound-last (its bound
+// terminates at pt, e.g. a subject hole's top horizontal whose far endpoint sits
+// on the clip vertex) and carries no ring, while the hot edge's bound continues
+// strictly above pt (boundContinuesAbove). Transferring the hot ring onto the
+// cold dead-end (the normal one-hot behaviour) would hand it to an edge that
+// closeBound removes immediately, collapsing the ring — the Intersect hole-top
+// drop where a hole's coincident top horizontal terminates on the clip's
+// continuing bound (DESIGN.md §12.11). The boundary must keep building on the hot
+// edge, so AddOutPt records pt but the swap is skipped. This is the non-coincident
+// sibling of [sameSideHotContinuesColdEnds]: there both edges are still on the
+// coincident horizontal; here the hot bound has already advanced onto its sloped
+// continuation, so the pair is a plain one-hot crossing rather than a coincident
+// horizontal pair. Gated on boundContinuesAbove so a genuine corner (hot edge also
+// topping out at pt) still transfers normally.
+func coldDeadEndAtHotThrough(hot, cold *ActiveEdge, pt fixed.Point) bool {
+	return !cold.IsHotEdge() && cold.IsBoundLast() && cold.Seg.Horizontal() &&
+		hot.Seg.Src != cold.Seg.Src && boundContinuesAbove(hot, pt) &&
+		hotPrevHorizontalCoincides(hot, cold)
+}
+
+// hotPrevHorizontalCoincides reports whether the hot bound's immediately-traversed
+// (previous) segment is a horizontal at cold's Y whose X-span overlaps cold's —
+// i.e. the hot bound just climbed off a horizontal COINCIDENT with the cold
+// dead-end edge. That makes the cold edge a redundant doubled boundary (the same
+// horizontal as one the hot bound already owns), so the one-hot transfer onto it
+// in [coldDeadEndAtHotThrough] must be suppressed. Without this, a genuine
+// cross-source horizontal cold dead-end that the hot ring must turn ONTO would be
+// wrongly skipped.
+func hotPrevHorizontalCoincides(hot, cold *ActiveEdge) bool {
+	if hot.Bound == nil || hot.EdgeIdx == 0 {
+		return false
+	}
+	prev := hot.Bound.Segs[hot.EdgeIdx-1]
+	if !prev.Horizontal() || prev.Bot.Y != cold.Seg.Bot.Y {
+		return false
+	}
+	return max(prev.Bot.X, cold.Seg.Bot.X) < min(prev.Top.X, cold.Seg.Top.X)
 }
 
 // sameSideHotContinuesColdEnds reports whether a coincident horizontal pair

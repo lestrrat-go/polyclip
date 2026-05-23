@@ -15,6 +15,13 @@ const (
 	opXor        = "Xor"
 )
 
+// Set-identity labels asserted by the holed-input regression tests.
+const (
+	identU = "U=A+B-I"
+	identD = "D=A-I"
+	identX = "X=U-I"
+)
+
 func sq(cx, cy, half float64) ExPolygon {
 	return ExPolygon{Outer: Polygon{
 		{cx - half, cy - half},
@@ -1810,9 +1817,9 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 		name      string
 		got, want float64
 	}{
-		{"U=A+B-I", uA, aA + bA - iA},
-		{"D=A-I", dA, aA - iA},
-		{"X=U-I", xA, uA - iA},
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
 	} {
 		if math.Abs(c.got-c.want) > 0.02 {
 			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
@@ -1867,9 +1874,9 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 		name      string
 		got, want float64
 	}{
-		{"U=A+B-I", uA, aA + bA - iA},
-		{"D=A-I", dA, aA - iA},
-		{"X=U-I", xA, uA - iA},
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
 	} {
 		if math.Abs(c.got-c.want) > 0.02 {
 			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
@@ -1961,9 +1968,66 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 		name      string
 		got, want float64
 	}{
-		{"U=A+B-I", uA, aA + bA - iA},
-		{"D=A-I", dA, aA - iA},
-		{"X=U-I", xA, uA - iA},
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
+func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
+	// The non-coincident sibling of …HoleTopCoincidentWithSlopedClipBound: by the
+	// time the two boundaries meet, the hot clip bound has ALREADY climbed off the
+	// coincident horizontal onto its sloped continuation, so the meeting is a plain
+	// one-hot crossing rather than a coincident-horizontal pair. A is a 12x12
+	// square with hole [[5,5],[3,9],[5,9],[9,9]] whose top is horizontal at y=9.
+	// B = [[3,9],[5,9],[0,11],[2,3]] shares the hole-top sub-edge (3,9)-(5,9), then
+	// B climbs (5,9)->(0,11). At (5,9) the hole's cold dead-end top horizontal
+	// S(3,9)->(5,9) crosses B's hot through-edge; the one-hot SwapOutrecs used to
+	// transfer the live Intersect ring onto that cold dead-end, collapsing Intersect
+	// to 0 (want ~12, and U/D/X identities broke off that I=0). coldDeadEndAtHotThrough
+	// now suppresses the transfer when the cold edge is a bound-last horizontal
+	// dead-ending on the hot bound that just climbed off a coincident horizontal
+	// (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 5}, {X: 3, Y: 9}, {X: 5, Y: 9}, {X: 9, Y: 9}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 11}, {X: 2, Y: 3}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Intersect must not have collapsed (the bug returned 0 instead of ~12).
+	if iA < 10 {
+		t.Errorf("intersect area %v collapsed (want ~12)", iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
 	} {
 		if math.Abs(c.got-c.want) > 0.02 {
 			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
@@ -2017,9 +2081,9 @@ func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
 		name      string
 		got, want float64
 	}{
-		{"U=A+B-I", uA, aA + bA - iA},
-		{"D=A-I", dA, aA - iA},
-		{"X=U-I", xA, uA - iA},
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
 	} {
 		if math.Abs(c.got-c.want) > 0.02 {
 			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
@@ -2075,9 +2139,9 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 		name      string
 		got, want float64
 	}{
-		{"U=A+B-I", uA, aA + bA - iA},
-		{"D=A-I", dA, aA - iA},
-		{"X=U-I", xA, uA - iA},
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
 	} {
 		if math.Abs(c.got-c.want) > 0.02 {
 			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)

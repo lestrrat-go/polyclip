@@ -1311,7 +1311,7 @@ func (s *sweep) plateauMaxPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool
 	if other == nil || other.Seg.Src != ae.Seg.Src {
 		return false
 	}
-	for i := 0; i < s.ael.Len(); i++ {
+	for i := range s.ael.Len() {
 		cand := s.ael.At(i)
 		if cand == ae || cand.Bound == nil || cand.Seg.Src != ae.Seg.Src {
 			continue

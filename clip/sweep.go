@@ -1011,23 +1011,53 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		// loop ae and partner are AEL-adjacent. Port of Clipper2 DoMaxima's
 		// between-maxima loop (engine.cpp:2756, DESIGN.md §12.6.1 follow-up).
 		s.resolveBetweenMaxima(ae, partner, maxPt)
-		if ae.IsHotEdge() && partner.IsHotEdge() {
-			AddLocalMaxPoly(s.ael, ae, partner, maxPt)
+		// Difference hole-notch bulk: a HOT ae reaching its apex whose same-source
+		// maxima partner is COLD is NOT closing a ring with that partner — the cold
+		// partner carries no OutRec (its bound went cold at an earlier cross-source
+		// crossing where a subject hole boundary met this clip bound). ae's ring
+		// must instead close via its own COUPLED other edge, which here is from the
+		// OTHER source (the ring spans subject+clip after the notch join) and tops
+		// out at or below this apex. Removing ae alongside the cold partner drops
+		// ae's apex and leaves its ring dangling, splicing a phantom edge that
+		// collapses the Difference result to a sliver (the hole∪clip void-merge
+		// over-count, e.g. A=square hole [[8,8],[6,8],[4,3],[3,8]], B=[[3,8],[5,8],
+		// [12,6],[10,11]]: D 138.6→118.1; DESIGN.md §12.11). So remove only the cold
+		// partner and fall through to the coupled-handoff path (Case A/B) so ae's
+		// apex is emitted and the coupling preserved. Scoped to Difference: the
+		// Intersect form of this confluence needs the cold bound to RE-HEAT past the
+		// hole (a separate unsolved case), and falling through there instead
+		// over-counts. When both edges are hot it is a genuine simultaneous maximum
+		// (close/join); when ae is cold it has no ring to preserve — both keep the
+		// original remove-both.
+		coupled := outrecOther(ae)
+		if s.op == OpDifference && ae.IsHotEdge() && !partner.IsHotEdge() &&
+			coupled != nil && coupled.Seg.Src != ae.Seg.Src &&
+			!boundContinuesAbove(coupled, maxPt) {
+			left, right := s.maximaFlanks(ae, partner)
+			s.ael.Remove(partner)
+			delete(s.bySeg, partner.Seg)
+			if left != nil && right != nil && left != ae && right != ae {
+				s.maybeScheduleIntersect(left, right, maxPt.Y)
+			}
+		} else {
+			if ae.IsHotEdge() && partner.IsHotEdge() {
+				AddLocalMaxPoly(s.ael, ae, partner, maxPt)
+			}
+			// Capture the edges flanking the removed pair: once both maxima edges
+			// leave, the edge to their left and the edge to their right become
+			// adjacent and may cross higher up. Schedule that check, or the
+			// crossing is silently missed and the AEL order corrupts later
+			// classifications (the cause of lost teeth in unions of concave shapes).
+			left, right := s.maximaFlanks(ae, partner)
+			s.ael.Remove(ae)
+			s.ael.Remove(partner)
+			delete(s.bySeg, ae.Seg)
+			delete(s.bySeg, partner.Seg)
+			if left != nil && right != nil {
+				s.maybeScheduleIntersect(left, right, maxPt.Y)
+			}
+			return
 		}
-		// Capture the edges flanking the removed pair: once both maxima edges
-		// leave, the edge to their left and the edge to their right become
-		// adjacent and may cross higher up. Schedule that check, or the
-		// crossing is silently missed and the AEL order corrupts later
-		// classifications (the cause of lost teeth in unions of concave shapes).
-		left, right := s.maximaFlanks(ae, partner)
-		s.ael.Remove(ae)
-		s.ael.Remove(partner)
-		delete(s.bySeg, ae.Seg)
-		delete(s.bySeg, partner.Seg)
-		if left != nil && right != nil {
-			s.maybeScheduleIntersect(left, right, maxPt.Y)
-		}
-		return
 	}
 
 	// Plateau maximum whose other bound reaches maxPt via a horizontal that has

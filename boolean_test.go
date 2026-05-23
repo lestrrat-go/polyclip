@@ -1978,6 +1978,66 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}
 }
 
+func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
+	// Difference where a subject hole and the clip overlap so their VOIDS merge.
+	// A is a 12x12 square with hole [[8,8],[6,8],[4,3],[3,8]] (a triangle with a
+	// flat top at y=8); B's bottom edge (3,8)-(5,8) is coincident with that top and
+	// B pokes up out of the square's interior. The correct result is the square
+	// with ONE hole = hole∪B (~25.9 void), area ~118.1. The hole's right bound and
+	// B's left bound cross where the filled strip between the two voids closes; the
+	// AddLocalMaxPoly join correctly merges the two void rings, but the surviving
+	// ring's other bound (B's left, cross-source coupled) tops out at the square
+	// corner with a COLD same-source maxima partner (B's top went cold at the
+	// crossing). The old code removed it without emitting the apex, splicing a
+	// phantom edge that collapsed the void to a 5.4 sliver → D returned 138.6
+	// instead of ~118.1. closeBound now closes such a hot edge via its coupled edge
+	// (Case A/B) instead of dropping it (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 8, Y: 8}, {X: 6, Y: 8}, {X: 4, Y: 3}, {X: 3, Y: 8}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 8}, {X: 5, Y: 8}, {X: 12, Y: 6}, {X: 10, Y: 11}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Difference must not have collapsed to a sliver (the bug returned 138.6,
+	// larger than A's area, instead of ~118.1).
+	if dA > aA-10 {
+		t.Errorf("difference area %v did not remove the hole-clip void (want ~118.1, A=%v)", dA, aA)
+	}
+	if math.Abs(dA-(aA-iA)) > 0.02 {
+		t.Errorf("D=A-I: got %v want %v", dA, aA-iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, uA, aA + bA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	// Intersect where a clip quad's left bound crosses INTO a triangular subject
 	// hole, biting a notch out of the clip. A is a 12x12 square with hole

@@ -1978,6 +1978,57 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}
 }
 
+func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
+	// Difference where the subject hole's TOP edge (4,8)-(7,8) is coincident with
+	// the clip's BOTTOM edge (4,8)-(7,8) — a doubled boundary — and BOTH edges are
+	// hot at the overlap (one ring from the cross-source crossing below, one from
+	// the clip's local min). The clip bound CONTINUES up past the overlap while the
+	// hole-top is bound-last (ends). The dispatchIntersect coincident skip is
+	// designed for hot+cold pairs, so this both-hot pair fell to branchBothHot,
+	// which AddLocalMaxPoly-merged the two rings through their coincident edge into
+	// a phantom sliver → D returned 141.6 (with a spurious island) instead of
+	// ~130.5. sameSideBothHotOneEnds now also skips a both-hot one-continues/one-ends
+	// coincident pair (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 4, Y: 7}, {X: 4, Y: 8}, {X: 7, Y: 8}, {X: 3, Y: 6}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 8}, {X: 7, Y: 8}, {X: 2, Y: 10}, {X: 2, Y: 2}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	if math.Abs(dA-(aA-iA)) > 0.02 {
+		t.Errorf("D=A-I: got %v want %v", dA, aA-iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, uA, aA + bA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
 	// Intersect where a clip quad's boundary crosses a subject hole that pokes
 	// back OUT through the clip (a notch). The intersection ring rides the hole's

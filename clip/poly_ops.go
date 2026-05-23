@@ -130,7 +130,7 @@ func dispatchIntersect(
 	if op != OpXor && !samePolyType &&
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
-		(e1.Seg.Reversed != e2.Seg.Reversed || sameSideHotContinuesColdEnds(e1, e2)) &&
+		(e1.Seg.Reversed != e2.Seg.Reversed || sameSideHotContinuesColdEnds(e1, e2) || sameSideBothHotOneEnds(e1, e2)) &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
 		(e1.IsBoundLast() || e2.IsBoundLast()) &&
 		!collinearContinuationBlocksSkip(e1) && !collinearContinuationBlocksSkip(e2) &&
@@ -267,6 +267,27 @@ func sameSideHotContinuesColdEnds(e1, e2 *ActiveEdge) bool {
 			!cold.IsHotEdge() && cold.IsBoundLast()
 	}
 	return hotEnds(e1, e2) || hotEnds(e2, e1)
+}
+
+// sameSideBothHotOneEnds is the BOTH-HOT sibling of [sameSideHotContinuesColdEnds]:
+// a same-side (Reversed-equal) coincident horizontal pair where BOTH edges are hot,
+// one bound CONTINUES strictly past the overlap (boundContinuesAbove) and the other
+// is bound-last (its plateau ends at the overlap). Each carries its own ring, so it
+// is a doubled boundary EXIT, not a co-maximum: closing/merging them (AddLocalMaxPoly
+// in branchBothHot) splices the two rings through their coincident edge into a
+// phantom sliver (the Difference hole-top == clip-bottom doubled boundary, hole
+// [[4,7],[4,8],[7,8],[3,6]] B=[[4,8],[7,8],[2,10],[2,2]]: D 141.6 vs 130.5). Skipping
+// lets each ring keep its run; [sweep.processHorzJoins] reconnects the coincident
+// runs once the global topology is known. Excludes the co-maximum (both bound-last,
+// both topping out at the plateau) which must still close.
+func sameSideBothHotOneEnds(e1, e2 *ActiveEdge) bool {
+	bothHot := func(cont, ends *ActiveEdge) bool {
+		throughY := fixed.Point{Y: cont.Seg.Bot.Y}
+		return cont.IsHotEdge() && ends.IsHotEdge() &&
+			boundContinuesAbove(cont, throughY) && !cont.IsBoundLast() &&
+			ends.IsBoundLast() && !boundContinuesAbove(ends, throughY)
+	}
+	return bothHot(e1, e2) || bothHot(e2, e1)
 }
 
 // respawnHandoffAtOverlap reports whether a coincident opposite-side horizontal

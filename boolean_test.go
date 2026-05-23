@@ -1978,6 +1978,61 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}
 }
 
+func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
+	// Intersect where a clip quad's left bound crosses INTO a triangular subject
+	// hole, biting a notch out of the clip. A is a 12x12 square with hole
+	// [[7,7],[5,4],[5,7],[3,7]] (simplifies to triangle (7,7),(5,4),(5,7), apex at
+	// the plateau (5,7)-(7,7)). B = [[3,7],[5,7],[11,1],[7,11]] shares vertex (5,7).
+	// B builds the Intersect ring; at the crossing (6.2,5.8) the ring correctly
+	// turns from B's left bound onto the hole's right edge (into the notch) and
+	// rides it up to the hole apex (5,7). There it must hand off onto B's left
+	// continuation (which went cold at the crossing and already traversed its
+	// (5,7)->(3,7) horizontal). Without the apexNotchContinuation handoff the ring
+	// collapsed to a tiny sliver, so Intersect returned ~1.2 instead of ~20.85 and
+	// all three U/D/X identities broke (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 7, Y: 7}, {X: 5, Y: 4}, {X: 5, Y: 7}, {X: 3, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 7}, {X: 5, Y: 7}, {X: 11, Y: 1}, {X: 7, Y: 11}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Intersect must not have collapsed (the bug returned ~1.2 instead of ~20.8).
+	if iA < 19 {
+		t.Errorf("intersect area %v collapsed (want ~20.8)", iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
 	// The non-coincident sibling of …HoleTopCoincidentWithSlopedClipBound: by the
 	// time the two boundaries meet, the hot clip bound has ALREADY climbed off the

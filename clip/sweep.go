@@ -1084,6 +1084,33 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		s.ael.InsertAt(iAe, ae)
 	}
 
+	// Hole-notch apex reconnection. ae is a HOT bound reaching its apex maxPt with
+	// no same-source maxima partner (the partner already left) and a coupled other
+	// edge still building. A COLD cross-source neighbour c continues strictly above
+	// maxPt and rejoins maxPt through its just-traversed horizontal (c's bound's
+	// previous segment is the horizontal from maxPt to c's current Bot). This is
+	// the Intersect hole-notch exit: the intersection boundary rode ae (a subject
+	// hole bound) up to the hole apex and must now turn onto the clip bound c that
+	// re-bounds the region above. Plain Case A would drop ae and leave c cold,
+	// collapsing the ring to a sliver (DESIGN.md §12.11). Instead emit maxPt and the
+	// horizontal's far end (c's Bot), then transfer ae's ring side to c so it keeps
+	// building; the ring closes when c meets the coupled edge at their shared apex.
+	if c := s.apexNotchContinuation(ae, maxPt); c != nil {
+		AddOutPt(ae, maxPt)
+		AddOutPt(ae, c.Seg.Bot)
+		or := ae.Outrec
+		if or.FrontEdge == ae {
+			or.FrontEdge = c
+		} else {
+			or.BackEdge = c
+		}
+		c.Outrec = or
+		ae.Outrec = nil
+		s.ael.Remove(ae)
+		delete(s.bySeg, ae.Seg)
+		return
+	}
+
 	// No simultaneous partner. The two bounds of this maximum arrive at
 	// different events — e.g. a flat top (local-max plateau) whose two
 	// ascending bounds reach the plateau ends as separate Top/horizontal
@@ -1514,6 +1541,52 @@ func boundContinuesAbove(ae *ActiveEdge, maxPt fixed.Point) bool {
 		return false
 	}
 	return last.Top.Y > maxPt.Y
+}
+
+// apexNotchContinuation finds the COLD cross-source neighbour that ae's ring must
+// turn onto at the hole-notch apex maxPt, or nil when this is not that case. ae is
+// a hot bound reaching its apex with its coupled other edge still building (the
+// ring stays open through it). The candidate c is an AEL neighbour of ae that:
+//   - is cold and from the other source,
+//   - continues strictly above maxPt (boundContinuesAbove), and
+//   - rejoins maxPt through its just-traversed horizontal: c sits at maxPt's Y and
+//     c's bound's previous segment is the horizontal joining maxPt to c's Bot.
+//
+// That horizontal was traversed COLD (the clip bound went cold at the notch-entry
+// crossing), so c never picked the ring back up; the close must hand ae's ring
+// side to c and emit the horizontal so the boundary continues (DESIGN.md §12.11).
+func (s *sweep) apexNotchContinuation(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
+	if !ae.IsHotEdge() {
+		return nil
+	}
+	coupled := outrecOther(ae)
+	if coupled == nil || s.ael.IndexOf(coupled) < 0 {
+		return nil
+	}
+	i := s.ael.IndexOf(ae)
+	if i < 0 {
+		return nil
+	}
+	for _, c := range []*ActiveEdge{s.ael.LeftOf(i), s.ael.RightOf(i)} {
+		if c == nil || c == coupled || c.IsHotEdge() || c.Bound == nil {
+			continue
+		}
+		if c.Seg.Src == ae.Seg.Src || c.EdgeIdx == 0 {
+			continue
+		}
+		if c.Seg.Bot.Y != maxPt.Y || !boundContinuesAbove(c, maxPt) {
+			continue
+		}
+		prev := c.Bound.Segs[c.EdgeIdx-1]
+		if !prev.Horizontal() || prev.Bot.Y != maxPt.Y {
+			continue
+		}
+		// The previous horizontal must join maxPt to c's current Bot.
+		if (prev.Bot == maxPt && prev.Top == c.Seg.Bot) || (prev.Top == maxPt && prev.Bot == c.Seg.Bot) {
+			return c
+		}
+	}
+	return nil
 }
 
 // boundApex returns the terminal (local-maximum) vertex of bound b: the far

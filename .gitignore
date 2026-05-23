@@ -7,3 +7,4 @@ coverage.txt
 # to an explicit test in *_test.go and remove the raw file. Don't commit
 # raw failures.
 testdata/fuzz/
+/differential

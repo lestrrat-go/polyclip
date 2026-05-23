@@ -1978,6 +1978,67 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}
 }
 
+func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
+	// Intersect where a clip quad's boundary crosses a subject hole that pokes
+	// back OUT through the clip (a notch). The intersection ring rides the hole's
+	// left bound up to the hole apex, where it must continue onto the clip's TOP
+	// edge — but that clip bound went cold at the cross-source crossing and only
+	// reaches the apex later this scanline, by traversing its coincident top
+	// horizontal in doHorizontal. Closing the hole bound's apex eagerly dropped
+	// the region past the hole (Intersect collapsed to a sliver, ~4.7 vs ~15.5).
+	// closeBound now DEFERS such a hot apex when a cold cross-source bound will
+	// traverse a horizontal through it (crossSourceHorizThroughPending), so the
+	// horizontal's crossing re-heats that bound onto the ring (DESIGN.md §12.11).
+	cases := []struct {
+		name string
+		hole Polygon
+		b    Polygon
+		want float64
+	}{
+		{"poke-up", Polygon{{9, 9}, {5, 6}, {5, 7}, {4, 9}}, Polygon{{0, 11}, {9, 0}, {6, 9}, {2, 9}}, 15.456},
+		{"poke-down", Polygon{{3, 3}, {6, 6}, {8, 6}, {8, 4}}, Polygon{{0, 10}, {6, 0}, {7.5, 6}, {6, 6}}, 16.92},
+	}
+	outer := Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}}
+	for _, tc := range cases {
+		a := MultiPolygon{ExPolygon{Outer: outer, Holes: []Polygon{tc.hole}}}
+		b := MultiPolygon{ExPolygon{Outer: tc.b}}
+		u, err := Union(a, b)
+		if err != nil {
+			t.Fatalf("%s union: %v", tc.name, err)
+		}
+		i, err := Intersect(a, b)
+		if err != nil {
+			t.Fatalf("%s intersect: %v", tc.name, err)
+		}
+		d, err := Difference(a, b)
+		if err != nil {
+			t.Fatalf("%s difference: %v", tc.name, err)
+		}
+		x, err := Xor(a, b)
+		if err != nil {
+			t.Fatalf("%s xor: %v", tc.name, err)
+		}
+		aA, bA := a.Area(), b.Area()
+		uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+		// Intersect must not have collapsed to a sliver (the bug returned ~5).
+		if iA < tc.want-0.6 {
+			t.Errorf("%s: intersect area %v collapsed (want ~%v)", tc.name, iA, tc.want)
+		}
+		for _, c := range []struct {
+			name      string
+			got, want float64
+		}{
+			{identU, uA, aA + bA - iA},
+			{identD, dA, aA - iA},
+			{identX, xA, uA - iA},
+		} {
+			if math.Abs(c.got-c.want) > 0.02 {
+				t.Errorf("%s %s: got %v want %v", tc.name, c.name, c.got, c.want)
+			}
+		}
+	}
+}
+
 func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
 	// Difference where a subject hole and the clip overlap so their VOIDS merge.
 	// A is a 12x12 square with hole [[8,8],[6,8],[4,3],[3,8]] (a triangle with a

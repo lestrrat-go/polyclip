@@ -1075,6 +1075,20 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		return
 	}
 
+	// Intersect hole-exit re-heat (cross-source horizontal-through-vertex pending).
+	// ae is a HOT bound topping out at maxPt, and a COLD CROSS-source bound will
+	// traverse a horizontal THROUGH maxPt later this scanline (its bound has a
+	// horizontal segment at maxPt.Y whose span includes maxPt.X, not yet swept).
+	// Closing ae now (Case A) drops its apex and the cross-source bound stays cold,
+	// so the region past the hole is lost (the Intersect hole-notch bulk drop:
+	// A=square hole [[9,9],[5,6],[5,7],[4,9]], B=[[0,11],[9,0],[6,9],[2,9]], I 4.7
+	// vs 15.5). Defer: leave ae hot so doHorizontal's crossing re-heats the cold
+	// bound onto ae's ring as it reaches maxPt (one-hot SwapOutrecs), then the ring
+	// continues along that bound (DESIGN.md §12.11).
+	if s.crossSourceHorizThroughPending(ae, maxPt) {
+		return
+	}
+
 	// Cross-source ring self-closure at a through-vertex. ae's bound maxes out
 	// at maxPt, and its OWN ring's other edge (coupled) is a DIFFERENT-source hot
 	// edge that passes THROUGH maxPt and continues strictly above (a vertex of
@@ -1387,6 +1401,36 @@ func (s *sweep) plateauMaxPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+// crossSourceHorizThroughPending reports whether a COLD cross-source bound will
+// traverse a horizontal THROUGH maxPt later this scanline — see the call site in
+// [closeBound]. ae must be hot. The candidate is any AEL edge from the other
+// source that is cold, continues strictly above maxPt, and whose bound has a
+// horizontal segment at maxPt.Y whose X-span strictly contains maxPt.X that the
+// candidate's cursor has NOT yet reached (so doHorizontal will sweep it through
+// maxPt, crossing ae and re-heating that bound onto ae's ring).
+func (s *sweep) crossSourceHorizThroughPending(ae *ActiveEdge, maxPt fixed.Point) bool {
+	if !ae.IsHotEdge() {
+		return false
+	}
+	for i := range s.ael.Len() {
+		cand := s.ael.At(i)
+		if cand == ae || cand.IsHotEdge() || cand.Bound == nil ||
+			cand.Seg.Src == ae.Seg.Src || !boundContinuesAbove(cand, maxPt) {
+			continue
+		}
+		for j := cand.EdgeIdx + 1; j < len(cand.Bound.Segs); j++ {
+			seg := cand.Bound.Segs[j]
+			if !seg.Horizontal() || seg.Bot.Y != maxPt.Y {
+				continue
+			}
+			if seg.Bot.X <= maxPt.X && maxPt.X <= seg.Top.X {
+				return true
+			}
+		}
 	}
 	return false
 }

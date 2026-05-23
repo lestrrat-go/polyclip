@@ -1820,6 +1820,63 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
+	// A is a 12x12 square with a quad hole whose TOP edge is a horizontal at y=7
+	// ((3,7)-(6,7)). B is a quad fully inside the square that overlaps the hole,
+	// so the hole pokes out of B on the left and B's clip edge crosses the hole's
+	// flat top. The difference region rides the hole's left bound up to the hole
+	// apex (3,7); because the apex is the LEFT end of the hole's top plateau, the
+	// hole's right bound reaches (3,7) only after traversing that horizontal,
+	// which closeBound had not yet seen — so it closed the region prematurely
+	// (Case A) and the plateau, crossing B's edge, fragmented the ring and dropped
+	// ~64 of the 82.3 area (Difference 18.30). plateauMaxPartnerPending now defers
+	// to the geometric same-source maxima partner so doHorizontal's own close
+	// pairs the two and joins the rings (DESIGN.md §12.11). Tilting the hole top
+	// off-horizontal already worked; this asserts the flat-top variant matches.
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 8, Y: 4}, {X: 5, Y: 5}, {X: 3, Y: 7}, {X: 6, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 11, Y: 4}, {X: 7, Y: 12}, {X: 0, Y: 1}, {X: 4, Y: 0}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Difference must not have collapsed (the bug dropped ~64 of ~82.3).
+	if dA < 78 {
+		t.Errorf("difference area %v collapsed (want ~%v)", dA, aA-iA)
+	}
+	// Noise-free set identities: U=A+B-I, D=A-I, X=U-I.
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{"U=A+B-I", uA, aA + bA - iA},
+		{"D=A-I", dA, aA - iA},
+		{"X=U-I", xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
 	// A and B are the SAME quad with vertices rotated by one position, so the
 	// mpolyEqual idempotency short-circuit (which compares vertex order) does

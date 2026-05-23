@@ -1041,7 +1041,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	// lets the horizontal's own closeBound pair with it via maximaPartner, and
 	// resolveBetweenMaxima crosses any between-edges (e.g. the other source's
 	// through-bound) at the apex first.
-	if s.plateauPartnerPending(ae, maxPt) {
+	if s.plateauPartnerPending(ae, maxPt) || s.plateauMaxPartnerPending(ae, maxPt) {
 		return
 	}
 
@@ -1275,6 +1275,61 @@ func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
 		// ae is orphaned, stranding it hot in the AEL where a later horizontal
 		// crosses it and drops a region (the holed-input coincident-plateau bug).
 		return h.WindOther != 0
+	}
+	return false
+}
+
+// plateauMaxPartnerPending reports whether ae's GEOMETRIC maxima partner — a
+// same-source bound whose apex is also maxPt — will reach maxPt only after
+// traversing a trailing horizontal plateau not yet swept this scanline. Unlike
+// [plateauPartnerPending], which inspects ae's RING-coupled edge, this looks for
+// the partner by geometry, so it fires even when ae is hot on an UNRELATED ring.
+//
+// That is the holed-input flat-hole-top case (DESIGN.md §12.11): a subject hole
+// pokes out of the clip, so the difference region's ring rides the hole's left
+// bound up to the hole apex maxPt. The hole's right bound ends in the horizontal
+// top whose far end is maxPt, but at the Tops phase — when ae (the left bound)
+// tops out and closeBound runs — that horizontal has not been promoted yet, so
+// [maximaPartner] misses it and ae closes prematurely (Case A). When the plateau
+// also crosses the clip edge, the Case A handoff never reconnects and the rings
+// fragment, dropping the region's area. Deferring leaves ae hot in the AEL;
+// [doHorizontal]'s own closeBound at the plateau far end then pairs the two via
+// maximaPartner and JoinOutrecPaths splices them — the same clean join the
+// non-horizontal (tilted-top) variant already produces at the apex.
+func (s *sweep) plateauMaxPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
+	if !ae.IsHotEdge() || ae.Seg.Horizontal() || ae.Bound == nil {
+		return false
+	}
+	// Only the hole-notch class: ae is hot on a SAME-source region ring (its
+	// coupled partner shares ae's source — e.g. region B bounded by the subject
+	// square's edge and the subject hole's edges). A CROSS-source ring (clip edge
+	// coupled to a subject edge, as at a coincident-plateau confluence) is closed
+	// by the cross-source maximum machinery, and deferring it there mis-times the
+	// close and drops area (the holed-input coincident-plateau case, DESIGN.md
+	// §12.11). Restricting to same-source coupling leaves that path untouched.
+	other := outrecOther(ae)
+	if other == nil || other.Seg.Src != ae.Seg.Src {
+		return false
+	}
+	for i := 0; i < s.ael.Len(); i++ {
+		cand := s.ael.At(i)
+		if cand == ae || cand.Bound == nil || cand.Seg.Src != ae.Seg.Src {
+			continue
+		}
+		last := cand.Bound.Last()
+		if last == nil || !last.Horizontal() || last.Bot.Y != maxPt.Y {
+			continue
+		}
+		if apex, ok := boundApex(cand.Bound); !ok || apex != maxPt {
+			continue
+		}
+		// cand reaches maxPt only after traversing its trailing horizontal. If its
+		// cursor is already on that horizontal AT maxPt, it is no longer pending —
+		// maximaPartner handles it directly.
+		if cand.Seg == last && cand.CurrX == maxPt.X {
+			continue
+		}
+		return true
 	}
 	return false
 }

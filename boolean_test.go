@@ -1877,6 +1877,64 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
+	// A is a 12x12 square with a triangular hole whose TOP edge is a horizontal
+	// at y=9 ((5,9)-(9,9)); the input hole [[5,4],[5,9],[9,9],[5,7]] has a
+	// degenerate zero-width spike along x=5 that simplifyCollinearRing strips to
+	// that triangle. B is a quad fully inside the square whose own TOP edge is
+	// also a horizontal at y=9 ((1,9)-(10,9)) — coincident with the hole's top
+	// over x[5,9], and the hole sits entirely inside B. The coincident pair is an
+	// opposite-side (Reversed-differing) doubled boundary, so dispatchIntersect
+	// should SKIP it; but B's top continues collinearly past the overlap to
+	// (10,9), and the old continuesCollinearHorizontal guard blocked the skip even
+	// though B's continuing bound was already HOT — the one-hot SwapOutrecs then
+	// transferred B's ring onto the cold dead-end hole edge, emitting B's region
+	// as a stray positive ring and the square as a full ring with no hole
+	// (Difference 152 instead of 116). collinearContinuationBlocksSkip now blocks
+	// the skip only when the continuing bound is COLD (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 4}, {X: 5, Y: 9}, {X: 9, Y: 9}, {X: 5, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 1}, {X: 10, Y: 9}, {X: 1, Y: 9}, {X: 3, Y: 5}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Difference must not have over-counted (the bug emitted 152 > A.Area).
+	if dA > aA+0.02 {
+		t.Errorf("difference area %v over-counts (want ~%v)", dA, aA-iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{"U=A+B-I", uA, aA + bA - iA},
+		{"D=A-I", dA, aA - iA},
+		{"X=U-I", xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
 	// A and B are the SAME quad with vertices rotated by one position, so the
 	// mpolyEqual idempotency short-circuit (which compares vertex order) does

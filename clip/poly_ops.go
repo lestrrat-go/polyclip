@@ -133,7 +133,7 @@ func dispatchIntersect(
 		e1.Seg.Reversed != e2.Seg.Reversed &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
 		(e1.IsBoundLast() || e2.IsBoundLast()) &&
-		!continuesCollinearHorizontal(e1) && !continuesCollinearHorizontal(e2) &&
+		!collinearContinuationBlocksSkip(e1) && !collinearContinuationBlocksSkip(e2) &&
 		!respawnHandoffAtOverlap(e1, e2) {
 		return nil
 	}
@@ -171,6 +171,22 @@ func continuesCollinearHorizontal(ae *ActiveEdge) bool {
 	}
 	ns := ae.Bound.Segs[next]
 	return ns.Horizontal() && ns.Bot.Y == ae.Seg.Bot.Y
+}
+
+// collinearContinuationBlocksSkip reports whether ae's collinear horizontal
+// continuation past the coincident overlap should BLOCK the opposite-side skip
+// in [dispatchIntersect]. A continuing bound forces normal dispatch (re-spawn)
+// ONLY when it is COLD: it carries no ring yet and must pick one up via the
+// one-hot SwapOutrecs as it exits the overlap (the corner-exit / SplitOverlaps
+// re-spawn case the guard was written for). When the continuing bound is already
+// HOT it is mid-build; skipping lets it keep its own clean run across the
+// overlap, while the other (ending, cold) coincident edge is a redundant doubled
+// boundary. Forcing dispatch there instead transfers the hot ring onto the cold
+// dead-end edge and corrupts the topology — the subject-hole-top coincident with
+// the clip-top, hole inside clip, which emitted the clip region as a stray
+// positive ring instead of a hole (DESIGN.md §12.11).
+func collinearContinuationBlocksSkip(ae *ActiveEdge) bool {
+	return continuesCollinearHorizontal(ae) && !ae.IsHotEdge()
 }
 
 // respawnHandoffAtOverlap reports whether a coincident opposite-side horizontal

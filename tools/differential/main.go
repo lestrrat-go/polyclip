@@ -29,8 +29,10 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/lestrrat-go/polyclip"
 )
@@ -205,50 +207,78 @@ func innerQuad(rng *rand.Rand, ext int) polyclip.Polygon {
 }
 
 func run(sc scenario) {
-	var fails []fail
-	interacting := 0
+	// Phase 1: generate every interacting pair SEQUENTIALLY, so the rng stream —
+	// and therefore the exact set of pairs — is identical to the serial version
+	// and stable across runs (toggling a library fix never shifts the pair set).
+	type pair struct{ a, b polyclip.MultiPolygon }
+	var pairs []pair
 	for seed := range sc.seeds {
 		rng := rand.New(rand.NewSource(int64(seed)*7919 + 1))
-		// The MC oracle gets its own rng so toggling a fix on/off (via a library
-		// change) doesn't shift the pair stream between runs.
-		mcRng := rand.New(rand.NewSource(int64(seed)*104729 + 3))
 		for range sc.pairs {
 			a, b, ok := genPair(rng, sc)
-			if !ok {
+			if !ok || !a.BoundingBox().Intersects(b.BoundingBox()) {
 				continue
 			}
-			if !a.BoundingBox().Intersects(b.BoundingBox()) {
-				continue
-			}
-			interacting++
+			pairs = append(pairs, pair{a, b})
+		}
+	}
+	interacting := len(pairs)
 
-			gu, eu := polyclip.Union(a, b)
-			gi, ei := polyclip.Intersect(a, b)
-			gd, ed := polyclip.Difference(a, b)
-			gx, ex := polyclip.Xor(a, b)
-			if eu != nil || ei != nil || ed != nil || ex != nil {
-				continue
-			}
-			aA, bA := a.Area(), b.Area()
-			uA, iA, dA, xA := gu.Area(), gi.Area(), gd.Area(), gx.Area()
-			check := func(op string, got, want float64) {
-				if math.Abs(got-want) > sc.tol {
-					fails = append(fails, fail{op, a, b, got, want})
+	// Phase 2: run the four ops + MC oracle + checks in PARALLEL across all cores
+	// (this is the slow part). Worker w handles pairs w, w+workers, w+2*workers…
+	// Each pair's MC oracle uses an rng seeded deterministically by the pair index,
+	// so results are reproducible and independent of worker scheduling; the
+	// noise-free identity checks don't use it. Fails are collected per-worker and
+	// merged — order is irrelevant, they are sorted by magnitude before display.
+	workers := runtime.NumCPU()
+	if workers > len(pairs) {
+		workers = len(pairs)
+	}
+	partial := make([][]fail, max(workers, 1))
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			var fails []fail
+			mcRng := rand.New(rand.NewSource(0))
+			for idx := w; idx < len(pairs); idx += workers {
+				a, b := pairs[idx].a, pairs[idx].b
+				check := func(op string, got, want float64) {
+					if math.Abs(got-want) > sc.tol {
+						fails = append(fails, fail{op, a, b, got, want})
+					}
+				}
+				gu, eu := polyclip.Union(a, b)
+				gi, ei := polyclip.Intersect(a, b)
+				gd, ed := polyclip.Difference(a, b)
+				gx, ex := polyclip.Xor(a, b)
+				if eu != nil || ei != nil || ed != nil || ex != nil {
+					continue
+				}
+				aA, bA := a.Area(), b.Area()
+				uA, iA, dA, xA := gu.Area(), gi.Area(), gd.Area(), gx.Area()
+				if sc.checkMC {
+					mcRng.Seed(int64(idx)*2654435761 + 12345)
+					mu, mi, md, mx := mcOracle(a, b, mcRng, sc.samples)
+					check("U", uA, mu)
+					check("I", iA, mi)
+					check("D", dA, md)
+					check("X", xA, mx)
+				}
+				if sc.checkIdentity {
+					check("idU", uA, aA+bA-iA)
+					check("idD", dA, aA-iA)
+					check("idX", xA, uA-iA)
 				}
 			}
-			if sc.checkMC {
-				mu, mi, md, mx := mcOracle(a, b, mcRng, sc.samples)
-				check("U", uA, mu)
-				check("I", iA, mi)
-				check("D", dA, md)
-				check("X", xA, mx)
-			}
-			if sc.checkIdentity {
-				check("idU", uA, aA+bA-iA)
-				check("idD", dA, aA-iA)
-				check("idX", xA, uA-iA)
-			}
-		}
+			partial[w] = fails
+		}(w)
+	}
+	wg.Wait()
+	var fails []fail
+	for _, p := range partial {
+		fails = append(fails, p...)
 	}
 
 	byOp := map[string]int{}

@@ -2029,6 +2029,62 @@ func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
+	// Intersect where a clip quad pokes into a subject hole and the hole's top is a
+	// horizontal plateau. The intersection ring rides the hole's left bound up to
+	// the hole apex while COUPLED to the clip edge it crossed (cross-source ring);
+	// at the apex the ring must continue along the hole's top plateau, but that
+	// plateau hasn't been swept yet, so closeBound closed eagerly and a stray
+	// AddLocalMinPoly spawned a phantom interior hole → Intersect 7.3 instead of
+	// ~15.5. plateauMaxPartnerPending now also defers a CROSS-source-coupled apex
+	// when the coupled edge is sloped, continues above, and is off the apex column
+	// (DESIGN.md §12.11); the coincident-plateau confluence (coupled edge horizontal
+	// / topping out / on the apex column) is excluded so it still closes normally.
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 9, Y: 7}, {X: 7, Y: 6}, {X: 5, Y: 5}, {X: 4, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 8}, {X: 2, Y: 7}, {X: 0, Y: 1}, {X: 10, Y: 10}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	if iA < 14 {
+		t.Errorf("intersect area %v collapsed (want ~15.3)", iA)
+	}
+	// No phantom interior hole: the intersection is a single simple region.
+	if len(i) != 1 || len(i[0].Holes) != 0 {
+		t.Errorf("intersect should be one hole-free ring, got %d pieces %v", len(i), i)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, uA, aA + bA - iA},
+		{identD, dA, aA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
 	// Intersect where a clip quad's boundary crosses a subject hole that pokes
 	// back OUT through the clip (a notch). The intersection ring rides the hole's

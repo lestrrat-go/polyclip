@@ -1371,15 +1371,26 @@ func (s *sweep) plateauMaxPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool
 	if !ae.IsHotEdge() || ae.Seg.Horizontal() || ae.Bound == nil {
 		return false
 	}
-	// Only the hole-notch class: ae is hot on a SAME-source region ring (its
-	// coupled partner shares ae's source — e.g. region B bounded by the subject
-	// square's edge and the subject hole's edges). A CROSS-source ring (clip edge
-	// coupled to a subject edge, as at a coincident-plateau confluence) is closed
-	// by the cross-source maximum machinery, and deferring it there mis-times the
-	// close and drops area (the holed-input coincident-plateau case, DESIGN.md
-	// §12.11). Restricting to same-source coupling leaves that path untouched.
+	// ae's coupled partner is usually SAME source (a single-source region ring,
+	// e.g. region B bounded by the subject square's edge and the subject hole's
+	// edges). A CROSS-source coupling — ae rode onto the other source's bound at a
+	// crossing — is admitted ONLY when that coupled edge is sloped/vertical,
+	// CONTINUES strictly above maxPt, and is NOT on the apex column at maxPt.Y. Then
+	// maxPt is genuinely ae's own bound apex and deferring lets doHorizontal's
+	// plateau reconnect ae's ring — the Intersect hole-notch where the ring rides
+	// the hole's left bound up to the apex while coupled to the clip edge that
+	// climbs on (hole [[9,7],[7,6],[5,5],[4,7]] B [[7,8],[2,7],[0,1],[10,10]], I
+	// 7.3→15.3). The three exclusions reject a COINCIDENT-PLATEAU confluence, where
+	// two sources share a top edge: there the coupled edge is itself the shared
+	// horizontal, or tops out at maxPt, or sits on the apex column — and that
+	// confluence is closed by the cross-source maximum machinery; deferring it
+	// mis-times the close and drops area (DESIGN.md §12.11).
 	other := outrecOther(ae)
-	if other == nil || other.Seg.Src != ae.Seg.Src {
+	if other == nil {
+		return false
+	}
+	if other.Seg.Src != ae.Seg.Src &&
+		(other.Seg.Horizontal() || !boundContinuesAbove(other, maxPt) || XAtY(other.Seg, maxPt.Y) == maxPt.X) {
 		return false
 	}
 	for i := range s.ael.Len() {

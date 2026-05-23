@@ -1971,6 +1971,62 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}
 }
 
+func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
+	// Sibling of …HoleTopCoincidentWithClipContinuingEdge, but here the hot
+	// clip bound continues past the coincident overlap with a SLOPED edge, not
+	// another collinear horizontal. A is a 12x12 square with hole
+	// [[3,9],[5,8],[7,8],[7,7]] whose top edge (5,8)-(7,8) is horizontal at y=8.
+	// B = [[5,8],[7,8],[0,12],[0,6]] shares that exact edge: B's bottom edge
+	// (5,8)-(7,8) is coincident with the hole top (same Reversed), then B's bound
+	// climbs (7,8)->(0,12). At the (7,8) confluence the one-hot SwapOutrecs used
+	// to transfer the live Intersect ring onto the hole's cold dead-end top,
+	// collapsing Intersect to 0 (want ~19, and U/D/X identities broke off that
+	// I=0). sameSideHotContinuesColdEnds now skips the coincident pair whenever
+	// the hot bound passes THROUGH the overlap (apex strictly above) regardless of
+	// whether its continuation is horizontal or sloped (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 3, Y: 9}, {X: 5, Y: 8}, {X: 7, Y: 8}, {X: 7, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 8}, {X: 7, Y: 8}, {X: 0, Y: 12}, {X: 0, Y: 6}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// Intersect must not have collapsed (the bug returned 0 instead of ~19).
+	if iA < 17 {
+		t.Errorf("intersect area %v collapsed (want ~19)", iA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{"U=A+B-I", uA, aA + bA - iA},
+		{"D=A-I", dA, aA - iA},
+		{"X=U-I", xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 	// A is a 12x12 square with a triangular hole whose TOP edge is a horizontal
 	// at y=9 ((5,9)-(9,9)); the input hole [[5,4],[5,9],[9,9],[5,7]] has a

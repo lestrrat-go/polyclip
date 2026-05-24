@@ -1,5 +1,7 @@
 package clip
 
+import "github.com/lestrrat-go/polyclip/fixed"
+
 // FillRule selects which polygon-fill convention decides whether a winding
 // count is "inside". The boolean ops always use [FillNonZero]; [FillPositive]
 // / [FillNegative] are used only by the single-source self-union that cleans a
@@ -54,6 +56,40 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	}
 	delta := ae.WindDx
 
+	// Positive/Negative fill (the single-source self-union) use a pure signed
+	// prefix sum for WindSelf — the winding of the region immediately right of
+	// ae is the signed count of same-source edges at or left of ae. Unlike the
+	// NonZero "reversing direction" model below, this represents a doubled
+	// coincident wall faithfully as a two-step +1 → 0 → -1 transition, so a
+	// self-overlapping offset ring resolves without the multi-frame vote
+	// (DESIGN.md §7.2). NonZero keeps Clipper2's incremental model unchanged.
+	if ael.Ordered {
+		// Order edges by their position just ABOVE the current scanline, not at
+		// it: a bound whose cursor sits on a LEADING horizontal (a local-min
+		// notch/plateau edge) is physically at the horizontal's near X now but
+		// continues at its far end (its first non-horizontal wall). The winding
+		// of the region the new ring lives in is the y+ε winding, so the prefix
+		// sum must place such a bound at its far X. Without this the doubled-wall
+		// degeneracy mis-assigns the sliver winding and a spurious ring spawns
+		// (DESIGN.md §7.2, the L3 simultaneous-spawn case).
+		myX := effectiveX(ae)
+		sum := ae.WindDx
+		for i := range ael.Len() {
+			e := ael.At(i)
+			if e == ae || e.Seg.Src != ae.Seg.Src {
+				continue
+			}
+			ex := effectiveX(e)
+			if ex < myX || (ex == myX && i < pos) {
+				sum += e.WindDx
+			}
+		}
+		ae.WindSelf = sum
+		ae.WindOther = 0
+		ae.Contributing = isContributing(ael.Fill, ael.Ordered, op, ae)
+		return
+	}
+
 	// Nearest same-source predecessor (Clipper2's e2).
 	var e2 *ActiveEdge
 	for i := pos - 1; i >= 0; i-- {
@@ -95,7 +131,7 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	}
 	ae.WindOther = other
 
-	ae.Contributing = isContributing(ael.Fill, op, ae)
+	ae.Contributing = isContributing(ael.Fill, ael.Ordered, op, ae)
 }
 
 // signedContribution returns the AEL contribution of seg per the convention
@@ -128,14 +164,29 @@ func signedContribution(seg *Segment) int {
 // NonZero because Positive/Negative are used only by the single-source
 // self-union where WindOther is identically zero. ae must already have
 // WindSelf and WindOther set.
-func isContributing(fill FillRule, op Operation, ae *ActiveEdge) bool {
+//
+// When ordered is set (the [SweepRingsFill] ordered-minima path) the
+// Positive/Negative test is the winding-`>0` BOUNDARY form rather than the
+// exact `WindSelf == ±1`: a doubled coincident wall's true boundary edge has
+// WindSelf == 0 on its right (the `+1 → 0` step), which the exact test drops
+// (DESIGN.md §7.2). The soup/vote path leaves ordered false and keeps the
+// exact test.
+func isContributing(fill FillRule, ordered bool, op Operation, ae *ActiveEdge) bool {
 	switch fill {
 	case FillPositive:
-		if ae.WindSelf != 1 {
+		if ordered {
+			if (ae.WindSelf > 0) == (ae.WindSelf-ae.WindDx > 0) {
+				return false
+			}
+		} else if ae.WindSelf != 1 {
 			return false
 		}
 	case FillNegative:
-		if ae.WindSelf != -1 {
+		if ordered {
+			if (ae.WindSelf < 0) == (ae.WindSelf-ae.WindDx < 0) {
+				return false
+			}
+		} else if ae.WindSelf != -1 {
 			return false
 		}
 	default: // FillNonZero
@@ -159,4 +210,17 @@ func isContributing(fill FillRule, op Operation, ae *ActiveEdge) bool {
 		return ae.WindOther != 0
 	}
 	return false
+}
+
+// effectiveX returns the X at which ae's bound sits just above the current
+// scanline: for a cursor on a horizontal segment, the far end of the
+// horizontal (where the bound's next non-horizontal edge continues upward);
+// otherwise the edge's current crossing X. Used by the ordered positive-fill
+// winding prefix sum so a leading-horizontal bound is ordered where its wall
+// actually lies (DESIGN.md §7.2).
+func effectiveX(ae *ActiveEdge) fixed.Coord {
+	if ae.Seg.Horizontal() && ae.Bound != nil {
+		return boundHorizontalFarX(ae.Bound, ae.Seg)
+	}
+	return ae.CurrX
 }

@@ -43,7 +43,15 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	// flips/steps WindSelf; crossing the other source's edge steps WindOther.
 	// This is by edge identity (uses e1/e2's WindDx), so the AEL position swap
 	// is irrelevant to it.
-	if samePolyType {
+	if samePolyType && ael.Ordered {
+		// Ordered positive/negative fill: pure signed step, matching Classify's
+		// prefix sum. The NonZero reflection trick below (negate when the count
+		// would reach 0) is specific to the abs-value contributing test and
+		// would corrupt the signed winding a self-overlapping ring relies on
+		// (DESIGN.md §7.2).
+		e1.WindSelf += e2.WindDx
+		e2.WindSelf -= e1.WindDx
+	} else if samePolyType {
 		if e1.WindSelf+e2.WindDx == 0 {
 			e1.WindSelf = -e1.WindSelf
 		} else {
@@ -64,8 +72,8 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 
 	// Refresh the Contributing flag for both edges' new winding state, so
 	// later events (closeBound, cursor advance) see consistent classification.
-	e1.Contributing = isContributing(ael.Fill, op, e1)
-	e2.Contributing = isContributing(ael.Fill, op, e2)
+	e1.Contributing = isContributing(ael.Fill, ael.Ordered, op, e1)
+	e2.Contributing = isContributing(ael.Fill, ael.Ordered, op, e2)
 
 	// Dispatch BEFORE swapping AEL positions: Clipper2 runs IntersectEdges with
 	// the AEL still in pre-crossing order and only swaps afterwards

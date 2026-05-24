@@ -1062,7 +1062,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		if farX < maxPt.X || rightwardOK {
 			oldWO := coupled.WindOther
 			coupled.WindOther += ae.WindDx
-			flipped := !isContributing(s.ael.Fill, s.op, coupled)
+			flipped := !isContributing(s.ael.Fill, s.ael.Ordered, s.op, coupled)
 			if flipped {
 				if ae.IsHotEdge() {
 					AddOutPt(ae, maxPt)

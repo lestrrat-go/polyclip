@@ -108,6 +108,13 @@ type AEL struct {
 	// (see [isContributing]). Zero value [FillNonZero] is the boolean-op
 	// default; the offset self-union sets [FillPositive].
 	Fill FillRule
+
+	// Ordered is set by the ordered-minima self-union entry [SweepRingsFill].
+	// It selects the pure-prefix-sum winding model and boundary contributing
+	// test (DESIGN.md §7.2) used to resolve a self-overlapping ring's doubled
+	// coincident walls. The soup-based [SweepFill] / boolean paths leave it
+	// false and keep Clipper2's incremental NonZero model unchanged.
+	Ordered bool
 }
 
 // NewAEL returns an empty AEL.

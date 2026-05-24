@@ -36,6 +36,21 @@ type IntersectResult struct {
 // configuration; the actual point of a proper crossing is computed in
 // float64 and snapped to the integer grid, per DESIGN.md §5.2.
 func Intersect(a, b Segment) IntersectResult {
+	// Bounding-box reject. Segments are canonical (Bot.Y <= Top.Y), so the
+	// Y-ranges are [a.Bot.Y, a.Top.Y] and [b.Bot.Y, b.Top.Y]. If the boxes are
+	// disjoint on either axis the segments cannot share a point, so the result
+	// is NoCrossing without any orientation math. This is the common case for
+	// the O(n^2) pairwise scans in SplitOverlaps, SplitTJunctions and
+	// buildIntersectList, and skips four 128-bit fixed.Orient2D evaluations.
+	if a.Top.Y < b.Bot.Y || b.Top.Y < a.Bot.Y {
+		return IntersectResult{Kind: NoCrossing}
+	}
+	axlo, axhi := minCoord(a.Bot.X, a.Top.X), maxCoord(a.Bot.X, a.Top.X)
+	bxlo, bxhi := minCoord(b.Bot.X, b.Top.X), maxCoord(b.Bot.X, b.Top.X)
+	if axhi < bxlo || bxhi < axlo {
+		return IntersectResult{Kind: NoCrossing}
+	}
+
 	o1 := fixed.Orient2D(a.Bot, a.Top, b.Bot)
 	o2 := fixed.Orient2D(a.Bot, a.Top, b.Top)
 	o3 := fixed.Orient2D(b.Bot, b.Top, a.Bot)

@@ -239,43 +239,28 @@ func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 			cont.Outrec, term.Outrec = nil, nil
 			return opC
 		}
-		// Mirror of the above for both-BACK: one ring continues on its FRONT edge
-		// while the other terminates. This is the CLIP-apex-in-Difference tangle —
-		// two difference regions meeting at the clip polygon's apex arrive both-back
-		// (e.g. B's apex (9,10): C[(4,0)->(9,10)] or=1B and C[(5,8)->(9,10)] or=4B).
-		// The relabel + JoinOutrecPaths path below reverses a sub-chain and emits a
-		// geometrically self-crossing ring (DESIGN.md §12.11). Splice as a figure-8
-		// self-touching detour at the apex instead, KEEPING the continuing ring's
-		// FRONT edge and growing tip; splitSelfTouchingRings decomposes the merged
-		// walk afterwards.
+		// Both-BACK with exactly one ring continuing — the CLIP-apex-in-Difference
+		// tangle, including the clip apex coinciding with a subject hole vertex
+		// (e.g. hole [[5,8],[8,8],[6,4],[6,7]] B [[0,7],[1,7],[12,2],[8,8]] at (8,8)).
+		// The pair only arrives same-side because the ring SPAWNED during this
+		// confluence's maxima resolution (resolveBetweenMaxima crossing the two cold
+		// edges that converge at the apex) is mis-oriented: the mid-resolution AEL is
+		// transient, so AddLocalMinPoly's getPrevHotEdge picked the wrong front/back.
+		// That CONTINUING ring (its other edge still in the AEL) is the spawned one;
+		// reverse its sides so the apex pair becomes opposite-side, then fall through
+		// to the standard JoinOutrecPaths splice. Clipper2 never reaches a same-side
+		// closed maximum at all (it has the edges opposite-side here); this restores
+		// that invariant instead of the old figure-8 detour, which merged the real
+		// ring into the spurious spawn and emitted a degenerate spur that
+		// splitSelfTouchingRings then dropped (DESIGN.md §12.11).
 		if c1 != c2 && !e1.IsFront() && !e2.IsFront() {
-			cont, term := e1, e2
+			contRing := e1.Outrec
 			if c2 {
-				cont, term = e2, e1
+				contRing = e2.Outrec
 			}
-			// cont is a BACK edge that terminates; orC's FRONT edge continues and
-			// prepends at orC.Pts, so Pts must REMAIN the original front head (unlike
-			// the both-front mirror, which moves Pts to the apex because there the
-			// BACK edge continues). Capture it before the splice.
-			origPts := cont.Outrec.Pts
-			opC := AddOutPt(cont, pt)
-			opT := AddOutPt(term, pt)
-			nC, nT := opC.Next, opT.Next
-			opC.Next, nT.Prev = nT, opC
-			opT.Next, nC.Prev = nC, opT
-			orC, orT := cont.Outrec, term.Outrec
-			for p := opC; ; p = p.Next {
-				p.Outrec = orC
-				if p.Next == opC {
-					break
-				}
-			}
-			orC.Pts = origPts
-			orC.BackEdge = nil
-			orT.FrontEdge, orT.BackEdge = nil, nil
-			orT.Pts = nil
-			cont.Outrec, term.Outrec = nil, nil
-			return opC
+			contRing.FrontEdge, contRing.BackEdge = contRing.BackEdge, contRing.FrontEdge
+			contRing.Pts = contRing.Pts.Next
+			goto joinTail
 		}
 		// Fallback recovery for same-side JOINs with a continuing edge: relabel
 		// the inverted ring's sides (mirror of Clipper2 SwapFrontBackSides) so the
@@ -299,6 +284,7 @@ func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 			}
 		}
 	}
+joinTail:
 	result := AddOutPt(e1, pt)
 	if e1.Outrec == e2.Outrec {
 		outrec := e1.Outrec

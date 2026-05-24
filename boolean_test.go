@@ -2512,3 +2512,49 @@ func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
 		t.Errorf("Xor area %v want 0", x.Area())
 	}
 }
+
+func TestBooleanHoledInputDifferenceClipApexAtHoleVertex(t *testing.T) {
+	// The clip apex (8,8) coincides with a subject hole vertex (8,8). Resolving
+	// the clip-apex maximum, resolveBetweenMaxima crosses the cold clip edge with
+	// the cold hole-right edge (both converge at (8,8)), spawning a ring whose
+	// front/back is mis-oriented because the mid-resolution AEL is transient. The
+	// two apex edges then arrive SAME-side (both back), forcing the figure-8
+	// workaround, which merged the real void into the spurious spawn and emitted a
+	// degenerate spur (5,8)(8,8)(8,8) that splitSelfTouchingRings drops → D
+	// returned 128.9 instead of ~119.9. AddLocalMaxPoly now reverses the
+	// continuing (spawned) ring's sides so the pair is opposite-side and splices
+	// via the standard JoinOutrecPaths (DESIGN.md §12.11, clip-apex/hole-vertex).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 8}, {X: 8, Y: 8}, {X: 6, Y: 4}, {X: 6, Y: 7}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 7}, {X: 1, Y: 7}, {X: 12, Y: 2}, {X: 8, Y: 8}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	if math.Abs(dA-(aA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identD, dA, aA-iA)
+	}
+	if math.Abs(uA-(aA+bA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identU, uA, aA+bA-iA)
+	}
+	if math.Abs(xA-(uA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identX, xA, uA-iA)
+	}
+}

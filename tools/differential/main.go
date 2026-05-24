@@ -230,10 +230,7 @@ func run(sc scenario) {
 	// so results are reproducible and independent of worker scheduling; the
 	// noise-free identity checks don't use it. Fails are collected per-worker and
 	// merged — order is irrelevant, they are sorted by magnitude before display.
-	workers := runtime.NumCPU()
-	if workers > len(pairs) {
-		workers = len(pairs)
-	}
+	workers := min(runtime.NumCPU(), len(pairs))
 	partial := make([][]fail, max(workers, 1))
 	var wg sync.WaitGroup
 	for w := range workers {

@@ -569,8 +569,8 @@ func (s *sweep) handleBatch(batch []Event) {
 		// different rings (or different bounds of the same ring) and the
 		// shared point is a "through-vertex" for one or both. Process
 		// each individually via handleTop so advanceBoundCursor handles
-		// non-terminal Tops correctly (DESIGN.md §11.7 touching-vertex
-		// diamonds case).
+		// non-terminal Tops correctly (DESIGN.md §12.11 shared-vertex
+		// crossings, touching diamonds case).
 		if topsAreLocalMax(s, tops) {
 			s.handleLocalMaximum(tops[0], tops[1])
 		} else {
@@ -813,7 +813,7 @@ func (s *sweep) activateBound(ae *ActiveEdge, y fixed.Coord) {
 
 // spawnBoundActive creates an [ActiveEdge] for bound b emerging from the
 // local-min vertex. The cursor sits on the bound's FIRST segment even when
-// that segment is horizontal (DESIGN.md §12.6.1, Stage 2): a leading
+// that segment is horizontal (DESIGN.md §12.6.1): a leading
 // horizontal is a first-class AEL member that [doHorizontal] later walks. The
 // edge enters the AEL at vertex.X (the near, local-min end of the first
 // segment) with a sweeping CurrX. Returns nil if b is empty.
@@ -1089,7 +1089,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		// through the §12.5 table and reclassifies the between-edge, so its
 		// hot/contributing status is updated before the pair closes. After the
 		// loop ae and partner are AEL-adjacent. Port of Clipper2 DoMaxima's
-		// between-maxima loop (engine.cpp:2756, DESIGN.md §12.6.1 follow-up).
+		// between-maxima loop (engine.cpp:2756, DESIGN.md §12.11 maxima pairing).
 		s.resolveBetweenMaxima(ae, partner, maxPt)
 		// Difference hole∪clip void-merge: ae is a COLD bound-last horizontal (the
 		// hole's top plateau) whose HOT same-source maxima partner rode the clip's

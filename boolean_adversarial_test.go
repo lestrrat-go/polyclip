@@ -249,13 +249,12 @@ func TestDifferenceTouchingAtVertex(t *testing.T) {
 	}
 }
 
-// ===== Known-broken: axial overlapping for non-Union =====
+// ===== Axial overlapping for non-Union =====
 //
-// The §11.7 synth-intersect mechanism in clip/sweep.go is Union-specific.
-// For Intersect/Difference/Xor on axial OVERLAPPING (not nested / not
-// touching / not disjoint) inputs, the engine produces incorrect output.
-// See DESIGN.md §11.7 "Implementation" section for status. The tests
-// below are skipped pending engine work; remove the t.Skip when fixed.
+// Intersect/Difference/Xor on axial OVERLAPPING (not nested / not touching /
+// not disjoint) inputs. These exercise coincident different-source horizontals
+// at the overlap; handled by the first-class-horizontal bound model and the
+// coincident-horizontal dispatch (DESIGN.md §12.6.1, §12.11).
 
 func TestIntersectOverlappingAxisAligned(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}

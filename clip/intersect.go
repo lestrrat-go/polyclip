@@ -45,8 +45,8 @@ func Intersect(a, b Segment) IntersectResult {
 	if a.Top.Y < b.Bot.Y || b.Top.Y < a.Bot.Y {
 		return IntersectResult{Kind: NoCrossing}
 	}
-	axlo, axhi := minCoord(a.Bot.X, a.Top.X), maxCoord(a.Bot.X, a.Top.X)
-	bxlo, bxhi := minCoord(b.Bot.X, b.Top.X), maxCoord(b.Bot.X, b.Top.X)
+	axlo, axhi := min(a.Bot.X, a.Top.X), max(a.Bot.X, a.Top.X)
+	bxlo, bxhi := min(b.Bot.X, b.Top.X), max(b.Bot.X, b.Top.X)
 	if axhi < bxlo || bxhi < axlo {
 		return IntersectResult{Kind: NoCrossing}
 	}
@@ -138,8 +138,8 @@ func collinearOverlap(a, b Segment) IntersectResult {
 	// to find the overlap. Horizontal segments share Y and need projection on
 	// X; the general case projects on Y.
 	if a.Horizontal() && b.Horizontal() {
-		xlo := maxCoord(minCoord(a.Bot.X, a.Top.X), minCoord(b.Bot.X, b.Top.X))
-		xhi := minCoord(maxCoord(a.Bot.X, a.Top.X), maxCoord(b.Bot.X, b.Top.X))
+		xlo := max(min(a.Bot.X, a.Top.X), min(b.Bot.X, b.Top.X))
+		xhi := min(max(a.Bot.X, a.Top.X), max(b.Bot.X, b.Top.X))
 		if xlo > xhi {
 			return IntersectResult{Kind: NoCrossing}
 		}
@@ -154,8 +154,8 @@ func collinearOverlap(a, b Segment) IntersectResult {
 		}
 	}
 
-	ylo := maxCoord(a.Bot.Y, b.Bot.Y)
-	yhi := minCoord(a.Top.Y, b.Top.Y)
+	ylo := max(a.Bot.Y, b.Bot.Y)
+	yhi := min(a.Top.Y, b.Top.Y)
 	if ylo > yhi {
 		return IntersectResult{Kind: NoCrossing}
 	}
@@ -193,18 +193,4 @@ func segCanonLess(a, b Segment) bool {
 		return a.Top.X < b.Top.X
 	}
 	return a.Top.Y < b.Top.Y
-}
-
-func minCoord(a, b fixed.Coord) fixed.Coord {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxCoord(a, b fixed.Coord) fixed.Coord {
-	if a > b {
-		return a
-	}
-	return b
 }

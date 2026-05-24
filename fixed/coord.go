@@ -46,7 +46,7 @@ type Scale struct {
 func ScaleFromBBox(minX, minY, maxX, maxY float64) Scale {
 	cx := (minX + maxX) / 2
 	cy := (minY + maxY) / 2
-	halfSpan := math.Max(maxX-minX, maxY-minY) / 2
+	halfSpan := max(maxX-minX, maxY-minY) / 2
 	target := float64(MaxCoordMagnitude)
 
 	var factor float64

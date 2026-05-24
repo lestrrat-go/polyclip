@@ -191,10 +191,10 @@ func pointOnSegment(a, b, q Point) bool {
 	if math.Abs(cross) > pointOnSegmentEpsilon(a, b) {
 		return false
 	}
-	if q.X < math.Min(a.X, b.X) || q.X > math.Max(a.X, b.X) {
+	if q.X < min(a.X, b.X) || q.X > max(a.X, b.X) {
 		return false
 	}
-	if q.Y < math.Min(a.Y, b.Y) || q.Y > math.Max(a.Y, b.Y) {
+	if q.Y < min(a.Y, b.Y) || q.Y > max(a.Y, b.Y) {
 		return false
 	}
 	return true
@@ -203,7 +203,7 @@ func pointOnSegment(a, b, q Point) bool {
 // pointOnSegmentEpsilon scales the collinearity tolerance with the segment's
 // magnitude so the test is invariant under uniform scaling of the input.
 func pointOnSegmentEpsilon(a, b Point) float64 {
-	scale := math.Max(math.Max(math.Abs(a.X), math.Abs(a.Y)), math.Max(math.Abs(b.X), math.Abs(b.Y)))
+	scale := max(max(math.Abs(a.X), math.Abs(a.Y)), max(math.Abs(b.X), math.Abs(b.Y)))
 	const eps = 1e-12
 	if scale < 1 {
 		return eps

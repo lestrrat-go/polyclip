@@ -39,8 +39,8 @@ func (b BBox) Add(p Point) BBox {
 		return BBox{Min: p, Max: p}
 	}
 	return BBox{
-		Min: Point{X: math.Min(b.Min.X, p.X), Y: math.Min(b.Min.Y, p.Y)},
-		Max: Point{X: math.Max(b.Max.X, p.X), Y: math.Max(b.Max.Y, p.Y)},
+		Min: Point{X: min(b.Min.X, p.X), Y: min(b.Min.Y, p.Y)},
+		Max: Point{X: max(b.Max.X, p.X), Y: max(b.Max.Y, p.Y)},
 	}
 }
 
@@ -54,8 +54,8 @@ func (b BBox) Union(other BBox) BBox {
 		return b
 	}
 	return BBox{
-		Min: Point{X: math.Min(b.Min.X, other.Min.X), Y: math.Min(b.Min.Y, other.Min.Y)},
-		Max: Point{X: math.Max(b.Max.X, other.Max.X), Y: math.Max(b.Max.Y, other.Max.Y)},
+		Min: Point{X: min(b.Min.X, other.Min.X), Y: min(b.Min.Y, other.Min.Y)},
+		Max: Point{X: max(b.Max.X, other.Max.X), Y: max(b.Max.Y, other.Max.Y)},
 	}
 }
 

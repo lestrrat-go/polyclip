@@ -163,7 +163,7 @@ func pointSegDist(p, a, b Point) float64 {
 		return math.Hypot(p.X-a.X, p.Y-a.Y)
 	}
 	t := ((p.X-a.X)*dx + (p.Y-a.Y)*dy) / l2
-	t = math.Max(0, math.Min(1, t))
+	t = max(0, min(1, t))
 	return math.Hypot(p.X-(a.X+t*dx), p.Y-(a.Y+t*dy))
 }
 
@@ -477,8 +477,8 @@ func onSegmentInterior(a, b, p Point) bool {
 	if p == a || p == b {
 		return false
 	}
-	return p.X >= math.Min(a.X, b.X) && p.X <= math.Max(a.X, b.X) &&
-		p.Y >= math.Min(a.Y, b.Y) && p.Y <= math.Max(a.Y, b.Y)
+	return p.X >= min(a.X, b.X) && p.X <= max(a.X, b.X) &&
+		p.Y >= min(a.Y, b.Y) && p.Y <= max(a.Y, b.Y)
 }
 
 // selfUnionResolveAngles lists the frame rotations tried by [selfUnionPositive].
@@ -538,7 +538,7 @@ func selfUnionPositive(rings []Polygon) MultiPolygon {
 		if a.pieces != b.pieces {
 			return false
 		}
-		den := math.Max(a.area, b.area)
+		den := max(a.area, b.area)
 		if den == 0 {
 			return true
 		}
@@ -629,10 +629,10 @@ func bboxOf(rings []Polygon) BBox {
 				first = false
 				continue
 			}
-			bb.Min.X = math.Min(bb.Min.X, p.X)
-			bb.Min.Y = math.Min(bb.Min.Y, p.Y)
-			bb.Max.X = math.Max(bb.Max.X, p.X)
-			bb.Max.Y = math.Max(bb.Max.Y, p.Y)
+			bb.Min.X = min(bb.Min.X, p.X)
+			bb.Min.Y = min(bb.Min.Y, p.Y)
+			bb.Max.X = max(bb.Max.X, p.X)
+			bb.Max.Y = max(bb.Max.Y, p.Y)
 		}
 	}
 	return bb

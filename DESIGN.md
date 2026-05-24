@@ -226,15 +226,45 @@ raw offset ring traces the left-pad right wall twice over `y∈[4,6]`, so
 - `FillPositive`'s contributing test is `WindSelf == 1` (exact), which wrongly
   drops the `+1/0` boundary edge; the correct rule is a winding-`>0` *boundary*
   test, `(WindSelf > 0) != (WindSelf - WindDx > 0)`.
-- But even with both fixes, the sweep's output machinery (hot-edge tracking,
-  `AddLocalMinPoly` front/back, the §12.11 coincident apparatus) and the
-  incremental winding update in `poly_ops.go` are built around NonZero's
-  `==1`/reflection invariants. Patching the contributing test and the
-  incremental step in isolation collapses positive-fill output to empty —
-  confirming this is a **structural rework of the sweep's winding core, gated on
-  `FillPositive` so the boolean (`FillNonZero`) differential stays clean**, not a
-  localized patch. Deferred to its own session; the multi-frame vote (§7.1)
-  remains the working stopgap.
+A second investigation (2026-05-24, WIP branch `fix-positive-fill-coincident`)
+disproved the "keep both edges + boundary test + pure incremental" theory as
+*sufficient* and resolved the problem into three coupled layers:
+
+- **L1 — winding core.** Under `FillPositive`/`FillNegative` `Classify` must
+  compute `WindSelf` as a pure signed prefix sum of same-source `WindDx` (the
+  NonZero "reversing direction" heuristic wrongly keeps `WindSelf` at magnitude
+  1 across a doubled wall instead of stepping `+1 → 0 → −1`); the contributing
+  test must be the boundary form `(WindSelf>0) != (WindSelf−WindDx>0)`; and the
+  `poly_ops.go` incremental update must be a pure `+=`/`−=` (no NonZero
+  reflection). All gated on the fill rule so the boolean differential is
+  untouched. *Implemented and verified correct on the vertical walls.*
+- **L2 — bound reconstruction.** `BuildLocalMinima`'s segment-soup walker
+  (`traceRing` via input-direction adjacency) cannot disambiguate the
+  *collinear degree-4 vertices* the doubled wall creates after `SplitOverlaps`
+  (two identical out-edges at one vertex, indistinguishable by angle), so it
+  traces spurious sub-cycles. The fix is to build local minima from the ring in
+  *traversal order* (Clipper2-style), splitting each ordered segment only at
+  the endpoints the soup passes introduce — the two wall passes then occupy
+  distinct sequence positions. *Implemented as `SweepRingsFill` /
+  `splitOrderedRings` (`clip/sweep_ordered.go`); with L1+L2 the canonical
+  dumbbell's left island resolves exactly (area 36).*
+- **L3 — simultaneous-spawn winding (UNSOLVED).** At a scanline where several
+  local minima spawn at once (axis-aligned doubled walls produce many at one
+  `Y`), `Classify` runs against a *partial* AEL — siblings, and the real
+  ascending wall hidden behind a leading horizontal of a min's own bound, are
+  not yet inserted — so the prefix sum is wrong (the dumbbell's neck-bottom
+  plateau spawns a spurious ring and pulls the neck into the right island, area
+  64 not 36). `buildBoundsAt` also mis-builds a degenerate local-min plateau
+  whose descent and ascent are at opposite ends. The rotated vote cannot mask
+  it. This is the genuinely entangled core: the `AddLocalMinPoly` ring-start
+  decision must be deferred until all same-`Y` minima are inserted and the AEL
+  is settled (or insertion must re-classify already-spawned siblings, as
+  NonZero's bubble does). Design this before more code.
+
+So this is a **structural rework of the sweep's winding and spawn core, gated on
+`FillPositive`** (the boolean `FillNonZero` path stays untouched → differential
+safe by construction), not a localized patch. The multi-frame vote (§7.1)
+remains the working stopgap until L3 lands.
 
 ### 7.3 Performance unverified at slicer scale
 

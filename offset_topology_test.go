@@ -141,14 +141,14 @@ func randomStarPolygon(rng *rand.Rand, n int, rMin, rMax float64) Polygon {
 
 // distToBoundary returns the minimum distance from p to any edge of ring.
 func distToBoundary(ring Polygon, p Point) float64 {
-	min := math.Inf(1)
+	minDist := math.Inf(1)
 	n := len(ring)
 	for i := range n {
-		if e := pointSegDist(p, ring[i], ring[(i+1)%n]); e < min {
-			min = e
+		if e := pointSegDist(p, ring[i], ring[(i+1)%n]); e < minDist {
+			minDist = e
 		}
 	}
-	return min
+	return minDist
 }
 
 // mpContains reports whether p is inside the MultiPolygon (inside some piece's

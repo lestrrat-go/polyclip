@@ -139,12 +139,12 @@ func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool
 		return false
 	}
 	tol := arcTol + dist*1e-6
-	min := math.Inf(1)
+	minDist := math.Inf(1)
 	scan := func(ring Polygon) {
 		n := len(ring)
 		for i := range n {
-			if e := pointSegDist(pt, ring[i], ring[(i+1)%n]); e < min {
-				min = e
+			if e := pointSegDist(pt, ring[i], ring[(i+1)%n]); e < minDist {
+				minDist = e
 			}
 		}
 	}
@@ -152,7 +152,7 @@ func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool
 	for _, h := range orig.Holes {
 		scan(h)
 	}
-	return min >= dist-tol
+	return minDist >= dist-tol
 }
 
 // pointSegDist returns the Euclidean distance from p to segment ab.

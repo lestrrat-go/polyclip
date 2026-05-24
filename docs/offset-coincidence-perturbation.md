@@ -82,15 +82,11 @@ positions of the walls), whereas generic SoS is an **index-respecting** one.
 
 ## 4. Better-targeted options
 
-1. **Geometry-aware normal perturbation (recommended prototype).** Before the
-   self-union sweep, displace each offset edge by a deterministic infinitesimal
-   along its own outward normal (the offset direction). This separates the two
-   coincident walls in the *correct* order — the pad wall stays outside, the
-   collapsed-neck fold moves strictly inside — so a single sweep yields the
-   intended erosion. It is SoS-style (a directed symbolic perturbation) but
-   encodes offset semantics, i.e. "one rotation-vote frame, chosen correctly
-   instead of voted." Deterministic, single sweep, no majority logic. Plugs
-   into the already-landed ordered path (`SweepRingsFill`).
+1. **Geometry-aware normal perturbation (prototyped — does not work, see §5).**
+   The idea was to displace each offset edge by a deterministic infinitesimal
+   along its own outward normal before the sweep, separating coincident walls in
+   the offset's own direction. It fails because the canonical coincidence is two
+   walls of the *same* traversal direction (shared normal): see §5.
 
 2. **Full index-based SoS.** Heaviest (symbolic re-derivation of every sweep
    predicate) and, per §3, does not by itself guarantee the intended result.
@@ -104,13 +100,45 @@ Note that "compute on a finer grid" does **not** help here: the coincidence is
 exact in the input geometry, not a product of integer snapping, so a finer grid
 leaves the walls coincident.
 
-## 5. Recommended next step
+## 5. Prototype results (empirical, 2026-05-24)
 
-Prototype option (1) on the landed ordered path: give each offset ring edge a
-deterministic outward-normal nudge of one grid unit (or a sub-grid ε in a
-scaled-up frame) before `SweepRingsFill`, and check whether the dumbbell and
-its rotations resolve to two 36-area islands at a single sweep, plus the
-existing `TestOffsetInwardErosionOracle` random cases. If it holds, wire
-`Offset` to the single-sweep ordered path and retire `selfUnionResolveAngles`.
-If edges that are coincident but offset in the *same* direction appear (a true
-ambiguity even for normal perturbation), fall back to keeping the vote.
+Options (1) and a deterministic single rotation were both prototyped against
+the dumbbell, its rotations, and the offset suite. All three clean-perturbation
+hypotheses failed:
+
+- **Uniform outward-normal nudge does not separate the canonical case.** The
+  dumbbell's two coincident walls *both descend* (same traversal direction), so
+  they share an outward normal — nudging along it moves both the same way and
+  they stay coincident. Option (1) as stated cannot break a same-direction
+  coincidence, which is exactly the case that matters.
+- **No single rotation is robust.** Running the ordered single-sweep path on
+  the dumbbell at one fixed angle is correct for some angles and wrong for
+  others with no usable pattern (0.001→72 ✓, 0.01→72 ✓, 0.05→44 ✗, 0.10→36 ✗,
+  0.21→100 ✗, 0.30→72 ✓, 1.0→36 ✗). A fixed angle that breaks the input's
+  coincidence creates a *different* snap-induced degeneracy elsewhere. This is
+  precisely why the shipped fix votes across several angles and takes the
+  majority — robustness comes from the vote, not from any single perturbation.
+- **The ordered single-sweep path regresses transversal self-crossings.** Even
+  with a vote on top (large *or* tiny angles), the rotated dumbbells (deg 7,
+  30, 60) merge into one island. The ordered path's crossing dispatch
+  (`branchBothHot` etc.) is still NonZero-tuned and is inconsistent with the
+  new pure-prefix-sum winding, so general-position self-intersections — which
+  the soup path resolves correctly — break. The ordered engine fixes the
+  axis-aligned coincidence's *winding* but is not yet a correct general
+  self-union.
+
+**Conclusion: the multi-frame rotation vote on the soup path (current `main`)
+is the correct, working solution and is kept.** Retiring it is not achievable
+with a clean deterministic perturbation: same-direction coincidences defeat
+normal perturbation, single rotations are not robust, and full index-based SoS
+(§3) would not guarantee the intended erosion. The gated ordered engine remains
+on `main` as documented infrastructure but is **not** wired into `Offset` and
+would first need its transversal-crossing dispatch reworked for the positive-
+fill winding model before it could host a single-sweep self-union.
+
+If retiring the vote is revisited, the realistic path is: (a) rework the
+ordered path's crossing dispatch to be winding-model-consistent (so it handles
+general self-intersections), *then* (b) add a directed, winding-aware
+perturbation (push negatively-wound folds inward) — note this needs the winding
+it is trying to compute, so it is genuinely circular for exact coincidences and
+may still reduce to a vote.

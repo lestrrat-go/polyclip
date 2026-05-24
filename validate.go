@@ -198,7 +198,7 @@ func segmentsCrossStrict(a1, a2, b1, b2 Point) bool {
 // triOrient returns positive when (a, b, c) makes a left turn,
 // negative for a right turn, and 0 when collinear.
 func triOrient(a, b, c Point) float64 {
-	v := (b.X-a.X)*(c.Y-a.Y) - (b.Y-a.Y)*(c.X-a.X)
+	v := b.Sub(a).Cross(c.Sub(a))
 	switch {
 	case v > 0:
 		return 1

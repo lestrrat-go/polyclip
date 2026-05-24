@@ -8,6 +8,35 @@ type Point struct {
 	X, Y float64
 }
 
+// Sub returns the vector p - q.
+func (p Point) Sub(q Point) Point {
+	return Point{X: p.X - q.X, Y: p.Y - q.Y}
+}
+
+// Cross returns the 2D cross product p × q (p.X*q.Y - p.Y*q.X). Treating p and
+// q as vectors, its sign gives their turn orientation and its magnitude is the
+// area of the parallelogram they span.
+func (p Point) Cross(q Point) float64 {
+	return p.X*q.Y - p.Y*q.X
+}
+
+// Dot returns the dot product p · q.
+func (p Point) Dot(q Point) float64 {
+	return p.X*q.X + p.Y*q.Y
+}
+
+// Dist2 returns the squared Euclidean distance between p and q. Squared
+// distance avoids the square root when only comparisons are needed.
+func (p Point) Dist2(q Point) float64 {
+	dx, dy := p.X-q.X, p.Y-q.Y
+	return dx*dx + dy*dy
+}
+
+// Len returns the Euclidean magnitude of p treated as a vector from the origin.
+func (p Point) Len() float64 {
+	return math.Hypot(p.X, p.Y)
+}
+
 // BBox is an axis-aligned bounding box. The zero value represents an empty
 // box; callers should use [BBox.Empty] to check this rather than comparing to
 // the zero value directly.

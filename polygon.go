@@ -187,7 +187,7 @@ func (m MultiPolygon) Contains(q Point) bool {
 // is sufficient for Phase 0 utility methods. The boolean engine uses exact
 // integer predicates instead (see DESIGN.md §5.2).
 func pointOnSegment(a, b, q Point) bool {
-	cross := (b.X-a.X)*(q.Y-a.Y) - (b.Y-a.Y)*(q.X-a.X)
+	cross := b.Sub(a).Cross(q.Sub(a))
 	if math.Abs(cross) > pointOnSegmentEpsilon(a, b) {
 		return false
 	}
@@ -260,7 +260,7 @@ func cleanRing(ring Polygon, vertexTol float64) Polygon {
 	for _, v := range ring {
 		if n := len(deduped); n > 0 {
 			last := deduped[n-1]
-			if dx, dy := v.X-last.X, v.Y-last.Y; dx*dx+dy*dy <= tol2 {
+			if v.Dist2(last) <= tol2 {
 				continue
 			}
 		}
@@ -270,8 +270,7 @@ func cleanRing(ring Polygon, vertexTol float64) Polygon {
 	for len(deduped) >= 2 {
 		first := deduped[0]
 		last := deduped[len(deduped)-1]
-		dx, dy := first.X-last.X, first.Y-last.Y
-		if dx*dx+dy*dy > tol2 {
+		if first.Dist2(last) > tol2 {
 			break
 		}
 		deduped = deduped[:len(deduped)-1]
@@ -310,14 +309,12 @@ func cleanRing(ring Polygon, vertexTol float64) Polygon {
 // a and b. When a == b, returns true only if v also coincides with that
 // point (within tol).
 func pointCollinear(a, v, b Point, tol float64) bool {
-	abx := b.X - a.X
-	aby := b.Y - a.Y
-	len2 := abx*abx + aby*aby
+	ab := b.Sub(a)
+	len2 := ab.Dot(ab)
 	if len2 == 0 {
-		dx, dy := v.X-a.X, v.Y-a.Y
-		return dx*dx+dy*dy <= tol*tol
+		return v.Dist2(a) <= tol*tol
 	}
-	cross := abx*(v.Y-a.Y) - aby*(v.X-a.X)
+	cross := ab.Cross(v.Sub(a))
 	return cross*cross <= tol*tol*len2
 }
 

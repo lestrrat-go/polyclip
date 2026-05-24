@@ -157,14 +157,15 @@ func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool
 
 // pointSegDist returns the Euclidean distance from p to segment ab.
 func pointSegDist(p, a, b Point) float64 {
-	dx, dy := b.X-a.X, b.Y-a.Y
-	l2 := dx*dx + dy*dy
+	d := b.Sub(a)
+	l2 := d.Dot(d)
 	if l2 == 0 {
-		return math.Hypot(p.X-a.X, p.Y-a.Y)
+		return p.Sub(a).Len()
 	}
-	t := ((p.X-a.X)*dx + (p.Y-a.Y)*dy) / l2
+	t := p.Sub(a).Dot(d) / l2
 	t = max(0, min(1, t))
-	return math.Hypot(p.X-(a.X+t*dx), p.Y-(a.Y+t*dy))
+	proj := Point{X: a.X + t*d.X, Y: a.Y + t*d.Y}
+	return p.Sub(proj).Len()
 }
 
 // resolveOffsetPiece turns the raw offset rings of one input ExPolygon (the
@@ -225,12 +226,12 @@ func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
 	have := make([]bool, n)
 	for i := range n {
 		a, b := ring[i], ring[(i+1)%n]
-		dx, dy := b.X-a.X, b.Y-a.Y
-		l := math.Hypot(dx, dy)
+		d := b.Sub(a)
+		l := d.Len()
 		if l == 0 {
 			continue
 		}
-		normals[i] = Point{X: dy / l, Y: -dx / l}
+		normals[i] = Point{X: d.Y / l, Y: -d.X / l}
 		have[i] = true
 	}
 	// Carry the most recent valid normal forward and backward to fill any
@@ -275,7 +276,7 @@ func emitVertex(out *Polygon, v, prevN, nextN Point, d float64, opts OffsetOptio
 	// cross of the two normals (pn × nn). For CCW input rings with d>0,
 	// positive cross = left turn = convex corner (offset wedge on the
 	// outside). Sign-flipped by d for the unified rule.
-	cross := prevN.X*nextN.Y - prevN.Y*nextN.X
+	cross := prevN.Cross(nextN)
 	// Sign of cross*d: positive means offset side is a WEDGE that needs
 	// filling with a join; non-positive means the offset edges cross on
 	// the offset side and emitting the miter apex (or two perpendicular
@@ -468,7 +469,7 @@ func segmentsProperlyIntersect(p1, p2, p3, p4 Point) bool {
 // orient returns the sign of the cross product (b-a)×(c-a): >0 left turn, <0
 // right turn, 0 collinear.
 func orient(a, b, c Point) float64 {
-	return (b.X-a.X)*(c.Y-a.Y) - (b.Y-a.Y)*(c.X-a.X)
+	return b.Sub(a).Cross(c.Sub(a))
 }
 
 // onSegmentInterior reports whether collinear point p lies strictly inside

@@ -995,6 +995,56 @@ func (s *sweep) advanceBoundCursor(ae *ActiveEdge, currentTop fixed.Point) {
 // AddLocalMaxPoly handles both the same-ring close and the two-ring join.
 func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	s.handoffMaxThroughVertex(ae, maxPt)
+
+	// Coincident-collinear cross-source horizontal cancellation at a shared apex.
+	// ae and its RING-coupled other edge are the two open ends of one cross-source
+	// ring meeting at maxPt; ae tops out here, but the coupled edge CONTINUES onto
+	// a LEFTWARD horizontal (turning into the column ae occupied). That horizontal
+	// is coincident with ae's source's boundary (the other shape fills below it),
+	// so it is an interior doubled boundary that must not trace — but polyclip's
+	// incremental WindOther never counted ae's coincident source (ae and the
+	// coupled bound converge at maxPt without crossing), so the coupled edge
+	// wrongly stays contributing and would drag the ring along the phantom span
+	// (the Union/Xor hole under-shrink: hole top coincident with a clip top that
+	// fills the hole from below — DESIGN.md §12.11). Fold ae's contribution into
+	// the coupled edge's other-source winding; if that makes it non-contributing,
+	// the boundary is interior: close the ring HERE (its OutPt cycle is already the
+	// correct shape) and leave the coupled edge cold-active so it keeps carrying
+	// its winding without tracing.
+	if coupled := outrecOther(ae); s.op != OpXor && coupled != nil &&
+		ae.IsHotEdge() && coupled.IsHotEdge() && coupled.Outrec == ae.Outrec &&
+		coupled.Seg.Src != ae.Seg.Src && coupled.Seg.Top == maxPt &&
+		nextSegHorizontalAt(coupled, maxPt.Y) {
+		ns := coupled.Bound.Segs[coupled.EdgeIdx+1]
+		farX := ns.Top.X
+		if ns.Top == maxPt {
+			farX = ns.Bot.X
+		}
+		if farX < maxPt.X {
+			oldWO := coupled.WindOther
+			coupled.WindOther += ae.WindDx
+			flipped := !isContributing(s.op, coupled)
+			if flipped {
+				if ae.IsHotEdge() {
+					AddOutPt(ae, maxPt)
+				}
+				or := ae.Outrec
+				or.FrontEdge = nil
+				or.BackEdge = nil
+				ae.Outrec = nil
+				coupled.Outrec = nil
+				coupled.Contributing = false
+				left, right := s.maximaFlanks(ae)
+				s.ael.Remove(ae)
+				delete(s.bySeg, ae.Seg)
+				if left != nil && right != nil {
+					s.maybeScheduleIntersect(left, right, maxPt.Y)
+				}
+				return
+			}
+			coupled.WindOther = oldWO
+		}
+	}
 	// Case C (simultaneous maxima): the partner bound is adjacent in the AEL
 	// and reaches maxPt at the same scanline event. AddLocalMaxPoly closes the
 	// ring (same OutRec) or joins two rings (different OutRecs — e.g. the

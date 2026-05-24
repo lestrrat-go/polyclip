@@ -1091,6 +1091,26 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		// loop ae and partner are AEL-adjacent. Port of Clipper2 DoMaxima's
 		// between-maxima loop (engine.cpp:2756, DESIGN.md §12.6.1 follow-up).
 		s.resolveBetweenMaxima(ae, partner, maxPt)
+		// Difference hole∪clip void-merge: ae is a COLD bound-last horizontal (the
+		// hole's top plateau) whose HOT same-source maxima partner rode the clip's
+		// void ring up to the hole apex maxPt. The void boundary continues from maxPt
+		// along ae to its near end, where a clip ring re-bounds the void; join there
+		// (DESIGN.md §12.11). Without this the hot partner is dropped and the hole's
+		// uncovered apex region stays solid.
+		if joinE, nearPt := s.differenceNotchPlateauJoin(ae, partner, maxPt); joinE != nil {
+			AddOutPt(partner, maxPt)
+			AddOutPt(partner, nearPt)
+			left, right := s.maximaFlanks(ae, partner)
+			AddLocalMaxPoly(s.ael, partner, joinE, nearPt)
+			s.ael.Remove(ae)
+			s.ael.Remove(partner)
+			delete(s.bySeg, ae.Seg)
+			delete(s.bySeg, partner.Seg)
+			if left != nil && right != nil {
+				s.maybeScheduleIntersect(left, right, maxPt.Y)
+			}
+			return
+		}
 		// Difference hole-notch bulk: a HOT ae reaching its apex whose same-source
 		// maxima partner is COLD is NOT closing a ring with that partner — the cold
 		// partner carries no OutRec (its bound went cold at an earlier cross-source
@@ -1870,6 +1890,56 @@ func (s *sweep) intersectNotchPlateau(ae *ActiveEdge, maxPt fixed.Point) (*Activ
 		}
 	}
 	return nil, nil, fixed.Point{}
+}
+
+// differenceNotchPlateauJoin handles the Difference hole∪clip void-merge where a
+// subject hole's left bound was made HOT by a bite crossing (it rode onto the
+// clip-derived void ring) and rises to the hole apex maxPt, while the hole's
+// trailing TOP horizontal (ae) is its cold same-source maxima partner. The void
+// boundary must continue from maxPt along that horizontal to its near end nearPt,
+// where a cross-source CLIP ring (already closed via Case A at nearPt) re-bounds
+// the void. The default maximaPartner remove-both drops the hot partner without
+// emitting its apex or tracing the horizontal, splicing a phantom edge that leaves
+// the hole's uncovered apex region solid (D under-removes; e.g. hole [[5,9],[9,9],
+// [9,6],[9,3]] B [[10,0],[9,9],[2,0],[5,2]]: D 116→110.46, DESIGN.md §12.11). This
+// is the Difference analog of [intersectNotchPlateau]. Returns the clip edge whose
+// ring to join at nearPt, plus nearPt; nil if the configuration does not match.
+//
+// Caller is the closeBound maximaPartner branch with ae,partner as the cold/hot
+// pair. Gated on the join target existing: a DIFFERENT, still-open cross-source
+// ring whose surviving edge terminates at the horizontal's near end.
+func (s *sweep) differenceNotchPlateauJoin(ae, partner *ActiveEdge, maxPt fixed.Point) (*ActiveEdge, fixed.Point) {
+	if s.op != OpDifference || ae.IsHotEdge() || !partner.IsHotEdge() {
+		return nil, fixed.Point{}
+	}
+	if ae.Bound == nil || !ae.Seg.Horizontal() || !ae.IsBoundLast() ||
+		partner.Seg.Src != ae.Seg.Src {
+		return nil, fixed.Point{}
+	}
+	nearPt := ae.Seg.Top
+	if nearPt == maxPt {
+		nearPt = ae.Seg.Bot
+	}
+	// The signal that this is a void-merge (not an ordinary hole closure) is a
+	// DIFFERENT, still-open CROSS-source ring whose surviving edge terminates at
+	// the horizontal's near end — the clip bound that re-bounds the merged void.
+	// (partner is hot because a bite crossing rode the clip's void ring onto this
+	// hole bound; its current coupling may already be same-source again, so it is
+	// not a reliable gate.)
+	for _, r := range s.ael.Rings() {
+		if r == nil || r.Pts == nil || r == partner.Outrec {
+			continue
+		}
+		for _, e := range []*ActiveEdge{r.FrontEdge, r.BackEdge} {
+			if e == nil || e.Seg.Src == ae.Seg.Src {
+				continue
+			}
+			if e.Seg.Top == nearPt || e.Seg.Bot == nearPt {
+				return e, nearPt
+			}
+		}
+	}
+	return nil, fixed.Point{}
 }
 
 func (s *sweep) apexNotchContinuation(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {

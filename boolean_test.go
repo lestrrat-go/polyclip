@@ -2261,6 +2261,60 @@ func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputDifferenceHoleTopPlateauVoidMerge(t *testing.T) {
+	// Difference where a subject hole's left bound is made HOT by a bite crossing
+	// (the clip's void ring rides onto it) and rises to the hole apex (5,9); the
+	// hole's trailing TOP horizontal (5,9)-(9,9) is its cold same-source maxima
+	// partner. The void boundary must continue from the apex along that horizontal
+	// to (9,9), where the clip's right bound re-bounds the merged void. The old
+	// maximaPartner remove-both dropped the hot partner without emitting its apex or
+	// tracing the horizontal, leaving the hole's uncovered apex region SOLID — D
+	// returned 116 instead of ~110.46 (under-removed by 5.54, the part of the hole
+	// not covered by B). differenceNotchPlateauJoin now joins the hot partner's ring
+	// to the clip ring at the horizontal's near end (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 9}, {X: 9, Y: 9}, {X: 9, Y: 6}, {X: 9, Y: 3}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 10, Y: 0}, {X: 9, Y: 9}, {X: 2, Y: 0}, {X: 5, Y: 2}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+
+	// The hole's uncovered apex region must be removed (the bug left D at 116).
+	if dA > 112 {
+		t.Errorf("difference area %v did not remove the hole apex region (want ~110.46)", dA)
+	}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identD, dA, aA - iA},
+		{identU, uA, aA + bA - iA},
+		{identX, xA, uA - iA},
+	} {
+		if math.Abs(c.got-c.want) > 0.02 {
+			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	// Intersect where a clip quad's left bound crosses INTO a triangular subject
 	// hole, biting a notch out of the clip. A is a 12x12 square with hole

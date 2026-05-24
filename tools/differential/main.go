@@ -384,8 +384,10 @@ func segCross(p1, p2, p3, p4 polyclip.Point) bool {
 	return d1*d2 < 0 && d3*d4 < 0
 }
 
+// orient returns the sign of the cross product (b-a)×(c-a): >0 left turn, <0
+// right turn, 0 collinear.
 func orient(a, b, c polyclip.Point) float64 {
-	return (b.X-a.X)*(c.Y-a.Y) - (b.Y-a.Y)*(c.X-a.X)
+	return b.Sub(a).Cross(c.Sub(a))
 }
 
 // mcOracle returns Monte-Carlo area estimates of all four ops from a single

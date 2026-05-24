@@ -2315,6 +2315,67 @@ func TestBooleanHoledInputDifferenceHoleTopPlateauVoidMerge(t *testing.T) {
 	}
 }
 
+func TestBooleanHoledInputXorHoleClipApexFigure8(t *testing.T) {
+	// Xor where a subject hole and the clip share an edge so their boundaries meet
+	// same-side BOTH-BACK at the clip's apex. polyclip's mirrored front/back makes
+	// the two input-min rings arrive same-side here; the figure-8 PINCH then
+	// double-counts the hole∩clip overlap lens, so splitSelfTouchingRings emits
+	// three overlapping holes and X under-counted (got 125.5 vs ~127.3 for the
+	// first input below; 114.5 vs 118.5 for the second). AddLocalMaxPoly now
+	// detects this mirror artifact (same source, both-back, equal other-winding,
+	// BOTH rings spawned at input minima — not a crossing) and reverses one ring to
+	// join opposite-side instead of pinching (DESIGN.md §12.11).
+	cases := []struct {
+		name string
+		hole Polygon
+		b    Polygon
+	}{
+		{"shared-edge", Polygon{{X: 5, Y: 9}, {X: 8, Y: 9}, {X: 6, Y: 4}, {X: 5, Y: 4}},
+			Polygon{{X: 8, Y: 9}, {X: 6, Y: 4}, {X: 10, Y: 12}, {X: 3, Y: 8}}},
+		{"shared-vertex", Polygon{{X: 7, Y: 8}, {X: 9, Y: 3}, {X: 3, Y: 4}, {X: 6, Y: 8}},
+			Polygon{{X: 1, Y: 2}, {X: 7, Y: 8}, {X: 10, Y: 2}, {X: 6, Y: 11}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := MultiPolygon{ExPolygon{
+				Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+				Holes: []Polygon{tc.hole},
+			}}
+			b := MultiPolygon{ExPolygon{Outer: tc.b}}
+			u, err := Union(a, b)
+			if err != nil {
+				t.Fatalf("union: %v", err)
+			}
+			i, err := Intersect(a, b)
+			if err != nil {
+				t.Fatalf("intersect: %v", err)
+			}
+			d, err := Difference(a, b)
+			if err != nil {
+				t.Fatalf("difference: %v", err)
+			}
+			x, err := Xor(a, b)
+			if err != nil {
+				t.Fatalf("xor: %v", err)
+			}
+			aA, bA := a.Area(), b.Area()
+			uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+			for _, c := range []struct {
+				name      string
+				got, want float64
+			}{
+				{identX, xA, uA - iA},
+				{identU, uA, aA + bA - iA},
+				{identD, dA, aA - iA},
+			} {
+				if math.Abs(c.got-c.want) > 0.02 {
+					t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
+				}
+			}
+		})
+	}
+}
+
 func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	// Intersect where a clip quad's left bound crosses INTO a triangular subject
 	// hole, biting a notch out of the clip. A is a 12x12 square with hole

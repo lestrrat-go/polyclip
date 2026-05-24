@@ -46,6 +46,14 @@ type OutRec struct {
 
 	// IsHole is set by postprocess from the ring's signed area.
 	IsHole bool
+
+	// fromInputMin records whether this ring was spawned at a genuine INPUT
+	// local minimum (AddLocalMinPoly isNew=true) rather than at a crossing
+	// (a synthetic minimum, isNew=false). A crossing-spawned ring is the
+	// legitimate figure-8 interleaving case at a same-side maximum (DESIGN.md
+	// §12.11); two input-min rings arriving same-side is instead the mirrored
+	// front/back artifact that must reverse+join (AddLocalMaxPoly).
+	fromInputMin bool
 }
 
 // IsHotEdge reports whether ae is currently building a ring.
@@ -101,7 +109,7 @@ func AddOutPt(ae *ActiveEdge, pt fixed.Point) *OutPt {
 // hot edge to the left of BOTH new edges rather than the partner — matches
 // Clipper2 regardless of caller argument order.
 func AddLocalMinPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point, isNew bool) *OutPt {
-	outrec := &OutRec{Idx: ael.NextOutRecIdx()}
+	outrec := &OutRec{Idx: ael.NextOutRecIdx(), fromInputMin: isNew}
 	ael.RegisterRing(outrec)
 	e1.Outrec = outrec
 	e2.Outrec = outrec
@@ -182,6 +190,22 @@ func AddLocalMaxPoly(ael *AEL, e1, e2 *ActiveEdge, pt fixed.Point) *OutPt {
 		continuing := func(e *ActiveEdge) bool {
 			o := otherEdge(e)
 			return o != nil && ael.IndexOf(o) >= 0
+		}
+		// Same-source BOTH-BACK terminal maximum where both rings were spawned at
+		// genuine input minima (neither from a crossing) and carry equal other-source
+		// winding: this is the mirrored front/back artifact, NOT a real figure-8
+		// interleaving — the two bounds are one polygon's two sides meeting at its
+		// apex and must close as a single loop. Reverse one ring's sides and join
+		// opposite-side (mirror of Clipper2 SwapFrontBackSides), instead of the
+		// figure-8 pinch which double-counts the overlap region (the Xor hole∪clip
+		// figure-8 over-count: hole [[5,9],[8,9],[6,4],[5,4]] B [[8,9],[6,4],[10,12],
+		// [3,8]] X 125.5→127.3; DESIGN.md §12.11). A crossing-spawned ring (synthetic
+		// min) is the legitimate figure-8 case and is excluded here.
+		if !continuing(e1) && !continuing(e2) && e1.Seg.Src == e2.Seg.Src && !e1.IsFront() &&
+			e1.WindOther == e2.WindOther && e1.Outrec.fromInputMin && e2.Outrec.fromInputMin {
+			e2.Outrec.FrontEdge, e2.Outrec.BackEdge = e2.Outrec.BackEdge, e2.Outrec.FrontEdge
+			e2.Outrec.Pts = e2.Outrec.Pts.Next
+			goto joinTail
 		}
 		if !continuing(e1) && !continuing(e2) {
 			op1 := AddOutPt(e1, pt)

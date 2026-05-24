@@ -162,6 +162,72 @@ Self-intersecting input rings are accepted; Vatti's intersection step processes 
 
 ---
 
+## 7. Roadmap / TODO
+
+The boolean engine (§11–§12) is correct on the noise-free set identities
+across the random, large, degenerate, and holed differential buckets
+(`idU=idD=idX=0`, §6) and is considered slicer-grade. The items below are the
+known gaps between current state and a complete drop-in for `makislicer`,
+roughly in priority order.
+
+### 7.1 Offset: inward-offset topology changes (blocking for shell generation)
+
+`Offset` builds each ring directly and accepts or rejects it **whole**
+(§4.3, `inwardRingValid` in `offset.go`). When an inward offset pinches a
+ring into two — a thin neck, web, or notch closing — the entire ring fails
+the overshoot check and the piece is dropped. Verified: a dumbbell (two pads
+joined by a thin neck) offset inward past the neck width returns
+`ErrOffsetEmpty` and loses **both** pads, rather than yielding the two
+islands it should.
+
+This is the single most important gap: shell/perimeter generation is repeated
+inward offset, and most real parts have necks. The fix is the Clipper2
+approach — build fat-edge polygons per edge and `Union` them — or an internal
+self-union of the raw offset ring to re-resolve topology, replacing the
+whole-ring accept/reject. Re-introduces a per-ring boolean self-union (the
+trade-off flagged in §4.3).
+
+### 7.2 No public way to resolve a self-intersecting polygon
+
+Several doc comments advise "run `Union` of `m` with itself first" to clean
+self-intersection. That advice does not work: `Union(A, A)` hits the
+`mpolyEqual` idempotency short-circuit (`boolean.go`) and returns the input
+unchanged — the self-intersection survives. `Clean` is purely geometric and
+cannot resolve it either. Outward offset of a concave ring can self-intersect,
+so there is currently no entry point that cleans it.
+
+Resolution options: (a) add a real `Simplify(m MultiPolygon)` that runs the
+engine without the short-circuit; and/or (b) correct the misleading doc
+comments in `polygon.go` (`Contains`, `Clean`) and `validate.go` that
+recommend self-union.
+
+### 7.3 Performance unverified at slicer scale
+
+`DoIntersections` is `O(m²)` per scanbeam (§4.4, correctness-first). There are
+no benchmarks in the repo, so the "within 5–10× of Clipper2" goal (§1) is
+unmeasured. Slicer layers can be thousands of vertices over hundreds of
+layers. TODO: add `testing.B` benchmarks on representative slicer geometry,
+then implement the merge-sort inversion-counter crossing optimisation if the
+quadratic beam cost dominates.
+
+### 7.4 Open-path offset (`EndType`)
+
+`EndType` is a reserved stub; only `EndPolygon` is implemented. Slicers want
+open-polyline offset for thin-wall / gap-fill / single-extrusion features.
+Currently a §1 non-goal — listed here so the scope decision is explicit and
+revisitable.
+
+### 7.5 Reachable `ErrHorizontalNotSupported`
+
+The legacy per-edge fallback can still return `ErrHorizontalNotSupported` on
+shared-vertex inputs where `BuildLocalMinima` fails (§12.10.7, `boolean.go`).
+Axis-aligned features are common in printed parts, so callers must handle the
+error path. TODO: confirm the bound model covers every shared-vertex
+horizontal case and retire the fallback, or document the residual inputs that
+trip it.
+
+---
+
 ## 8. Conventions and constraints
 
 - **Go version:** 1.22+. Concrete types in the engine; generics only where they pay.

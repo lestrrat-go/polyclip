@@ -1140,6 +1140,26 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 	// lets the horizontal's own closeBound pair with it via maximaPartner, and
 	// resolveBetweenMaxima crosses any between-edges (e.g. the other source's
 	// through-bound) at the apex first.
+	// Intersect hole-notch through the hole's own max-plateau (DESIGN.md §12.11,
+	// L6 Intersect-bite through hole apex). Tightly gated: ae's ring must already
+	// be CROSS-source (the hole bit into the clip via an earlier transfer), and
+	// the join target t must be a DIFFERENT clip ring.
+	if s.op == OpIntersect {
+		if p, t, nearPt := s.intersectNotchPlateau(ae, maxPt); t != nil {
+			AddOutPt(ae, maxPt)
+			AddOutPt(ae, nearPt)
+			left, right := s.maximaFlanks(ae)
+			AddLocalMaxPoly(s.ael, ae, t, nearPt)
+			s.ael.Remove(ae)
+			delete(s.bySeg, ae.Seg)
+			_ = p
+			if left != nil && right != nil {
+				s.maybeScheduleIntersect(left, right, maxPt.Y)
+			}
+			return
+		}
+	}
+
 	if s.plateauPartnerPending(ae, maxPt) || s.plateauMaxPartnerPending(ae, maxPt) {
 		return
 	}
@@ -1773,6 +1793,54 @@ func boundContinuesAbove(ae *ActiveEdge, maxPt fixed.Point) bool {
 // That horizontal was traversed COLD (the clip bound went cold at the notch-entry
 // crossing), so c never picked the ring back up; the close must hand ae's ring
 // side to c and emit the horizontal so the boundary continues (DESIGN.md §12.11).
+// intersectNotchPlateau locates a hole's max-plateau the Intersect notch must
+// trace before rejoining the clip (DESIGN.md §12.11). ae is a HOT bound topping
+// at maxPt whose ring is already CROSS-source (the hole bit into the clip). It
+// returns p (a same-source cold bound whose trailing horizontal — the hole's
+// max-plateau — ends at maxPt), nearPt (the plateau's far endpoint, the hole
+// apex), and t (a cross-source HOT edge on a DIFFERENT ring with an endpoint at
+// nearPt — the clip bound the notch rejoins). All nil/zero if no match.
+func (s *sweep) intersectNotchPlateau(ae *ActiveEdge, maxPt fixed.Point) (*ActiveEdge, *ActiveEdge, fixed.Point) {
+	if !ae.IsHotEdge() || ae.WindOther == 0 {
+		return nil, nil, fixed.Point{}
+	}
+	coupled := outrecOther(ae)
+	if coupled == nil || coupled.Seg.Src == ae.Seg.Src {
+		return nil, nil, fixed.Point{}
+	}
+	for i := range s.ael.Len() {
+		p := s.ael.At(i)
+		if p == ae || p.Bound == nil || p.IsHotEdge() || p.Seg.Src != ae.Seg.Src {
+			continue
+		}
+		last := p.Bound.Last()
+		if last == nil || !last.Horizontal() || last.Bot.Y != maxPt.Y {
+			continue
+		}
+		apex, ok := boundApex(p.Bound)
+		if !ok || apex != maxPt {
+			continue
+		}
+		nearPt := last.Top
+		if nearPt == maxPt {
+			nearPt = last.Bot
+		}
+		for j := range s.ael.Len() {
+			t := s.ael.At(j)
+			if t == ae || t == p || !t.IsHotEdge() || t.Bound == nil {
+				continue
+			}
+			if t.Seg.Src == ae.Seg.Src || t.Outrec == ae.Outrec {
+				continue
+			}
+			if t.Seg.Top == nearPt || t.Seg.Bot == nearPt {
+				return p, t, nearPt
+			}
+		}
+	}
+	return nil, nil, fixed.Point{}
+}
+
 func (s *sweep) apexNotchContinuation(ae *ActiveEdge, maxPt fixed.Point) *ActiveEdge {
 	if !ae.IsHotEdge() {
 		return nil

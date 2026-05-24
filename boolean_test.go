@@ -2658,3 +2658,45 @@ func TestBooleanHoledInputUnionHoleTopCoincidentMaxPlateau(t *testing.T) {
 		t.Errorf("union area: got %v want ~130.902", uA)
 	}
 }
+
+func TestBooleanHoledInputIntersectHoleBiteThroughApex(t *testing.T) {
+	// B = quad (1,2),(7,8),(10,2),(6,11) lies inside the square but its edge
+	// (1,2)-(7,8) passes through subject hole vertex (3,4), so the hole bites a
+	// triangle (3,4),(6,8),(7,8) (area 2) out of B. In Intersect the bite must be
+	// carved: the intersection ring rides the hole-left bound up to the hole's
+	// max-plateau apex (6,8), traces the plateau to the hole apex (7,8), and
+	// rejoins the clip ring there. polyclip closed the ring prematurely at (6,8)
+	// (the hole's max-plateau being cold), so Intersect returned 13.5 (all of B)
+	// instead of 11.5, breaking the U/D identities. intersectNotchPlateau now joins
+	// the notch to the continuing clip ring at the hole apex (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 7, Y: 8}, {X: 9, Y: 3}, {X: 3, Y: 4}, {X: 6, Y: 8}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 2}, {X: 7, Y: 8}, {X: 10, Y: 2}, {X: 6, Y: 11}}}}
+
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	aA := a.Area()
+	bA := b.Area()
+	iA := i.Area()
+	if math.Abs(iA-11.5) > 0.02 {
+		t.Errorf("intersect area: got %v want ~11.5", iA)
+	}
+	if math.Abs(u.Area()-(aA+bA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identU, u.Area(), aA+bA-iA)
+	}
+	if math.Abs(d.Area()-(aA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identD, d.Area(), aA-iA)
+	}
+}

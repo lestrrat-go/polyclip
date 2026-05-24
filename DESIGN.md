@@ -248,23 +248,31 @@ disproved the "keep both edges + boundary test + pure incremental" theory as
   distinct sequence positions. *Implemented as `SweepRingsFill` /
   `splitOrderedRings` (`clip/sweep_ordered.go`); with L1+L2 the canonical
   dumbbell's left island resolves exactly (area 36).*
-- **L3 — simultaneous-spawn winding (UNSOLVED).** At a scanline where several
-  local minima spawn at once (axis-aligned doubled walls produce many at one
-  `Y`), `Classify` runs against a *partial* AEL — siblings, and the real
-  ascending wall hidden behind a leading horizontal of a min's own bound, are
-  not yet inserted — so the prefix sum is wrong (the dumbbell's neck-bottom
-  plateau spawns a spurious ring and pulls the neck into the right island, area
-  64 not 36). `buildBoundsAt` also mis-builds a degenerate local-min plateau
-  whose descent and ascent are at opposite ends. The rotated vote cannot mask
-  it. This is the genuinely entangled core: the `AddLocalMinPoly` ring-start
-  decision must be deferred until all same-`Y` minima are inserted and the AEL
-  is settled (or insertion must re-classify already-spawned siblings, as
-  NonZero's bubble does). Design this before more code.
+- **L3 — exact-coincidence ambiguity (FUNDAMENTAL — the vote is the answer).**
+  Two parts. (a) A local-min bound that *leads with a horizontal* is ordered in
+  the AEL at the horizontal's near X, so the prefix sum runs before the bound's
+  real wall is placed. *Fixed* by ordering the prefix sum by each bound's
+  position just **above** the scanline (the far end of a leading horizontal);
+  this resolves the dumbbell's left island and excludes the neck from it.
+  (b) The residual is fundamental: two **exactly coincident** ascending walls
+  over a Y-range (the dumbbell's `x=22` over `y∈[4,6]` — the right square's
+  left wall and the neck's right wall) are geometrically indistinguishable at
+  the local-min scanline. Being parallel they *never cross*, so no event ever
+  orders them, and the winding prefix cannot tell which carries the `0` sliver
+  vs the `+1` boundary. Deferring the ring-start decision does not help (no
+  ordering event ever arrives); a topology look-ahead to where the walls
+  diverge is itself degenerate because they diverge through horizontals at the
+  same `Y`.
 
-So this is a **structural rework of the sweep's winding and spawn core, gated on
-`FillPositive`** (the boolean `FillNonZero` path stays untouched → differential
-safe by construction), not a localized patch. The multi-frame vote (§7.1)
-remains the working stopgap until L3 lands.
+The standard computational-geometry resolution for such exact degeneracies is
+**perturbation** — and the multi-frame rotation vote (§7.1) *is* perturbation
+that breaks the coincidence so a clean transversal sweep resolves it. So
+"retire the vote" is reframed: the vote is the **correct design**, not a
+stopgap, until/unless the engine gains principled symbolic perturbation
+(Simulation-of-Simplicity style) letting a single sweep break ties
+deterministically. The ordered-minima rewrite explored on branch
+`fix-positive-fill-coincident` does not improve on the proven soup+vote path
+and is kept only as an investigation record.
 
 ### 7.3 Performance unverified at slicer scale
 

@@ -41,7 +41,7 @@ func manyDisjoint(k, vtx int) MultiPolygon {
 
 func benchOp(b *testing.B, op func(a, c MultiPolygon) (MultiPolygon, error), a, c MultiPolygon) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if _, err := op(a, c); err != nil {
 			b.Fatal(err)
 		}

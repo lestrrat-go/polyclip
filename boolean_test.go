@@ -2700,3 +2700,53 @@ func TestBooleanHoledInputIntersectHoleBiteThroughApex(t *testing.T) {
 		t.Errorf("%s: got %v want %v", identD, d.Area(), aA-iA)
 	}
 }
+
+func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
+	// Subject hole top is the y=6 plateau (3,6)-(6,6)-(9,6); clip B shares vertices
+	// (3,6),(6,6) and its mid-bound top edge (3,6)-(6,6) is COINCIDENT with the
+	// hole top's left piece, with B's left bound continuing RIGHTWARD up past (6,6)
+	// to (8,11). In Intersect the Intersect ring rode the bite onto the hole-left,
+	// topped at the shared vertex (3,6) coincident with B-left's apex, and B-left's
+	// continuation traced the coincident interior B-top (3,6)-(6,6), tangling into a
+	// self-touching ring that shattered into slivers — Intersect returned 0.305
+	// instead of ~1.733. closeBound's coincident-collinear cancellation now also
+	// fires for a RIGHTWARD coupled continuation when that horizontal is coincident
+	// with an edge of ae's own source (a doubled interior boundary); the ring closes
+	// at the shared vertex and B-left goes cold (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 9, Y: 6}, {X: 8, Y: 3}, {X: 3, Y: 6}, {X: 6, Y: 6}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 6}, {X: 6, Y: 4}, {X: 8, Y: 11}, {X: 6, Y: 6}}}}
+
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	iA := i.Area()
+	if math.Abs(iA-1.733) > 0.02 {
+		t.Errorf("intersect area: got %v want ~1.733", iA)
+	}
+	if math.Abs(u.Area()-(aA+bA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identU, u.Area(), aA+bA-iA)
+	}
+	if math.Abs(d.Area()-(aA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identD, d.Area(), aA-iA)
+	}
+	if math.Abs(x.Area()-(u.Area()-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identX, x.Area(), u.Area()-iA)
+	}
+}

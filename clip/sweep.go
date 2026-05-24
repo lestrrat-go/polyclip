@@ -1039,7 +1039,18 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		if ns.Top == maxPt {
 			farX = ns.Bot.X
 		}
-		if farX < maxPt.X {
+		// Leftward (farX < maxPt.X): the coupled horizontal turns into the column
+		// ae just occupied — the original cc549a0 hole-top-coincident-with-filling-
+		// clip case. Rightward (farX > maxPt.X): only interior when the coupled
+		// horizontal is COINCIDENT with an edge of ae's OWN source (a doubled
+		// boundary, e.g. the hole's top edge overlapping the clip's top), so that
+		// the coupled bound would trace a phantom interior span (the d1.43 Intersect
+		// self-touching tangle: B's mid-bound top traced through the shared hole-top
+		// vertex). Without that coincidence the rightward continuation is a genuine
+		// boundary and must keep building (DESIGN.md §12.11).
+		rightwardOK := farX > maxPt.X &&
+			s.sourceHasCoincidentHoriz(ae.Seg.Src, coupled.Bound.Segs[coupled.EdgeIdx+1])
+		if farX < maxPt.X || rightwardOK {
 			oldWO := coupled.WindOther
 			coupled.WindOther += ae.WindDx
 			flipped := !isContributing(s.op, coupled)
@@ -1477,6 +1488,26 @@ func (s *sweep) coincidesColdInteriorPlateau(ae *ActiveEdge, maxPt fixed.Point, 
 	}
 	for _, p := range s.coldMaxPlateaus {
 		if p.Y == maxPt.Y && p.Src != ae.Seg.Src && p.X0 <= x0 && x1 <= p.X1 {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceHasCoincidentHoriz reports whether source src has a horizontal input
+// segment coincident with h (same two endpoints, either orientation). Used to
+// detect a doubled interior boundary where one source's top edge overlaps the
+// other source's continuing horizontal (DESIGN.md §12.11).
+func (s *sweep) sourceHasCoincidentHoriz(src Source, h *Segment) bool {
+	if !h.Horizontal() {
+		return false
+	}
+	for i := range s.segs {
+		seg := &s.segs[i]
+		if seg.Src != src || !seg.Horizontal() {
+			continue
+		}
+		if (seg.Bot == h.Bot && seg.Top == h.Top) || (seg.Bot == h.Top && seg.Top == h.Bot) {
 			return true
 		}
 	}

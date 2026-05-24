@@ -21,8 +21,18 @@ func SplitOverlaps(segs []Segment) []Segment {
 		}
 	}
 
+	// start is the lowest index that might still take part in an overlap.
+	// When findFirstOverlap returns a pair at outer index i, every segment
+	// before i is conflict-free against all others, and the only mutation a
+	// split performs is replacing two segments with sub-pieces of strictly
+	// smaller extent at index >= i. Sub-pieces cannot overlap a segment the
+	// original did not, so the conflict-free prefix stays conflict-free and the
+	// next scan can resume at i instead of restarting from 0. This drops the
+	// repeated full O(n^2) scan (overall O(n^3)) to a single forward sweep with
+	// splits (overall O(n^2)).
+	start := 0
 	for {
-		i, j, p, q, found := findFirstOverlap(work)
+		i, j, p, q, found := findFirstOverlap(work, start)
 		if !found {
 			return work
 		}
@@ -40,16 +50,18 @@ func SplitOverlaps(segs []Segment) []Segment {
 			}
 		}
 		work = out
+		// newI's first piece now sits at index i; re-examine from there.
+		start = i
 	}
 }
 
-// findFirstOverlap returns the indices of the first pair in segs that
-// requires a split: a CollinearOverlap whose interval does not already
-// match both segments' full extent. Fully-coincident pairs (same Bot and
-// same Top on both segments) are skipped — they are left for the sweep's
-// own coincident-edge handling.
-func findFirstOverlap(segs []Segment) (i, j int, p, q fixed.Point, found bool) {
-	for i := range segs {
+// findFirstOverlap returns the indices of the first pair in segs at or after
+// outer index start that requires a split: a CollinearOverlap whose interval
+// does not already match both segments' full extent. Fully-coincident pairs
+// (same Bot and same Top on both segments) are skipped — they are left for the
+// sweep's own coincident-edge handling.
+func findFirstOverlap(segs []Segment, start int) (i, j int, p, q fixed.Point, found bool) {
+	for i := start; i < len(segs); i++ {
 		for j := i + 1; j < len(segs); j++ {
 			res := Intersect(segs[i], segs[j])
 			if res.Kind != CollinearOverlap {
@@ -126,47 +138,58 @@ func SplitTJunctions(segs []Segment) []Segment {
 		}
 	}
 
+	// start is the lowest outer index that might still expose a T-junction.
+	// Splitting subdivides a segment at an existing vertex (the touching point
+	// is another segment's endpoint), so it introduces no new vertex and only
+	// shrinks extents. A segment before the outer index where the junction was
+	// found is therefore clean against every vertex in the arrangement and stays
+	// clean, letting the scan resume there. O(n^3) -> O(n^2), as in
+	// [SplitOverlaps].
+	start := 0
 	for {
-		i, p, found := findFirstTJunction(work)
+		resumeAt, idx, p, found := findFirstTJunction(work, start)
 		if !found {
 			return work
 		}
-		pieces := splitAt(work[i], p, p)
+		pieces := splitAt(work[idx], p, p)
 		out := make([]Segment, 0, len(work)+1)
 		for k, s := range work {
-			if k == i {
+			if k == idx {
 				out = append(out, pieces...)
 				continue
 			}
 			out = append(out, s)
 		}
 		work = out
+		start = resumeAt
 	}
 }
 
-// findFirstTJunction returns the index of the first segment that has a vertex
-// of another segment lying strictly in its interior, together with that
-// vertex. A [Touch] whose point is an endpoint of both segments (a shared
+// findFirstTJunction scans pairs at or after outer index start and returns the
+// outer index where the first T-junction was found (resumeAt, for the caller's
+// resume), the index idx of the segment to split, and the touching vertex p.
+// idx is the segment that has a vertex of another lying strictly in its
+// interior. A [Touch] whose point is an endpoint of both segments (a shared
 // corner) needs no split and is skipped.
-func findFirstTJunction(segs []Segment) (idx int, p fixed.Point, found bool) {
+func findFirstTJunction(segs []Segment, start int) (resumeAt, idx int, p fixed.Point, found bool) {
 	interior := func(s Segment, pt fixed.Point) bool {
 		return pt != s.Bot && pt != s.Top
 	}
-	for i := range segs {
+	for i := start; i < len(segs); i++ {
 		for j := i + 1; j < len(segs); j++ {
 			res := Intersect(segs[i], segs[j])
 			if res.Kind != Touch {
 				continue
 			}
 			if interior(segs[i], res.P) {
-				return i, res.P, true
+				return i, i, res.P, true
 			}
 			if interior(segs[j], res.P) {
-				return j, res.P, true
+				return i, j, res.P, true
 			}
 		}
 	}
-	return 0, fixed.Point{}, false
+	return 0, 0, fixed.Point{}, false
 }
 
 // DedupCoincidentEdges handles the same-source §11.7 cases:

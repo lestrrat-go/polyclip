@@ -299,12 +299,25 @@ depends on the input shape:
   cuts each segment at the interior vertices found through an X-sorted vertex
   index. This dropped those benchmarks 24–89× (e.g. a 24×24 brick wall union
   178 ms → 2 ms) with no change to the differential oracle.
-- **Dense mutually-intersecting inputs** (meshing gears) are now dominated
-  (~87% of CPU) by `DoIntersections`/`buildIntersectList`, the `O(m²)`-per-
-  scanbeam crossing enumeration (§4.4). This is the remaining lever: the
-  merge-sort inversion-counter crossing optimisation (à la Clipper2
-  `BuildIntersectList`) would replace the quadratic beam scan. TODO when dense
-  self-intersecting geometry matters; the disjoint slicer case is already fast.
+- **Dense mutually-intersecting inputs** (meshing gears) were then dominated
+  (~87% of CPU) by `buildIntersectList`, the per-scanbeam crossing enumeration
+  (§4.4). It is now a merge-sort inversion counter (à la Clipper2
+  `BuildIntersectList`): a proper crossing in the beam swaps the two edges'
+  X-order between the beam bottom and top, so the crossing pairs are the
+  inversions between the bottom and top orderings, enumerated in
+  `O(n log n + k)` instead of testing all `O(n²)` pairs. This cut the gears
+  benchmarks ~3.8× (union 75 ms → 20 ms) with no change to the differential.
+
+  Edge ordering uses exact 128-bit rational X-intercept comparison
+  (`fixed.CmpRationals`, via `clip.cmpXAtY`), **not** the float `XAtY`: at the
+  ±`MaxCoordMagnitude` grid a float intercept carries hundreds of units of
+  rounding error, enough to mis-order a crossing on a scanline and drop it.
+  Two boundary cases are added back as candidates so the node set matches the
+  exact full scan: edges concurrent at the beam bottom (no defined order there)
+  and AEL-adjacent pairs (nearly-parallel edges whose true crossing lies just
+  outside the beam but whose float crossing point — still used for the beam
+  test, matching the old behaviour — rounds inside). Validated by a full-scan
+  cross-check assertion run over the entire differential corpus.
 
 The "within 5–10× of Clipper2" goal (§1) is still not measured against
 Clipper2 directly (the differential oracle is Monte-Carlo, not Clipper2).

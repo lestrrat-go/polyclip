@@ -316,31 +316,190 @@ type intersectNode struct {
 	pt   fixed.Point
 }
 
-// buildIntersectList enumerates all edge-pair crossings strictly inside
-// (botY, topY). O(n²) per beam (correctness-first; a merge-sort inversion
-// counter à la Clipper2 BuildIntersectList is the later optimisation).
+// xEdge pairs a non-horizontal AEL edge with its position, for the exact
+// inversion enumeration in [sweep.buildIntersectList].
+type xEdge struct {
+	pos int
+	seg *Segment
+}
+
+// buildIntersectList enumerates every edge-pair crossing strictly inside the
+// beam (botY, topY]. A proper crossing in the beam swaps the two edges' X-order
+// between botY and topY, so ordered left-to-right at botY an accepted crossing
+// pair is inverted (or tied) by X at topY. We sort the non-horizontal edges
+// into botY order and enumerate exactly those inverted/tied pairs with a
+// merge-sort inversion pass (O(n log n + k) for k candidate pairs), applying
+// the exact [Intersect] + beam test to each.
+//
+// Ordering uses [cmpXAtY], which compares exact X intercepts (128-bit
+// rationals), not the float [XAtY]: at the engine's ±[fixed.MaxCoordMagnitude]
+// grid a float intercept carries ~hundreds of units of rounding error, enough
+// to mis-order a crossing that lands on a scanline and drop it from the
+// inversion test. With exact ordering a crossing-on-topY shows as an exact tie
+// (recorded), and two edges compare equal only when truly coincident at the
+// scanline — which cannot cross strictly above it — so no special tie handling
+// is needed.
+//
+// Horizontal edges have no single X at a scanline; they are kept out of the
+// inversion sort and tested against every other active edge directly (they are
+// few, and [Intersect] resolves any horizontal crossing exactly).
 func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
-	var nodes []intersectNode
 	n := s.ael.Len()
+	if n < 2 {
+		return nil
+	}
+	items := make([]xEdge, 0, n)
+	var horiz []int
 	for i := range n {
-		ei := s.ael.At(i)
-		for j := i + 1; j < n; j++ {
-			ej := s.ael.At(j)
-			res := Intersect(*ei.Seg, *ej.Seg)
-			if res.Kind != ProperCross {
-				continue
+		e := s.ael.At(i)
+		if e.Seg.Horizontal() {
+			horiz = append(horiz, i)
+			continue
+		}
+		items = append(items, xEdge{pos: i, seg: e.Seg})
+	}
+
+	// Candidate (lower, higher) AEL-position pairs to test exactly.
+	var pairs [][2]int
+	add := func(p, q int) {
+		if p > q {
+			p, q = q, p
+		}
+		pairs = append(pairs, [2]int{p, q})
+	}
+
+	if len(items) >= 2 {
+		sort.Slice(items, func(i, j int) bool {
+			if c := cmpXAtY(items[i].seg, items[j].seg, botY); c != 0 {
+				return c < 0
 			}
-			// Beam is (botY, topY]: a crossing at botY was resolved in the
-			// previous beam (as its topY); one at topY must be applied here,
-			// before topY's Top/LocalMin events (Clipper2 clamps boundary
-			// crossings into the beam rather than dropping them).
-			if res.P.Y <= botY || res.P.Y > topY {
-				continue
+			if c := cmpXAtY(items[i].seg, items[j].seg, topY); c != 0 {
+				return c < 0
 			}
-			nodes = append(nodes, intersectNode{a: ei, b: ej, pt: res.P})
+			return items[i].pos < items[j].pos
+		})
+
+		// Edges concurrent at botY (cmpXAtY == 0) have no defined left-right
+		// order there, so the inversion pass cannot see a crossing between them.
+		// Their true intersection sits at the beam bottom, but Intersect's float
+		// crossing point can round it just inside the beam, so the old full scan
+		// counts it here. Such concurrency is rare; test every pair within each
+		// run. Done before the inversion pass reorders items by the top key.
+		for a := 0; a < len(items); {
+			b := a + 1
+			for b < len(items) && cmpXAtY(items[a].seg, items[b].seg, botY) == 0 {
+				b++
+			}
+			for p := a; p < b; p++ {
+				for q := p + 1; q < b; q++ {
+					add(items[p].pos, items[q].pos)
+				}
+			}
+			a = b
+		}
+
+		buf := make([]xEdge, len(items))
+		enumInversionPairs(items, buf, topY, add)
+	}
+
+	// AEL-adjacent pairs. Nearly-parallel edges that never swap order in the
+	// beam are not inversions, yet Intersect's float crossing point can still
+	// round their (out-of-beam) intersection into it; the old full scan then
+	// counts them. Such pairs have a tiny X gap, so they are AEL-adjacent —
+	// test every neighbouring pair (O(n)) to match that behaviour.
+	for i := 0; i+1 < n; i++ {
+		add(i, i+1)
+	}
+
+	// Horizontal edges: pair with every other active edge.
+	for _, h := range horiz {
+		for j := range n {
+			if j != h {
+				add(h, j)
+			}
 		}
 	}
+
+	// Sort + dedup: a pair found twice would otherwise be dispatched twice and
+	// swap the edges back. Sorted (lower, higher) order also makes the node list
+	// deterministic and matches the old full-scan ordering.
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i][0] != pairs[j][0] {
+			return pairs[i][0] < pairs[j][0]
+		}
+		return pairs[i][1] < pairs[j][1]
+	})
+	var nodes []intersectNode
+	var prev [2]int
+	for i, pr := range pairs {
+		if i > 0 && pr == prev {
+			continue
+		}
+		prev = pr
+		s.addCrossing(pr[0], pr[1], botY, topY, &nodes)
+	}
 	return nodes
+}
+
+// enumInversionPairs merge-sorts items by exact X at topY ascending (buf is
+// scratch, len >= len(items)) and, for every pair out of or tied in top order
+// relative to the incoming botY order, reports it via add. Splitting by slice
+// index keeps every left-half edge ahead of every right-half edge in botY
+// order, so each reported pair is (botY-left, botY-right) by AEL position.
+func enumInversionPairs(items, buf []xEdge, topY fixed.Coord, add func(p, q int)) {
+	n := len(items)
+	if n < 2 {
+		return
+	}
+	mid := n / 2
+	enumInversionPairs(items[:mid], buf[:mid], topY, add)
+	enumInversionPairs(items[mid:], buf[mid:], topY, add)
+
+	i, j, k := 0, mid, 0
+	for i < mid && j < n {
+		if cmpXAtY(items[i].seg, items[j].seg, topY) < 0 {
+			buf[k] = items[i]
+			i++
+		} else {
+			// items[j] is left of (or tied with) every remaining left item at
+			// topY — each is inverted-or-tied with items[j]: a candidate.
+			for l := i; l < mid; l++ {
+				add(items[l].pos, items[j].pos)
+			}
+			buf[k] = items[j]
+			j++
+		}
+		k++
+	}
+	for i < mid {
+		buf[k] = items[i]
+		i++
+		k++
+	}
+	for j < n {
+		buf[k] = items[j]
+		j++
+		k++
+	}
+	copy(items, buf[:n])
+}
+
+// addCrossing applies the exact proper-crossing test to the AEL edges at
+// positions posA < posB and appends a node iff they properly cross strictly
+// inside the beam (botY, topY]. The beam is half-open at the bottom: a crossing
+// at botY was resolved in the previous beam (as its topY); one at topY must be
+// applied here, before topY's Top/LocalMin events (Clipper2 clamps boundary
+// crossings into the beam rather than dropping them).
+func (s *sweep) addCrossing(posA, posB int, botY, topY fixed.Coord, nodes *[]intersectNode) {
+	ei, ej := s.ael.At(posA), s.ael.At(posB)
+	res := Intersect(*ei.Seg, *ej.Seg)
+	if res.Kind != ProperCross {
+		return
+	}
+	if res.P.Y <= botY || res.P.Y > topY {
+		return
+	}
+	*nodes = append(*nodes, intersectNode{a: ei, b: ej, pt: res.P})
 }
 
 // processIntersectList applies the (Y,X-sorted) crossings bottom-up. The

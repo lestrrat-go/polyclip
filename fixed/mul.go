@@ -61,6 +61,74 @@ func (x I128) IsZero() bool {
 	return x.Hi == 0 && x.Lo == 0
 }
 
+// abs returns the magnitude of x as an unsigned 128-bit value (hi, lo).
+func (x I128) abs() (hi, lo uint64) {
+	if x.Hi >= 0 {
+		return uint64(x.Hi), x.Lo
+	}
+	lo, borrow := bits.Sub64(0, x.Lo, 0)
+	hi = uint64(0) - uint64(x.Hi) - borrow
+	return hi, lo
+}
+
+// u192 is an unsigned 192-bit integer, w0 the least-significant word.
+type u192 struct{ w0, w1, w2 uint64 }
+
+// mulU128U64 multiplies an unsigned 128-bit value (hi, lo) by m, exactly.
+func mulU128U64(hi, lo, m uint64) u192 {
+	p0hi, p0lo := bits.Mul64(lo, m)
+	p1hi, p1lo := bits.Mul64(hi, m)
+	w1, c := bits.Add64(p0hi, p1lo, 0)
+	return u192{w0: p0lo, w1: w1, w2: p1hi + c}
+}
+
+// cmp reports -1, 0, +1 for a < b, a == b, a > b.
+func (a u192) cmp(b u192) int {
+	switch {
+	case a.w2 != b.w2:
+		if a.w2 < b.w2 {
+			return -1
+		}
+		return 1
+	case a.w1 != b.w1:
+		if a.w1 < b.w1 {
+			return -1
+		}
+		return 1
+	case a.w0 != b.w0:
+		if a.w0 < b.w0 {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// CmpRationals returns the sign of na/da − nb/db, with da and db strictly
+// positive, computed exactly: sign(na·db − nb·da) in full 192-bit precision.
+// na, nb may be any [I128]; |na|·db and |nb|·da each fit in 192 bits for grid
+// coordinates up to [MaxCoordMagnitude]. Used to order two edges by their X at
+// a scanline without the rounding error of a float intercept.
+func CmpRationals(na I128, da int64, nb I128, db int64) int {
+	s1, s2 := na.Sign(), nb.Sign()
+	if s1 != s2 {
+		if s1 < s2 {
+			return -1
+		}
+		return 1
+	}
+	if s1 == 0 {
+		return 0
+	}
+	nahi, nalo := na.abs()
+	nbhi, nblo := nb.abs()
+	c := mulU128U64(nahi, nalo, uint64(db)).cmp(mulU128U64(nbhi, nblo, uint64(da)))
+	if s1 > 0 {
+		return c
+	}
+	return -c
+}
+
 // Orient2D returns the sign of the determinant
 //
 //	(q.X - p.X) * (r.Y - p.Y) - (q.Y - p.Y) * (r.X - p.X)

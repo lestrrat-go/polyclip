@@ -140,3 +140,18 @@ func TestXAtYDiagonal(t *testing.T) {
 		}
 	}
 }
+
+func TestCmpXAtY(t *testing.T) {
+	// a: (0,0)->(10,10), b: (10,0)->(0,10). They cross at (5,5).
+	a := seg(0, 0, 10, 10)
+	b := seg(10, 0, 0, 10)
+	if got := cmpXAtY(&a, &b, 2); got >= 0 {
+		t.Errorf("at y=2 a should be left of b, got %d", got)
+	}
+	if got := cmpXAtY(&a, &b, 5); got != 0 {
+		t.Errorf("at y=5 (crossing) a and b should be equal, got %d", got)
+	}
+	if got := cmpXAtY(&a, &b, 8); got <= 0 {
+		t.Errorf("at y=8 a should be right of b, got %d", got)
+	}
+}

@@ -154,3 +154,54 @@ func signFloat(x float64) int {
 		return 0
 	}
 }
+
+func TestCmpRationals(t *testing.T) {
+	i := func(v int64) I128 { return MulI64(v, 1) }
+	cases := []struct {
+		name           string
+		na, da, nb, db int64
+		want           int
+	}{
+		{"half vs third", 1, 2, 1, 3, +1},
+		{"third vs half", 1, 3, 1, 2, -1},
+		{"equal reduced", 1, 2, 2, 4, 0},
+		{"neg vs pos", -1, 2, 1, 3, -1},
+		{"both neg", -1, 2, -1, 3, -1},
+		{"both neg swapped", -1, 3, -1, 2, +1},
+		{"zero vs pos", 0, 5, 1, 7, -1},
+		{"zero vs neg", 0, 5, -1, 7, +1},
+		{"both zero", 0, 3, 0, 9, 0},
+		{"equal whole", 5, 1, 5, 1, 0},
+	}
+	for _, c := range cases {
+		if got := CmpRationals(i(c.na), c.da, i(c.nb), c.db); got != c.want {
+			t.Errorf("%s: CmpRationals(%d/%d, %d/%d) = %d want %d", c.name, c.na, c.da, c.nb, c.db, got, c.want)
+		}
+	}
+}
+
+func TestCmpRationalsLargeExact(t *testing.T) {
+	// Magnitudes where na·db and nb·da overflow int64 (~2^118 · 2^61 here), so
+	// the comparison must use the 192-bit path. This is the case a float
+	// intercept comparison gets wrong.
+	big := MulI64(int64(1)<<59, int64(1)<<59) // 2^118, fits I128
+	bigPlus1 := big.Add(I128{Lo: 1})          // 2^118 + 1
+	// big/3 vs big/2: same positive numerator, larger denom is smaller.
+	if got := CmpRationals(big, 3, big, 2); got != -1 {
+		t.Errorf("big/3 vs big/2 = %d want -1", got)
+	}
+	// (2^118+1)/7 vs 2^118/7: numerator larger by 1 -> greater.
+	if got := CmpRationals(bigPlus1, 7, big, 7); got != +1 {
+		t.Errorf("(big+1)/7 vs big/7 = %d want +1", got)
+	}
+	// Cross-denominator near-tie that float64 (52-bit mantissa) cannot resolve:
+	// (m·q)/q vs m/1 are exactly equal for m, q near the grid max.
+	m := int64(1) << 60
+	q := int64(123456789)
+	if got := CmpRationals(MulI64(m, q), q, MulI64(m, 1), 1); got != 0 {
+		t.Errorf("(m·q)/q vs m/1 = %d want 0", got)
+	}
+	if got := CmpRationals(MulI64(m, q).Add(I128{Lo: 1}), q, MulI64(m, 1), 1); got != +1 {
+		t.Errorf("(m·q+1)/q vs m/1 = %d want +1", got)
+	}
+}

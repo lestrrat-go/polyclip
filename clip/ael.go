@@ -79,6 +79,27 @@ func XAtY(seg *Segment, y fixed.Coord) fixed.Coord {
 	return fixed.Coord(math.Round(float64(seg.Bot.X) + t*dx))
 }
 
+// numXAtY returns seg.Bot.X·dy + (y − seg.Bot.Y)·dx as an exact [fixed.I128],
+// the numerator of seg's X at scanline y over the denominator dy = Top.Y −
+// Bot.Y. seg must be non-horizontal (dy > 0). For grid coordinates up to
+// [fixed.MaxCoordMagnitude] the value fits in 128 bits.
+func numXAtY(seg *Segment, y fixed.Coord) fixed.I128 {
+	dy := int64(seg.Top.Y) - int64(seg.Bot.Y)
+	dx := int64(seg.Top.X) - int64(seg.Bot.X)
+	return fixed.MulI64(int64(seg.Bot.X), dy).Add(fixed.MulI64(int64(y)-int64(seg.Bot.Y), dx))
+}
+
+// cmpXAtY reports whether non-horizontal edge a is left of (−1), at (0), or
+// right of (+1) edge b at scanline y, comparing their exact X intercepts with
+// no float rounding (unlike [XAtY]). Both denominators Top.Y − Bot.Y are
+// strictly positive for canonical non-horizontal segments.
+func cmpXAtY(a, b *Segment, y fixed.Coord) int {
+	return fixed.CmpRationals(
+		numXAtY(a, y), int64(a.Top.Y)-int64(a.Bot.Y),
+		numXAtY(b, y), int64(b.Top.Y)-int64(b.Bot.Y),
+	)
+}
+
 // slope returns the segment's dX/dY ratio in float64 form. Used as the
 // tie-breaker in the AEL ordering when two edges share the same CurrX
 // (typically when they share a vertex on the scanline). A horizontal edge

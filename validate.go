@@ -25,10 +25,9 @@ const (
 	// convention.
 	IssueWrongWinding
 	// IssueSelfIntersecting marks a ring whose edges cross each other.
-	// Self-intersecting input may still produce reasonable output from
-	// the boolean engine (Union of a self-intersecting polygon resolves
-	// it under the Vatti rules), but Offset's direct construction
-	// assumes a simple ring.
+	// Self-intersecting input can be normalised with [Simplify], which
+	// resolves it under the Vatti non-zero rule; Offset's direct
+	// construction assumes a simple ring.
 	IssueSelfIntersecting
 	// IssueHoleOutsideOuter marks a hole with at least one vertex
 	// outside its containing outer ring.

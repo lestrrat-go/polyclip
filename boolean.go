@@ -179,6 +179,46 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 	return runBooleanOp(a, b, clip.OpXor)
 }
 
+// Simplify resolves self-intersections and self-overlaps in m, returning an
+// equivalent MultiPolygon whose rings are simple (non-self-intersecting) under
+// the non-zero winding rule — the same convention the boolean ops use (CCW
+// outer, CW hole). It runs the Vatti engine over m as a single source: a
+// figure-eight splits into its two oppositely-wound loops, a ring traced twice
+// collapses to one, and a doubled-back spur cancels.
+//
+// Simplify is the correct way to clean a self-intersecting polygon — for
+// example the outward offset of a sharply concave ring. Running [Union] of m
+// with itself does NOT work: identical inputs hit an idempotency
+// short-circuit and are returned unchanged, leaving the self-intersection in
+// place. [MultiPolygon.Clean] is purely geometric and also cannot resolve it.
+//
+// Empty input returns an empty MultiPolygon. Transversal (general-position)
+// self-intersections resolve exactly. A snapped collinear degeneracy — e.g.
+// parallel coincident walls landing on a single integer grid line — is subject
+// to the same fixed-point limitation as the rest of the engine (DESIGN.md
+// §7.2); callers needing robustness there should use [Offset], which adds its
+// own multi-frame resolution.
+func Simplify(m MultiPolygon) (MultiPolygon, error) {
+	if len(m) == 0 {
+		return MultiPolygon{}, nil
+	}
+	bbox := m.BoundingBox()
+	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
+
+	segs := collectSegments(m, clip.Subject, scale)
+	segs = clip.SplitOverlaps(segs)
+	segs = clip.SplitTJunctions(segs)
+	segs = clip.DedupCoincidentEdges(segs)
+	sw := clip.Sweep(segs, clip.OpUnion)
+	if sw.Err != nil {
+		if errors.Is(sw.Err, clip.ErrUnsupportedHorizontal) {
+			return nil, fmt.Errorf("%w: %v", ErrHorizontalNotSupported, sw.Err)
+		}
+		return nil, sw.Err
+	}
+	return assembleResult(sw.Rings, scale), nil
+}
+
 // mpolyEqual reports whether two MultiPolygons are deeply equal — same
 // piece count, same outer ring vertices in the same order, same holes.
 // Used by the idempotency short-circuits in [Union] / [Intersect] /

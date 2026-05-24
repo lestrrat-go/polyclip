@@ -188,23 +188,53 @@ differential still `idU=idD=idX=0`.
 Residual: robustness leans on a multi-frame (rotated) majority vote because the
 boolean sweep mis-resolves *snapped* same-source collinear coincident edges
 (common in axis-aligned and thin-neck inward offsets). The clean fix is to make
-the sweep handle same-source coincident edges directly — the same gap as §7.2
-(`Simplify`). Until then the multi-frame vote (≈8 sweeps per topology-changing
-piece) is the cost; non-topology-change offsets keep the exact `O(n)` fast path.
+the sweep handle same-source coincident edges directly under `FillPositive` —
+the in-sweep gap detailed in §7.2. Until then the multi-frame vote (≈8 sweeps
+per topology-changing piece) is the cost; non-topology-change offsets keep the
+exact `O(n)` fast path.
 
-### 7.2 No public way to resolve a self-intersecting polygon
+### 7.2 Public `Simplify` — DONE; in-sweep coincident fix remains
 
-Several doc comments advise "run `Union` of `m` with itself first" to clean
-self-intersection. That advice does not work: `Union(A, A)` hits the
-`mpolyEqual` idempotency short-circuit (`boolean.go`) and returns the input
-unchanged — the self-intersection survives. `Clean` is purely geometric and
-cannot resolve it either. Outward offset of a concave ring can self-intersect,
-so there is currently no entry point that cleans it.
+**Public entry point (DONE).** `Simplify(m MultiPolygon)` (`boolean.go`) runs
+the Vatti engine over `m` as a single source (`clip.Sweep`, non-zero fill),
+bypassing the `mpolyEqual` idempotency short-circuit that made the old "run
+`Union` of `m` with itself" advice a no-op. A figure-eight splits into its two
+oppositely-wound loops, a doubly-traced ring collapses to one, a doubled-back
+spur cancels. Transversal (general-position) self-intersections resolve
+exactly; the snapped collinear degeneracy below is the residual limit. The
+misleading doc comments in `polygon.go` (`ExPolygon`, `Clean`) and `validate.go`
+(`IssueSelfIntersecting`) now point at `Simplify`. Tests: `simplify_test.go`.
 
-Resolution options: (a) add a real `Simplify(m MultiPolygon)` that runs the
-engine without the short-circuit; and/or (b) correct the misleading doc
-comments in `polygon.go` (`Contains`, `Clean`) and `validate.go` that
-recommend self-union.
+**In-sweep same-source coincident edges (REMAINS — the deeper root cause).**
+The boolean sweep still mis-resolves a *single* self-overlapping ring with
+same-source collinear coincident edges (axis-aligned and thin-neck inward
+offsets produce them; it is why §7.1's offset self-union needs the multi-frame
+rotated majority vote). The minimal repro is the dumbbell offset by `-2`: its
+raw offset ring traces the left-pad right wall twice over `y∈[4,6]`, so
+`SplitOverlaps` makes a doubled coincident edge there. Investigation
+(2026-05-24) pinned the mechanism precisely:
+
+- A self-overlapping ring's winding genuinely reaches 2 across a doubled wall;
+  the pad interior is `+1`, the dropped neck fold `−1`, and the doubled wall is
+  a `+1 → 0 → −1` step represented by two coincident unit edges. So the wall's
+  true boundary edge has `WindSelf == 0` on its right (the infinitesimal sliver),
+  not `1`.
+- `DedupCoincidentEdges` collapses the doubled edge to one, destroying the `+1`
+  count the second pass carries — making winding locally inconsistent (the
+  sweep then emits 3 spurious pieces / area 40 instead of 2 pads / area 72).
+  Keeping both edges instead is necessary but not sufficient.
+- `FillPositive`'s contributing test is `WindSelf == 1` (exact), which wrongly
+  drops the `+1/0` boundary edge; the correct rule is a winding-`>0` *boundary*
+  test, `(WindSelf > 0) != (WindSelf - WindDx > 0)`.
+- But even with both fixes, the sweep's output machinery (hot-edge tracking,
+  `AddLocalMinPoly` front/back, the §12.11 coincident apparatus) and the
+  incremental winding update in `poly_ops.go` are built around NonZero's
+  `==1`/reflection invariants. Patching the contributing test and the
+  incremental step in isolation collapses positive-fill output to empty —
+  confirming this is a **structural rework of the sweep's winding core, gated on
+  `FillPositive` so the boolean (`FillNonZero`) differential stays clean**, not a
+  localized patch. Deferred to its own session; the multi-frame vote (§7.1)
+  remains the working stopgap.
 
 ### 7.3 Performance unverified at slicer scale
 

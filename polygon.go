@@ -17,8 +17,8 @@ type Polygon []Point
 // union of the holes' interiors as the represented region.
 //
 // Holes must be fully contained in Outer and must not overlap each other.
-// This invariant is not checked at construction; pass an [ExPolygon] through
-// a boolean operation (e.g. [Union] with itself) if you need it normalized.
+// This invariant is not checked at construction; pass an [ExPolygon] (wrapped
+// in a [MultiPolygon]) through [Simplify] if you need it normalized.
 type ExPolygon struct {
 	Outer Polygon
 	Holes []Polygon
@@ -227,8 +227,7 @@ func pointOnSegmentEpsilon(a, b Point) float64 {
 // vertexTol and minArea must be non-negative; pass zero to disable
 // either check (with vertexTol=0 only exact duplicates are merged).
 // Clean is purely geometric — it does not run the boolean engine and
-// cannot resolve self-intersection. For that, run [Union] of m with
-// itself first.
+// cannot resolve self-intersection. For that, use [Simplify].
 func (m MultiPolygon) Clean(vertexTol, minArea float64) MultiPolygon {
 	out := make(MultiPolygon, 0, len(m))
 	for _, ex := range m {

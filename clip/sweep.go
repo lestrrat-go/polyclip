@@ -22,10 +22,19 @@ import (
 // reconstruct ring topology; that fallback strictly rejects mid-bound
 // horizontals and surfaces [ErrUnsupportedHorizontal] via SweepResult.Err.
 func Sweep(segs []Segment, op Operation) *SweepResult {
+	return SweepFill(segs, op, FillNonZero)
+}
+
+// SweepFill is [Sweep] with an explicit fill rule. The boolean ops use
+// [Sweep] (FillNonZero); the offset self-union (offset.go) uses
+// [FillPositive] to drop the negatively-wound overshoot folds of a
+// self-intersecting raw offset ring (DESIGN.md §7.1).
+func SweepFill(segs []Segment, op Operation, fill FillRule) *SweepResult {
 	s := newSweep(segs, op)
 	if s.err != nil {
 		return &SweepResult{Err: s.err}
 	}
+	s.ael.Fill = fill
 	s.run()
 	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings()}
 }
@@ -1053,7 +1062,7 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		if farX < maxPt.X || rightwardOK {
 			oldWO := coupled.WindOther
 			coupled.WindOther += ae.WindDx
-			flipped := !isContributing(s.op, coupled)
+			flipped := !isContributing(s.ael.Fill, s.op, coupled)
 			if flipped {
 				if ae.IsHotEdge() {
 					AddOutPt(ae, maxPt)

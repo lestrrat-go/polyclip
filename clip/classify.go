@@ -1,5 +1,25 @@
 package clip
 
+// FillRule selects which polygon-fill convention decides whether a winding
+// count is "inside". The boolean ops always use [FillNonZero]; [FillPositive]
+// / [FillNegative] are used only by the single-source self-union that cleans a
+// self-intersecting offset ring (offset.go), where the sign of a sub-loop's
+// winding distinguishes the kept region from a spurious overshoot fold.
+type FillRule int
+
+const (
+	// FillNonZero fills a region whose winding count is non-zero (abs == 1 on
+	// an outer boundary edge). The only rule used by the boolean ops.
+	FillNonZero FillRule = iota
+	// FillPositive fills a region with strictly positive winding; an outer
+	// boundary edge has WindSelf == +1. Negative (clockwise) sub-loops are
+	// dropped.
+	FillPositive
+	// FillNegative fills a region with strictly negative winding; an outer
+	// boundary edge has WindSelf == -1.
+	FillNegative
+)
+
 // Operation is the boolean set operation requested by the caller.
 type Operation int
 
@@ -75,7 +95,7 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 	}
 	ae.WindOther = other
 
-	ae.Contributing = isContributing(op, ae)
+	ae.Contributing = isContributing(ael.Fill, op, ae)
 }
 
 // signedContribution returns the AEL contribution of seg per the convention
@@ -102,12 +122,26 @@ func signedContribution(seg *Segment) int {
 // isContributing reports whether ae bounds an output region for op, given its
 // current WindSelf/WindOther. This transcribes Clipper2's IsContributingClosed
 // (engine.cpp:908) for the non-zero fill rule: the edge must be on the outer
-// boundary of its own source (abs(WindSelf) == 1), and the other source's
-// count must satisfy the operation's inside/outside test. ae must already have
+// boundary of its own source (the WindSelf test selected by fill — abs==1 for
+// NonZero, ==+1 for Positive, ==-1 for Negative), and the other source's count
+// must satisfy the operation's inside/outside test. The WindOther test stays
+// NonZero because Positive/Negative are used only by the single-source
+// self-union where WindOther is identically zero. ae must already have
 // WindSelf and WindOther set.
-func isContributing(op Operation, ae *ActiveEdge) bool {
-	if absInt(ae.WindSelf) != 1 {
-		return false
+func isContributing(fill FillRule, op Operation, ae *ActiveEdge) bool {
+	switch fill {
+	case FillPositive:
+		if ae.WindSelf != 1 {
+			return false
+		}
+	case FillNegative:
+		if ae.WindSelf != -1 {
+			return false
+		}
+	default: // FillNonZero
+		if absInt(ae.WindSelf) != 1 {
+			return false
+		}
 	}
 	switch op {
 	case OpUnion:

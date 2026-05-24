@@ -106,11 +106,15 @@ Offset walks each input ring once and emits an offset ring directly, vertex by v
    - **Wedge** (`cross·d > 0`): convex offset corner; emit a join (miter apex, square chamfer, or tessellated arc) per `OffsetOptions.Join`.
    - **Overlap** (`cross·d ≤ 0`): the offset edges cross; emit the miter apex (for antiparallel normals, fall back to emitting `a` and `c`).
 
-Holes are offset by `-d`. For `d < 0` the apex formula can produce an "inside-out" ring when `|d|` overshoots the inradius; every output vertex must satisfy `(V − ring[i])·n_i ≤ d` for every edge `i` (tolerance `max(ArcTol, |d|·1e-6)`), and a ring failing any constraint is discarded. If the whole result collapses, `Offset` returns `ErrOffsetEmpty`.
+Holes are offset by `-d`. The raw ring is emitted unconditionally — when an inward offset overshoots the inradius it self-intersects (a pinched neck, a closing notch, an inside-out collapse) rather than being rejected.
 
-Direct ring construction (rather than Clipper2's "fat-edge polygons → union") avoids dense diff-source coincident-edge pile-ups, is `O(n)`, and gives exact convex output. Trade-off: topology change under inward offset (a U-shape splitting in two, a deep notch closing) is not handled — the ring is accepted or rejected whole. That is a follow-up; it would re-introduce a per-ring boolean self-union.
+**Topology resolution (§7.1).** Per input `ExPolygon`, the raw offset rings (outer by `d`, holes by `-d`) are checked for self/mutual intersection (`ringsIntersect`). If none, topology is unchanged and the rings are returned directly (exact, no engine pass). If they intersect, the piece is re-resolved by a **positive-fill self-union**: feed the rings to the scanline engine (`clip.SweepFill` with `clip.FillPositive`), which keeps exactly the strictly-positively-wound region — the outer winds `+1` inside, CW holes `−1` — so a pinched ring splits into islands and the negatively-wound overshoot folds drop. An inward result piece is additionally validated against the erosion definition (`insetDeepEnough`: an interior point must be ≥ `|d|` from the input boundary), which rejects the convex "inside-out" collapse whose ring is simple and positively oriented yet sits where the offset is empty. If everything collapses, `Offset` returns `ErrOffsetEmpty`.
 
-Implementation in `offset.go`: `Offset` (orchestration, hole sign), `offsetRing` (per-ring walk + overshoot check), `emitVertex` (wedge/overlap dispatch), `appendMiter`/`appendMiterApex`/`appendSquareJoin`/`appendRoundJoin`.
+**Degeneracy robustness.** The sweep is exact on transversal self-intersections but resolves a *snapped* degenerate configuration (same-source collinear coincident edges from parallel walls a multiple of `2|d|` apart, or a near-pinch crossing) differently — sometimes wrongly — per coordinate frame. Axis-aligned and thin-neck inward offsets hit this. So the self-union is run in several rotated frames (`selfUnionResolveAngles`) and the **most-agreed-upon** result (same piece count and area, within 2%) is kept; the correct resolution recurs across frames while each degenerate misresolution is scattered. Angle 0 (no rotation, exact coordinates) is preferred within the agreeing majority, so non-degenerate offsets keep exact output. (The boolean engine's own same-source coincident-edge gap is the deeper root cause; see §7.2.)
+
+Direct ring construction (rather than Clipper2's "fat-edge polygons → union") avoids dense diff-source coincident-edge pile-ups and is `O(n)` for the common no-topology-change case; only intersecting pieces pay for the multi-frame self-union.
+
+Implementation in `offset.go`: `Offset` (orchestration, hole sign, inset validation), `offsetRing` (per-ring walk), `emitVertex` (wedge/overlap dispatch), `appendMiter`/`appendMiterApex`/`appendSquareJoin`/`appendRoundJoin`, `resolveOffsetPiece` (fast path vs self-union), `selfUnionPositive`/`selfUnionAt` (multi-frame positive-fill resolution), `ringsIntersect`, `insetDeepEnough`.
 
 ### 4.4 Complexity
 
@@ -170,22 +174,23 @@ across the random, large, degenerate, and holed differential buckets
 known gaps between current state and a complete drop-in for `makislicer`,
 roughly in priority order.
 
-### 7.1 Offset: inward-offset topology changes (blocking for shell generation)
+### 7.1 Offset: inward-offset topology changes — DONE
 
-`Offset` builds each ring directly and accepts or rejects it **whole**
-(§4.3, `inwardRingValid` in `offset.go`). When an inward offset pinches a
-ring into two — a thin neck, web, or notch closing — the entire ring fails
-the overshoot check and the piece is dropped. Verified: a dumbbell (two pads
-joined by a thin neck) offset inward past the neck width returns
-`ErrOffsetEmpty` and loses **both** pads, rather than yielding the two
-islands it should.
+`Offset` now re-resolves topology changes via a per-piece positive-fill
+self-union (§4.3). A dumbbell offset inward past its neck yields the two
+island pads; a U-shape / notch that closes resolves to the correct connected
+shape; an over-shrunk convex ring collapses to empty. Validated by
+`TestOffsetDumbbellSplits` (eight orientations), `TestOffsetUNotchCloses`, and
+`TestOffsetInwardErosionOracle` (a Monte-Carlo erosion oracle over random
+concave polygons), with the existing offset suite unchanged and the boolean
+differential still `idU=idD=idX=0`.
 
-This is the single most important gap: shell/perimeter generation is repeated
-inward offset, and most real parts have necks. The fix is the Clipper2
-approach — build fat-edge polygons per edge and `Union` them — or an internal
-self-union of the raw offset ring to re-resolve topology, replacing the
-whole-ring accept/reject. Re-introduces a per-ring boolean self-union (the
-trade-off flagged in §4.3).
+Residual: robustness leans on a multi-frame (rotated) majority vote because the
+boolean sweep mis-resolves *snapped* same-source collinear coincident edges
+(common in axis-aligned and thin-neck inward offsets). The clean fix is to make
+the sweep handle same-source coincident edges directly — the same gap as §7.2
+(`Simplify`). Until then the multi-frame vote (≈8 sweeps per topology-changing
+piece) is the cost; non-topology-change offsets keep the exact `O(n)` fast path.
 
 ### 7.2 No public way to resolve a self-intersecting polygon
 

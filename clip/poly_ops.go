@@ -64,8 +64,8 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 
 	// Refresh the Contributing flag for both edges' new winding state, so
 	// later events (closeBound, cursor advance) see consistent classification.
-	e1.Contributing = isContributing(op, e1)
-	e2.Contributing = isContributing(op, e2)
+	e1.Contributing = isContributing(ael.Fill, op, e1)
+	e2.Contributing = isContributing(ael.Fill, op, e2)
 
 	// Dispatch BEFORE swapping AEL positions: Clipper2 runs IntersectEdges with
 	// the AEL still in pre-crossing order and only swaps afterwards

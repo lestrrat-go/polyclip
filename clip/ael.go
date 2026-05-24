@@ -103,6 +103,11 @@ type AEL struct {
 	edges         []*ActiveEdge
 	rings         []*OutRec
 	nextOutRecIdx int
+
+	// Fill is the fill rule used to classify whether an edge is contributing
+	// (see [isContributing]). Zero value [FillNonZero] is the boolean-op
+	// default; the offset self-union sets [FillPositive].
+	Fill FillRule
 }
 
 // NewAEL returns an empty AEL.

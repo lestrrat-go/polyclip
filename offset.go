@@ -3,6 +3,9 @@ package polyclip
 import (
 	"errors"
 	"math"
+
+	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/lestrrat-go/polyclip/fixed"
 )
 
 // JoinType selects the geometry used at convex corners of an offset.
@@ -53,11 +56,18 @@ var ErrOffsetEmpty = errors.New("polyclip: offset produced empty result")
 // a join (miter/round/square wedge filler, when offset edges leave a
 // gap on the offset side, e.g. outward offset of a convex corner).
 //
+// Topology changes are handled (DESIGN.md §7.1): when an inward offset
+// pinches a ring in two (a dumbbell past its neck) or closes a notch, or
+// when an outward offset of a concave ring self-intersects, the raw offset
+// ring is re-resolved by a positive-fill self-union that splits or merges it
+// into the correct simple pieces. A piece is emitted only where the offset
+// region is non-empty; an over-shrunk piece collapses and is dropped, and if
+// everything collapses Offset returns [ErrOffsetEmpty].
+//
 // Hole orientation: outer rings are CCW, holes are CW (the standard
 // polyclip convention). A positive d inflates outer rings and shrinks
-// holes; a negative d does the opposite. When a hole closes up under
-// inward offset (its width drops below 2·|d|) it is dropped; when an
-// outer ring vanishes the whole piece is dropped.
+// holes; a negative d does the opposite. A hole that closes up under
+// inward offset is absorbed; an outer ring that vanishes drops its piece.
 //
 // Use [OffsetOptions.Join] to pick the convex-corner geometry; see
 // [JoinType] for choices. Default join is [JoinMiter] with miter
@@ -78,29 +88,39 @@ func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error)
 
 	result := MultiPolygon{}
 	for _, ex := range m {
-		// Outer ring: offset by d. Right-hand normal of a CCW ring points
-		// outward, so positive d grows the ring outward.
-		outer := offsetRing(ex.Outer, d, opts)
-		if !validOffsetRing(outer, true) {
-			// Outer collapsed (inward offset > smallest half-extent) — drop
-			// the whole piece.
+		// Build the raw offset rings for this piece: the outer offset by d,
+		// each hole by -d. Right-hand normal of a CCW ring points outward, so
+		// positive d grows the outer outward; a CW hole offset by -d grows the
+		// printable region by shrinking the hole.
+		//
+		// The rings are NOT validated or rejected individually here — an
+		// inward offset that overshoots produces a self-intersecting ring, and
+		// resolveOffsetPiece re-resolves the topology (splitting a pinched ring
+		// into islands, dropping inside-out collapses) via a positive-fill
+		// self-union (DESIGN.md §7.1).
+		rings := make([]Polygon, 0, 1+len(ex.Holes))
+		if outer := offsetRing(ex.Outer, d, opts); len(outer) >= 3 {
+			rings = append(rings, outer)
+		}
+		if len(rings) == 0 {
 			continue
 		}
-		piece := ExPolygon{Outer: outer}
-		// Holes: a CW hole walked CW has its right-hand normal pointing
-		// INTO the hole. Offsetting the hole boundary by +d (with the same
-		// formula) moves it INTO the hole — which GROWS the printable
-		// region. To grow the printable region for d>0 we want holes to
-		// shrink, so offset holes by -d.
 		for _, h := range ex.Holes {
-			offHole := offsetRing(h, -d, opts)
-			if !validOffsetRing(offHole, false) {
-				// Hole collapsed — drop it (the printable region absorbs it).
+			if oh := offsetRing(h, -d, opts); len(oh) >= 3 {
+				rings = append(rings, oh)
+			}
+		}
+		for _, piece := range resolveOffsetPiece(rings) {
+			// For inward offset, drop any piece that is not genuinely ≥|d|
+			// inside the original — this catches the convex "inside-out"
+			// collapse, whose offset ring is simple and positively oriented
+			// yet sits where the offset region is empty (the erosion
+			// definition: a result point must be ≥|d| from the input boundary).
+			if d < 0 && !insetDeepEnough(piece, ex, math.Abs(d), opts.ArcTol) {
 				continue
 			}
-			piece.Holes = append(piece.Holes, offHole)
+			result = append(result, piece)
 		}
-		result = append(result, piece)
 	}
 	if len(result) == 0 {
 		return nil, ErrOffsetEmpty
@@ -108,20 +128,76 @@ func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error)
 	return result, nil
 }
 
-// validOffsetRing reports whether an offset ring kept its expected
-// orientation. An outer ring is valid only if CCW (positive signed
-// area); a hole only if CW (negative signed area). A ring that flipped
-// orientation collapsed under inward offset and should be discarded.
-// Length < 3 is also invalid.
-func validOffsetRing(ring Polygon, outer bool) bool {
-	if len(ring) < 3 {
+// insetDeepEnough reports whether piece lies at least dist inside the original
+// ExPolygon orig — i.e. an interior point of piece is ≥ dist from every edge
+// of orig (its outer and holes). This is the erosion criterion used to reject
+// the inside-out collapse of an over-shrunk convex ring. The tolerance absorbs
+// round-join chord deviation (chords sit up to arcTol inside the true arc).
+func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool {
+	pt, ok := interiorPoint(piece.Outer)
+	if !ok {
 		return false
 	}
-	area := ring.SignedArea()
-	if outer {
-		return area > 0
+	tol := arcTol + dist*1e-6
+	min := math.Inf(1)
+	scan := func(ring Polygon) {
+		n := len(ring)
+		for i := range n {
+			if e := pointSegDist(pt, ring[i], ring[(i+1)%n]); e < min {
+				min = e
+			}
+		}
 	}
-	return area < 0
+	scan(orig.Outer)
+	for _, h := range orig.Holes {
+		scan(h)
+	}
+	return min >= dist-tol
+}
+
+// pointSegDist returns the Euclidean distance from p to segment ab.
+func pointSegDist(p, a, b Point) float64 {
+	dx, dy := b.X-a.X, b.Y-a.Y
+	l2 := dx*dx + dy*dy
+	if l2 == 0 {
+		return math.Hypot(p.X-a.X, p.Y-a.Y)
+	}
+	t := ((p.X-a.X)*dx + (p.Y-a.Y)*dy) / l2
+	t = math.Max(0, math.Min(1, t))
+	return math.Hypot(p.X-(a.X+t*dx), p.Y-(a.Y+t*dy))
+}
+
+// resolveOffsetPiece turns the raw offset rings of one input ExPolygon (the
+// offset outer first, then the offset holes) into clean, simple output
+// pieces. The outer ring is CCW (positive winding inside) and the hole rings
+// are CW (negative winding inside), so the printable region is exactly where
+// the combined winding is strictly positive.
+//
+// When none of the rings self-intersect or cross each other the offset did
+// not change topology: the rings are returned directly as one ExPolygon
+// (exact, no engine pass), with the outer dropped if it inverted (an inward
+// offset past the inradius). Otherwise the rings are re-resolved by a
+// positive-fill self-union (DESIGN.md §7.1): the sweep splits a pinched ring
+// into islands and drops the negatively-wound overshoot folds.
+func resolveOffsetPiece(rings []Polygon) MultiPolygon {
+	if len(rings) == 0 {
+		return nil
+	}
+	if !ringsIntersect(rings) {
+		// Topology unchanged. The outer (rings[0]) is valid only if it kept
+		// CCW orientation; an inverted outer collapsed to nothing.
+		if rings[0].SignedArea() <= 0 {
+			return nil
+		}
+		piece := ExPolygon{Outer: rings[0]}
+		for _, h := range rings[1:] {
+			if h.SignedArea() < 0 { // a real hole stayed CW
+				piece.Holes = append(piece.Holes, h)
+			}
+		}
+		return MultiPolygon{piece}
+	}
+	return selfUnionPositive(rings)
 }
 
 // offsetRing walks ring once and emits a new polygon offset by d. With
@@ -181,47 +257,13 @@ func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
 		nextN := normals[i]
 		emitVertex(&out, v, prevN, nextN, d, opts)
 	}
-	// For inward offset (d<0), detect overshoot: the offset region is the
-	// intersection of half-planes (V - ring[i]) · normals[i] ≤ d for every
-	// input edge i. If any output vertex violates any of these half-plane
-	// constraints by more than the tessellation tolerance, the offset has
-	// overshot the inradius and the ring is invalid (geometrically
-	// collapsed even if its signed area is still positive — see the
-	// inside-out 2x2 result for d=-6 on a 10x10 square).
-	if d < 0 && !inwardRingValid(out, ring, normals, d, opts.ArcTol) {
-		return nil
-	}
+	// The raw ring is returned as-is, even when an inward offset overshoots
+	// the inradius and the ring self-intersects (a pinched neck, a collapsed
+	// notch, an inside-out collapse). Topology is re-resolved by the
+	// self-union in [resolveOffsetPiece] (DESIGN.md §7.1) rather than by a
+	// whole-ring accept/reject, which would drop both islands of a dumbbell
+	// that splits in two.
 	return out
-}
-
-// inwardRingValid returns true when every output vertex satisfies every
-// input-edge inward half-plane constraint, modulo a tolerance that
-// absorbs chord-deviation noise from round joins. Used only for d<0;
-// for d>0 the offset never collapses.
-//
-// Tolerance: max(arcTol, |d|·1e-6). When the input itself came from a
-// round-joined outward offset, its arc chords lie up to arcTol inside
-// the true arc, so a valid inward apex can appear to violate a chord-
-// edge constraint by up to arcTol. The 1e-6·|d| floor handles
-// non-arc inputs where only floating-point noise is at play.
-func inwardRingValid(out Polygon, ring Polygon, normals []Point, d, arcTol float64) bool {
-	tol := math.Abs(d) * 1e-6
-	if arcTol > tol {
-		tol = arcTol
-	}
-	for _, v := range out {
-		for i, p := range ring {
-			n := normals[i]
-			if n == (Point{}) {
-				continue // degenerate edge — no constraint.
-			}
-			dot := (v.X-p.X)*n.X + (v.Y-p.Y)*n.Y
-			if dot > d+tol {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // emitVertex appends the offset-ring points for input vertex v with
@@ -354,6 +396,278 @@ func appendRoundJoin(out *Polygon, v, a, c Point, d, arcTol float64) {
 		*out = append(*out, Point{X: v.X + r*math.Cos(ang), Y: v.Y + r*math.Sin(ang)})
 	}
 	*out = append(*out, c)
+}
+
+// ringsIntersect reports whether any edge of the offset rings properly
+// crosses or collinearly overlaps another (ignoring the shared endpoint of
+// consecutive edges within a ring). True means the offset changed topology —
+// a pinched neck, a closing notch, an inside-out collapse, or two rings that
+// now touch — and the piece must be re-resolved by [selfUnionPositive].
+// Offset rings are short, so the O(n²) edge-pair scan is cheap.
+func ringsIntersect(rings []Polygon) bool {
+	type edge struct {
+		a, b Point
+		ring int
+		idx  int
+	}
+	var edges []edge
+	for r, ring := range rings {
+		n := len(ring)
+		for i := range n {
+			edges = append(edges, edge{a: ring[i], b: ring[(i+1)%n], ring: r, idx: i})
+		}
+	}
+	for i := range edges {
+		for j := i + 1; j < len(edges); j++ {
+			ei, ej := edges[i], edges[j]
+			// Skip consecutive edges of the same ring (they legitimately share
+			// one endpoint); any other shared geometry is a real intersection.
+			if ei.ring == ej.ring {
+				n := len(rings[ei.ring])
+				if ei.idx == (ej.idx+1)%n || ej.idx == (ei.idx+1)%n {
+					continue
+				}
+			}
+			if segmentsProperlyIntersect(ei.a, ei.b, ej.a, ej.b) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// segmentsProperlyIntersect reports whether segments p1p2 and p3p4 share any
+// point other than a single shared endpoint — i.e. they cross transversally
+// or overlap collinearly, or one endpoint lies in the open interior of the
+// other segment. A bare touch at a single common endpoint returns false.
+func segmentsProperlyIntersect(p1, p2, p3, p4 Point) bool {
+	d1 := orient(p3, p4, p1)
+	d2 := orient(p3, p4, p2)
+	d3 := orient(p1, p2, p3)
+	d4 := orient(p1, p2, p4)
+	if ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0)) &&
+		d1 != 0 && d2 != 0 && d3 != 0 && d4 != 0 {
+		return true // transversal crossing
+	}
+	// Collinear / endpoint-on-segment cases.
+	if d1 == 0 && onSegmentInterior(p3, p4, p1) {
+		return true
+	}
+	if d2 == 0 && onSegmentInterior(p3, p4, p2) {
+		return true
+	}
+	if d3 == 0 && onSegmentInterior(p1, p2, p3) {
+		return true
+	}
+	if d4 == 0 && onSegmentInterior(p1, p2, p4) {
+		return true
+	}
+	return false
+}
+
+// orient returns the sign of the cross product (b-a)×(c-a): >0 left turn, <0
+// right turn, 0 collinear.
+func orient(a, b, c Point) float64 {
+	return (b.X-a.X)*(c.Y-a.Y) - (b.Y-a.Y)*(c.X-a.X)
+}
+
+// onSegmentInterior reports whether collinear point p lies strictly inside
+// segment ab (not at either endpoint).
+func onSegmentInterior(a, b, p Point) bool {
+	if p == a || p == b {
+		return false
+	}
+	return p.X >= math.Min(a.X, b.X) && p.X <= math.Max(a.X, b.X) &&
+		p.Y >= math.Min(a.Y, b.Y) && p.Y <= math.Max(a.Y, b.Y)
+}
+
+// selfUnionResolveAngles lists the frame rotations tried by [selfUnionPositive].
+// 0 first: a non-degenerate offset resolves exactly with no rotation, so its
+// output vertices stay on their true positions. The oblique angles handle the
+// degenerate geometry an axis-aligned (or thin-neck) inward offset produces:
+// parallel walls a multiple of 2|d| apart, plus near-pinch self-crossings, snap
+// to fragile configurations the boolean sweep resolves differently per frame.
+// Rotating to an oblique frame snaps those features to distinct grid lines so
+// the self-intersections become clean transversal crossings. The angles are
+// spread across (0, π/2) avoiding axis (0, π/2) and the 45° diagonal (π/4),
+// which themselves induce coincidences.
+var selfUnionResolveAngles = []float64{
+	0, 0.21, 0.43, 0.61, 0.92, 1.13, 1.32, 1.49,
+}
+
+// selfUnionPositive resolves a set of raw offset rings into clean output pieces
+// via the scanline engine with the positive fill rule (DESIGN.md §7.1): the
+// outer ring winds positively inside, hole rings negatively, so the printable
+// region is exactly where the combined winding is strictly positive.
+//
+// The sweep is exact on transversal self-intersections but resolves a
+// snapped degenerate configuration (same-source collinear coincident edges, or
+// a near-pinch crossing) differently — and sometimes wrongly — depending on the
+// coordinate frame. Such degeneracies are common in inward offsets of
+// axis-aligned or thin-neck features. To be robust, the resolution is attempted
+// in several rotated frames ([selfUnionResolveAngles]) and the most-agreed-upon
+// result is chosen: the correct resolution recurs across frames (same piece
+// count and area), while each degenerate misresolution is scattered. Among the
+// agreeing majority the un-rotated (angle 0) result is preferred so a
+// non-degenerate offset keeps its exact coordinates. Returns nil if every
+// attempt fails or the region is empty.
+func selfUnionPositive(rings []Polygon) MultiPolygon {
+	bb := bboxOf(rings)
+	cx, cy := (bb.Min.X+bb.Max.X)/2, (bb.Min.Y+bb.Max.Y)/2
+
+	type cand struct {
+		res    MultiPolygon
+		area   float64
+		pieces int
+		zero   bool // produced at angle 0 (exact coordinates)
+	}
+	var cands []cand
+	for _, ang := range selfUnionResolveAngles {
+		res := selfUnionAt(rings, cx, cy, ang)
+		if res == nil {
+			continue
+		}
+		cands = append(cands, cand{res: res, area: res.Area(), pieces: len(res), zero: ang == 0})
+	}
+	if len(cands) == 0 {
+		return nil
+	}
+	// Agreement score: number of candidates with the same piece count and an
+	// area within 2% (degenerate misresolutions rarely cluster).
+	agree := func(a, b cand) bool {
+		if a.pieces != b.pieces {
+			return false
+		}
+		den := math.Max(a.area, b.area)
+		if den == 0 {
+			return true
+		}
+		return math.Abs(a.area-b.area)/den <= 0.02
+	}
+	best := 0
+	bestScore := -1
+	for i := range cands {
+		score := 0
+		for j := range cands {
+			if agree(cands[i], cands[j]) {
+				score++
+			}
+		}
+		switch {
+		case score > bestScore:
+			best, bestScore = i, score
+		case score == bestScore && cands[i].zero && !cands[best].zero:
+			best = i // prefer exact (un-rotated) coordinates within the majority
+		}
+	}
+	return cands[best].res
+}
+
+// selfUnionAt rotates rings about (cx,cy) by ang, runs the positive-fill
+// self-union, and rotates the result back. ang == 0 skips both rotations so
+// the output coordinates are exactly the input ones.
+func selfUnionAt(rings []Polygon, cx, cy, ang float64) MultiPolygon {
+	work := rings
+	ca, sa := 1.0, 0.0
+	if ang != 0 {
+		ca, sa = math.Cos(ang), math.Sin(ang)
+		work = make([]Polygon, len(rings))
+		for i, r := range rings {
+			rr := make(Polygon, len(r))
+			for j, p := range r {
+				rr[j] = rotateAbout(p, cx, cy, ca, sa)
+			}
+			work[i] = rr
+		}
+	}
+
+	bb := bboxOf(work)
+	scale := fixed.ScaleFromBBox(bb.Min.X, bb.Min.Y, bb.Max.X, bb.Max.Y)
+	var segs []clip.Segment
+	for _, r := range work {
+		appendOffsetRingSegs(&segs, r, scale)
+	}
+	segs = clip.SplitOverlaps(segs)
+	segs = clip.SplitTJunctions(segs)
+	segs = clip.DedupCoincidentEdges(segs)
+	sw := clip.SweepFill(segs, clip.OpUnion, clip.FillPositive)
+	if sw.Err != nil {
+		return nil
+	}
+	res := assembleResult(sw.Rings, scale)
+	if ang != 0 {
+		for _, ex := range res {
+			for i, p := range ex.Outer {
+				ex.Outer[i] = rotateAbout(p, cx, cy, ca, -sa)
+			}
+			for _, h := range ex.Holes {
+				for i, p := range h {
+					h[i] = rotateAbout(p, cx, cy, ca, -sa)
+				}
+			}
+		}
+	}
+	return res
+}
+
+// rotateAbout rotates p about (cx,cy) by the rotation with cosine ca and sine
+// sa (negate sa to invert).
+func rotateAbout(p Point, cx, cy, ca, sa float64) Point {
+	dx, dy := p.X-cx, p.Y-cy
+	return Point{X: cx + dx*ca - dy*sa, Y: cy + dx*sa + dy*ca}
+}
+
+// bboxOf returns the bounding box of all vertices across rings.
+func bboxOf(rings []Polygon) BBox {
+	var bb BBox
+	first := true
+	for _, r := range rings {
+		for _, p := range r {
+			if first {
+				bb = BBox{Min: p, Max: p}
+				first = false
+				continue
+			}
+			bb.Min.X = math.Min(bb.Min.X, p.X)
+			bb.Min.Y = math.Min(bb.Min.Y, p.Y)
+			bb.Max.X = math.Max(bb.Max.X, p.X)
+			bb.Max.Y = math.Max(bb.Max.Y, p.Y)
+		}
+	}
+	return bb
+}
+
+// appendOffsetRingSegs snaps ring to the grid and emits its edges as subject
+// segments in input order — unlike boolean.appendRing it does NOT normalize
+// orientation, since the offset self-union relies on the natural traversal
+// direction to set the winding sign.
+func appendOffsetRingSegs(dst *[]clip.Segment, ring Polygon, scale fixed.Scale) {
+	n := len(ring)
+	if n < 3 {
+		return
+	}
+	pts := make([]fixed.Point, 0, n)
+	for i := range n {
+		p := scale.Snap(ring[i].X, ring[i].Y)
+		if len(pts) > 0 && pts[len(pts)-1] == p {
+			continue
+		}
+		pts = append(pts, p)
+	}
+	for len(pts) >= 2 && pts[0] == pts[len(pts)-1] {
+		pts = pts[:len(pts)-1]
+	}
+	pts = simplifyCollinearRing(pts)
+	m := len(pts)
+	if m < 3 {
+		return
+	}
+	for i := range m {
+		seg := clip.NewSegment(pts[i], pts[(i+1)%m], clip.Subject)
+		if !seg.Degenerate() {
+			*dst = append(*dst, seg)
+		}
+	}
 }
 
 func cloneMulti(m MultiPolygon) MultiPolygon {

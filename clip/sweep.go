@@ -1404,6 +1404,20 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		s.ael.Remove(ae)
 		Classify(s.ael, coupled, s.op)
 		contribAbove := coupled.Contributing
+		// When coupled reaches maxPt along a coincident HORIZONTAL (rather than a
+		// column through-vertex), the scanline reclassify above is blind to the
+		// region above maxPt: ae's source can have its OTHER bound still in the AEL
+		// at this scanline (it tops out here too, at a different X/event), so
+		// coupled's WindOther still counts that source as present and contribAbove
+		// is a false positive. For Intersect the ring only continues above maxPt if
+		// the other source actually FILLS there — test its winding counting only
+		// edges that span STRICTLY above the scanline. If absent, the coincident
+		// edge is the top of the intersection region and the ring must close
+		// (DESIGN.md §7.6).
+		if contribAbove && s.op == OpIntersect && coupled.Seg.Horizontal() &&
+			s.otherSourceWindingAbove(coupled, maxPt) == 0 {
+			contribAbove = false
+		}
 		coupled.WindSelf, coupled.WindOther, coupled.Contributing = savedWS, savedWO, savedC
 		if !contribAbove {
 			AddLocalMaxPoly(s.ael, ae, coupled, maxPt)
@@ -1962,6 +1976,36 @@ func (s *sweep) resolveBetweenMaxima(ae, partner *ActiveEdge, maxPt fixed.Point)
 		}
 		IntersectEdges(s.ael, s.op, ae, between, maxPt)
 	}
+}
+
+// otherSourceWindingAbove returns the winding of the source OTHER than e's, at
+// x = maxPt.X just ABOVE maxPt — counting only non-horizontal AEL edges whose
+// segment spans strictly above the scanline. Edges that top out exactly at the
+// scanline (a same-Y local maximum of the other source) are excluded, so a
+// coincident-apex confluence where the other source's bounds all terminate at
+// maxPt.Y reads as winding 0 (absent above), which the scanline-local [Classify]
+// cannot tell. Used by [sweep.closeBound]'s cross-source self-closure to decide
+// whether an Intersect ring continues above a coincident horizontal apex
+// (DESIGN.md §7.6).
+func (s *sweep) otherSourceWindingAbove(e *ActiveEdge, maxPt fixed.Point) int {
+	other := Subject
+	if e.Seg.Src == Subject {
+		other = Clip
+	}
+	wind := 0
+	for i := range s.ael.Len() {
+		ed := s.ael.At(i)
+		if ed.Seg.Src != other || ed.Seg.Horizontal() {
+			continue
+		}
+		if ed.Seg.Top.Y <= maxPt.Y {
+			continue
+		}
+		if ed.CurrX < maxPt.X {
+			wind += ed.WindDx
+		}
+	}
+	return wind
 }
 
 // throughVertexOnColumn reports whether seg passes through maxPt on the apex

@@ -363,17 +363,49 @@ unified cycle (matching `JoinOutrecPaths`), so no OutPt is left on the dead
 ring and the `or1==or2` split/merge test always reads live pointers. Differential
 byte-identical (idU=idD=idX=0, gross 93/236). Regression: `TestHorizJoinHangRepro`.
 
-### 7.6 Axis-aligned Union over-count (collinear shared boundary edge)
+### 7.6 Axis-aligned identity violations (collinear shared edge) — PARTIAL
 
 Pre-existing, distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds,
-on inputs the bound model DOES handle). On validated axis-aligned pairs that
-share a collinear boundary edge segment, the boolean ops can double-count the
-shared overlap: e.g. `A=[(0,0)(2,0)(2,1)(1,1)(0,1)]`, `B=[(1,-1)(3,-1)(3,3)
-(2,3)(2,1)(1,1)]` (sharing the segment (1,1)-(2,1)) gives `Union` area 7 where
-`A+B-I = 2+6-2 = 6`. `TestHorizontalFallbackReachability` counts ~106 such
-identity violations in its sweep (logged, not asserted); `TestHorizIdentityRepro`
-is the minimal repro (skipped until fixed). A §12.11-class coincident-edge
-classification bug — the next deep correctness target after §7.5.
+on inputs the bound model DOES handle). A class of algebraic-identity violations
+on axis-aligned pairs sharing collinear boundary segments. The minimal
+**Intersect spurious-lobe** case is now FIXED (below); a residual set of more
+complex *staircase* configurations remains — `TestHorizontalFallbackReachability`
+still logs **73** identity violations (down from ~106), now dominated by
+Union/Xor under-counts (e.g. a 16-vertex comb `A` over a small `B` giving U=29
+where `A+B−I = 30`). Those are a related but distinct mechanism and are left for
+a future increment.
+
+**Intersect spurious lobe — FIXED.** The symptom was an algebraic-identity
+violation on axis-aligned pairs sharing a collinear boundary segment — e.g.
+`A=[(0,0)(2,0)(2,1)(1,1)(0,1)]`, `B=[(1,-1)(3,-1)(3,3)(2,3)(2,1)(1,1)]` (sharing
+(1,1)-(2,1)): `Union` returns 7 and `Intersect` returns 2, so `U = A+B−I`
+breaks. The root cause was in **`Intersect`, not `Union`**: the true union *is*
+7 (A=2, B=6, true I=1), and the bug was that Intersect emitted a **spurious
+second lobe** — a triangle `(2,1)-(3,3)-(2,3)` lying inside B's upper-right
+region but entirely *outside* A — making I=2 instead of 1.
+
+The shared segment (1,1)-(2,1) is **A's outer local maximum**: A's two bounds
+meet there and A is absent above it. The intersection ring (the unit square
+[1,2]x[0,1]) should close along that edge. Instead, when A's right wall reached
+the apex, `closeBound`'s cross-source self-closure check (which removes the
+maxing edge and reclassifies the coupled hot edge to test whether the region
+continues above) was fooled: the coupled edge reaches the apex along a
+*coincident horizontal*, and A's *other* bound (the left wall) is still in the
+AEL at that scanline — it tops out at the same Y but at a different X/event — so
+the scanline reclassify still counts A as present and kept the ring open. B's
+hot bound was then dragged up out of A, threading the spurious lobe (a figure-8
+pinched at (2,1) that `splitSelfTouchingRings` split into the square + the stray
+triangle).
+
+Fix (`clip/sweep.go`): when the coupled edge reaches the apex along a coincident
+horizontal, decide "continues above" with `otherSourceWindingAbove` — a winding
+probe at the apex column counting only edges that span **strictly above** the
+scanline (so a same-Y local maximum of the other source does not register as
+present). When the other source is absent above, the coincident edge is the top
+of the intersection region and the ring closes. Scoped to `OpIntersect`;
+differential byte-identical (idU=idD=idX=0, gross 93/236). Regression:
+`TestHorizIdentityRepro`. This cut the reachability harness's logged identity
+violations from ~106 to 73 (the remainder are the residual staircase cases).
 
 ---
 

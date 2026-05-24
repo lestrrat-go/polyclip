@@ -583,14 +583,15 @@ func selfUnionAt(rings []Polygon, cx, cy, ang float64) MultiPolygon {
 
 	bb := bboxOf(work)
 	scale := fixed.ScaleFromBBox(bb.Min.X, bb.Min.Y, bb.Max.X, bb.Max.Y)
-	var segs []clip.Segment
+	orderedRings := make([][]clip.Segment, 0, len(work))
 	for _, r := range work {
-		appendOffsetRingSegs(&segs, r, scale)
+		var rs []clip.Segment
+		appendOffsetRingSegs(&rs, r, scale)
+		if len(rs) > 0 {
+			orderedRings = append(orderedRings, rs)
+		}
 	}
-	segs = clip.SplitOverlaps(segs)
-	segs = clip.SplitTJunctions(segs)
-	segs = clip.DedupCoincidentEdges(segs)
-	sw := clip.SweepFill(segs, clip.OpUnion, clip.FillPositive)
+	sw := clip.SweepRingsFill(orderedRings, clip.OpUnion, clip.FillPositive)
 	if sw.Err != nil {
 		return nil
 	}

@@ -90,6 +90,13 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	// when BOTH edges are eligible.
 	e1Eligible := e1Hot || w1 == 0 || w1 == 1
 	e2Eligible := e2Hot || w2 == 0 || w2 == 1
+	if ael.Ordered {
+		// Positive fill: an edge can start/close a ring iff it is hot or a
+		// boundary of the filled region (Contributing). abs(WindSelf)∈{0,1} is
+		// the NonZero proxy and misclassifies positive-fill nesting (DESIGN §7.2).
+		e1Eligible = e1Hot || e1.Contributing
+		e2Eligible = e2Hot || e2.Contributing
+	}
 	if e1Eligible && e2Eligible {
 		result = dispatchIntersect(ael, op, e1, e2, pt, e1Hot, e2Hot, w1, w2, samePolyType)
 	}
@@ -369,6 +376,17 @@ func branchNeitherHot(
 	w1, w2 int,
 	samePolyType bool,
 ) *OutPt {
+	if ael.Ordered {
+		// Ordered single-source positive fill: a crossing of two cold edges
+		// starts a ring exactly when both are boundaries of the filled region
+		// (Contributing). The NonZero abs(WindSelf)==1 + WindOther op-tests
+		// below assume the boolean model and wrongly drop a positive-fill
+		// boundary whose WindSelf is 0 (the doubled-wall sliver) — DESIGN §7.2.
+		if e1.Contributing && e2.Contributing {
+			return AddLocalMinPoly(ael, e1, e2, pt, false)
+		}
+		return nil
+	}
 	if !samePolyType {
 		return AddLocalMinPoly(ael, e1, e2, pt, false)
 	}

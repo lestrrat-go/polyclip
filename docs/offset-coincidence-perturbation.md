@@ -118,27 +118,32 @@ hypotheses failed:
   coincidence creates a *different* snap-induced degeneracy elsewhere. This is
   precisely why the shipped fix votes across several angles and takes the
   majority — robustness comes from the vote, not from any single perturbation.
-- **The ordered single-sweep path regresses transversal self-crossings.** Even
-  with a vote on top (large *or* tiny angles), the rotated dumbbells (deg 7,
-  30, 60) merge into one island. The ordered path's crossing dispatch
-  (`branchBothHot` etc.) is still NonZero-tuned and is inconsistent with the
-  new pure-prefix-sum winding, so general-position self-intersections — which
-  the soup path resolves correctly — break. The ordered engine fixes the
-  axis-aligned coincidence's *winding* but is not yet a correct general
-  self-union.
+- **The ordered single-sweep path regressed transversal self-crossings — now
+  FIXED (see §6).** Initially, with a vote on top, the rotated dumbbells (deg 7,
+  30, 60) merged into one island: the ordered path's crossing dispatch was still
+  NonZero-tuned (`branchNeitherHot` and the edge-eligibility guard keyed on
+  `absInt(WindSelf) == 1`), which drops a positive-fill boundary whose
+  `WindSelf` is `0`. That has since been corrected.
 
-**Conclusion: the multi-frame rotation vote on the soup path (current `main`)
-is the correct, working solution and is kept.** Retiring it is not achievable
-with a clean deterministic perturbation: same-direction coincidences defeat
-normal perturbation, single rotations are not robust, and full index-based SoS
-(§3) would not guarantee the intended erosion. The gated ordered engine remains
-on `main` as documented infrastructure but is **not** wired into `Offset` and
-would first need its transversal-crossing dispatch reworked for the positive-
-fill winding model before it could host a single-sweep self-union.
+**Conclusion: the multi-frame rotation vote is kept for the exact-coincidence
+residual** (same-direction coincidences defeat normal perturbation, single
+rotations are not robust, full index-based SoS would not guarantee the intended
+erosion). But the *crossing dispatch* — the other half of the problem — was
+fixable, see §6.
 
-If retiring the vote is revisited, the realistic path is: (a) rework the
-ordered path's crossing dispatch to be winding-model-consistent (so it handles
-general self-intersections), *then* (b) add a directed, winding-aware
-perturbation (push negatively-wound folds inward) — note this needs the winding
-it is trying to compute, so it is genuinely circular for exact coincidences and
-may still reduce to a vote.
+## 6. Crossing-dispatch restructure (DONE)
+
+Investigating "rework the dispatch to be winding-consistent" found the fix is
+small and local. Under `AEL.Ordered`, `IntersectEdges` now drives both the edge
+**eligibility guard** and `branchNeitherHot`'s ring-start decision by the
+`Contributing` (winding-`>0` boundary) flag rather than `absInt(WindSelf) ∈
+{0,1}`. The trace that pinned it: at a deg-30 dumbbell self-crossing both edges
+were `Contributing` boundaries but `WindSelf` was `0`/`1`, so the old
+`w1 == 1 && w2 == 1` test bailed and no ring started (an island came out at area
+6 instead of 36). With the contributing-based dispatch, general-position
+self-intersections resolve at a single sweep (deg 17/30/7/123 → two 36-area
+islands with no vote), and `Offset` now uses `SweepRingsFill` + the vote in
+place of the soup path. The vote remains only for the exact-coincidence cases
+(deg 0/45/90/60), which a single perturbation still cannot resolve robustly.
+All changes are gated on `AEL.Ordered`; the boolean `FillNonZero` path is
+untouched (differential `idU=idD=idX=0`).

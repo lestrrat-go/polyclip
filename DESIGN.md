@@ -267,12 +267,23 @@ disproved the "keep both edges + boundary test + pure incremental" theory as
 The standard computational-geometry resolution for such exact degeneracies is
 **perturbation** — and the multi-frame rotation vote (§7.1) *is* perturbation
 that breaks the coincidence so a clean transversal sweep resolves it. So
-"retire the vote" is reframed: the vote is the **correct design**, not a
-stopgap, until/unless the engine gains principled symbolic perturbation
-(Simulation-of-Simplicity style) letting a single sweep break ties
-deterministically. The ordered-minima rewrite explored on branch
-`fix-positive-fill-coincident` does not improve on the proven soup+vote path
-and is kept only as an investigation record.
+"retire the vote" is reframed: the vote is the **correct design** for the
+exact-coincidence residual, not a stopgap, until/unless the engine gains
+principled symbolic perturbation (Simulation-of-Simplicity style) letting a
+single sweep break ties deterministically.
+
+**Crossing-dispatch restructure (DONE).** `Offset` now runs its self-union on
+the ordered-minima engine (`SweepRingsFill`) plus the rotation vote, replacing
+the soup path. The blocker that previously made the ordered path worse —
+transversal self-crossings (rotated pinches) merging into one island — was a
+NonZero assumption in `IntersectEdges`: `branchNeitherHot` and the edge
+eligibility guard keyed on `absInt(WindSelf) == 1`, which drops a positive-fill
+boundary whose `WindSelf` is `0` (the doubled-wall sliver). Under `AEL.Ordered`
+both are now driven by the `Contributing` (winding-`>0` boundary) flag instead;
+general-position self-intersections resolve at a single sweep, and the vote is
+needed only for the exact-coincidence residual above. All gated on
+`AEL.Ordered`, so the boolean (`FillNonZero`) path is untouched (differential
+`idU=idD=idX=0`). See `docs/offset-coincidence-perturbation.md`.
 
 ### 7.3 Performance unverified at slicer scale
 

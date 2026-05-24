@@ -1,6 +1,10 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import (
+	"sort"
+
+	"github.com/lestrrat-go/polyclip/fixed"
+)
 
 // SplitOverlaps takes a list of segments and returns a new list where every
 // pair of partially-overlapping collinear segments has been split at the
@@ -10,73 +14,130 @@ import "github.com/lestrrat-go/polyclip/fixed"
 //
 // Degenerate (zero-length) segments are dropped.
 //
-// Complexity is O(n³) in the worst case (an O(n²) scan repeated up to O(n)
-// times). The function is intended for correctness-first work; Phase 5
-// replaces it with a line-bucketed implementation.
+// Two segments can only overlap if they share a supporting line, so we bucket
+// the survivors by their exact (integer) supporting line and resolve each
+// bucket independently. Within a bucket every endpoint is a potential split
+// point: a segment is cut at each other segment's endpoint that lies strictly
+// in its interior. After the cuts no segment's interior contains another's
+// endpoint, so any remaining collinear pair is disjoint or fully coincident —
+// the required invariant. Segments are emitted expanded in place, preserving
+// input order (a bucket of one passes through unchanged).
+//
+// Complexity is O(n) to bucket plus, per line bucket of m segments, O(m²) to
+// test endpoint containment — versus the previous global O(n³) pairwise scan.
+// For the common case of few collinear segments per line this is effectively
+// linear.
 func SplitOverlaps(segs []Segment) []Segment {
-	work := make([]Segment, 0, len(segs))
-	for _, s := range segs {
-		if !s.Degenerate() {
-			work = append(work, s)
+	byLine := make(map[lineKey][]int, len(segs))
+	for i := range segs {
+		if segs[i].Degenerate() {
+			continue
 		}
+		k := lineOf(segs[i])
+		byLine[k] = append(byLine[k], i)
 	}
 
-	// start is the lowest index that might still take part in an overlap.
-	// When findFirstOverlap returns a pair at outer index i, every segment
-	// before i is conflict-free against all others, and the only mutation a
-	// split performs is replacing two segments with sub-pieces of strictly
-	// smaller extent at index >= i. Sub-pieces cannot overlap a segment the
-	// original did not, so the conflict-free prefix stays conflict-free and the
-	// next scan can resume at i instead of restarting from 0. This drops the
-	// repeated full O(n^2) scan (overall O(n^3)) to a single forward sweep with
-	// splits (overall O(n^2)).
-	start := 0
-	for {
-		i, j, p, q, found := findFirstOverlap(work, start)
-		if !found {
-			return work
+	out := make([]Segment, 0, len(segs))
+	for i := range segs {
+		if segs[i].Degenerate() {
+			continue
 		}
-		newI := splitAt(work[i], p, q)
-		newJ := splitAt(work[j], p, q)
-		out := make([]Segment, 0, len(work)+2)
-		for k, s := range work {
-			switch k {
-			case i:
-				out = append(out, newI...)
-			case j:
-				out = append(out, newJ...)
-			default:
-				out = append(out, s)
-			}
+		group := byLine[lineOf(segs[i])]
+		if len(group) == 1 {
+			out = append(out, segs[i])
+			continue
 		}
-		work = out
-		// newI's first piece now sits at index i; re-examine from there.
-		start = i
+		out = append(out, splitAtInteriorEndpoints(segs[i], group, segs)...)
 	}
+	return out
 }
 
-// findFirstOverlap returns the indices of the first pair in segs at or after
-// outer index start that requires a split: a CollinearOverlap whose interval
-// does not already match both segments' full extent. Fully-coincident pairs
-// (same Bot and same Top on both segments) are skipped — they are left for the
-// sweep's own coincident-edge handling.
-func findFirstOverlap(segs []Segment, start int) (i, j int, p, q fixed.Point, found bool) {
-	for i := start; i < len(segs); i++ {
-		for j := i + 1; j < len(segs); j++ {
-			res := Intersect(segs[i], segs[j])
-			if res.Kind != CollinearOverlap {
-				continue
-			}
-			// Skip if both segments are already exactly the overlap interval.
-			fullyCoincident := segs[i].Bot == segs[j].Bot && segs[i].Top == segs[j].Top
-			if fullyCoincident {
-				continue
-			}
-			// Intersect returns P and Q in LessYX order.
-			return i, j, res.P, res.Q, true
+// splitAtInteriorEndpoints cuts s at every endpoint of the other segments in
+// its collinear group that lies strictly inside s, returning the ordered
+// pieces. group holds indices into segs; all are collinear with s.
+func splitAtInteriorEndpoints(s Segment, group []int, segs []Segment) []Segment {
+	var cuts []fixed.Point
+	seen := map[fixed.Point]struct{}{}
+	consider := func(p fixed.Point) {
+		if !LessYX(s.Bot, p) || !LessYX(p, s.Top) {
+			return // not strictly interior to s
 		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		cuts = append(cuts, p)
 	}
-	return 0, 0, fixed.Point{}, fixed.Point{}, false
+	for _, k := range group {
+		consider(segs[k].Bot)
+		consider(segs[k].Top)
+	}
+	if len(cuts) == 0 {
+		return []Segment{s}
+	}
+	sortPointsYX(cuts)
+
+	pieces := make([]Segment, 0, len(cuts)+1)
+	cur := s.Bot
+	for _, p := range cuts {
+		pieces = append(pieces, makeSegment(cur, p, s.Src, s.Reversed))
+		cur = p
+	}
+	pieces = append(pieces, makeSegment(cur, s.Top, s.Src, s.Reversed))
+	return pieces
+}
+
+// sortPointsYX sorts points ascending in (Y, X) order.
+func sortPointsYX(pts []fixed.Point) {
+	sort.Slice(pts, func(i, j int) bool { return LessYX(pts[i], pts[j]) })
+}
+
+// lineKey identifies a segment's supporting line exactly: a gcd-reduced
+// direction plus the signed line offset b·X − a·Y, which is constant along the
+// line and distinct for parallel lines. The offset is held in 128 bits so it
+// is exact for the full [fixed.MaxCoordMagnitude] grid (the products overflow
+// int64).
+type lineKey struct {
+	a, b int64
+	off  fixed.I128
+}
+
+// lineOf returns the supporting line of s. Two segments are collinear iff their
+// lineKeys are equal.
+func lineOf(s Segment) lineKey {
+	d := direction(s)
+	a, b := d[0], d[1]
+	off := fixed.MulI64(b, int64(s.Bot.X)).Sub(fixed.MulI64(a, int64(s.Bot.Y)))
+	return lineKey{a: a, b: b, off: off}
+}
+
+// direction returns s's gcd-reduced direction vector. Segments are stored
+// canonically (Bot < Top in (Y, X) order), so dy > 0, or dy == 0 with dx > 0;
+// the reduced vector is therefore already sign-canonical and two collinear
+// segments always reduce to the identical key. The computation uses only
+// coordinate differences and a gcd, never a product, so it cannot overflow.
+func direction(s Segment) [2]int64 {
+	dx := int64(s.Top.X - s.Bot.X)
+	dy := int64(s.Top.Y - s.Bot.Y)
+	g := gcd64(dx, dy)
+	if g == 0 {
+		return [2]int64{dx, dy} // degenerate; callers drop these beforehand
+	}
+	return [2]int64{dx / g, dy / g}
+}
+
+// gcd64 returns the non-negative greatest common divisor of |a| and |b|.
+func gcd64(a, b int64) int64 {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // splitAt returns the pieces of s after splitting at the two interior or
@@ -128,68 +189,96 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 // Run AFTER [SplitOverlaps] (so collinear overlaps are already resolved to
 // disjoint or fully-coincident) and before [DedupCoincidentEdges].
 //
-// Complexity is O(n³) in the worst case (an O(n²) scan repeated up to O(n)
-// times), matching [SplitOverlaps]; correctness-first.
+// Splitting a segment at a T-junction inserts an existing vertex as a shared
+// endpoint, so it creates no new vertex. The set of vertices is therefore
+// fixed, and a single batch pass — cut every segment at every vertex strictly
+// in its interior — establishes the invariant with no fixpoint. Candidate
+// vertices are found through an X-sorted index of the distinct vertices: for a
+// segment we binary-search its X-extent and test only that window, instead of
+// scanning every other segment. Complexity is O(n log n) plus the cost of the
+// candidates actually inside each segment's bounding box, versus the previous
+// global O(n³) pairwise scan.
 func SplitTJunctions(segs []Segment) []Segment {
-	work := make([]Segment, 0, len(segs))
-	for _, s := range segs {
-		if !s.Degenerate() {
-			work = append(work, s)
-		}
-	}
+	verts := distinctVerticesByX(segs)
 
-	// start is the lowest outer index that might still expose a T-junction.
-	// Splitting subdivides a segment at an existing vertex (the touching point
-	// is another segment's endpoint), so it introduces no new vertex and only
-	// shrinks extents. A segment before the outer index where the junction was
-	// found is therefore clean against every vertex in the arrangement and stays
-	// clean, letting the scan resume there. O(n^3) -> O(n^2), as in
-	// [SplitOverlaps].
-	start := 0
-	for {
-		resumeAt, idx, p, found := findFirstTJunction(work, start)
-		if !found {
-			return work
+	out := make([]Segment, 0, len(segs))
+	for i := range segs {
+		s := segs[i]
+		if s.Degenerate() {
+			continue
 		}
-		pieces := splitAt(work[idx], p, p)
-		out := make([]Segment, 0, len(work)+1)
-		for k, s := range work {
-			if k == idx {
-				out = append(out, pieces...)
-				continue
-			}
+		cuts := interiorVertices(s, verts)
+		if len(cuts) == 0 {
 			out = append(out, s)
+			continue
 		}
-		work = out
-		start = resumeAt
+		sortPointsYX(cuts)
+		cur := s.Bot
+		for _, p := range cuts {
+			out = append(out, makeSegment(cur, p, s.Src, s.Reversed))
+			cur = p
+		}
+		out = append(out, makeSegment(cur, s.Top, s.Src, s.Reversed))
 	}
+	return out
 }
 
-// findFirstTJunction scans pairs at or after outer index start and returns the
-// outer index where the first T-junction was found (resumeAt, for the caller's
-// resume), the index idx of the segment to split, and the touching vertex p.
-// idx is the segment that has a vertex of another lying strictly in its
-// interior. A [Touch] whose point is an endpoint of both segments (a shared
-// corner) needs no split and is skipped.
-func findFirstTJunction(segs []Segment, start int) (resumeAt, idx int, p fixed.Point, found bool) {
-	interior := func(s Segment, pt fixed.Point) bool {
-		return pt != s.Bot && pt != s.Top
-	}
-	for i := start; i < len(segs); i++ {
-		for j := i + 1; j < len(segs); j++ {
-			res := Intersect(segs[i], segs[j])
-			if res.Kind != Touch {
-				continue
-			}
-			if interior(segs[i], res.P) {
-				return i, i, res.P, true
-			}
-			if interior(segs[j], res.P) {
-				return i, j, res.P, true
-			}
+// distinctVerticesByX returns the distinct endpoints of the non-degenerate
+// segments, sorted ascending by (X, Y) for binary-search lookup.
+func distinctVerticesByX(segs []Segment) []fixed.Point {
+	seen := make(map[fixed.Point]struct{}, 2*len(segs))
+	verts := make([]fixed.Point, 0, 2*len(segs))
+	add := func(p fixed.Point) {
+		if _, ok := seen[p]; ok {
+			return
 		}
+		seen[p] = struct{}{}
+		verts = append(verts, p)
 	}
-	return 0, 0, fixed.Point{}, false
+	for i := range segs {
+		if segs[i].Degenerate() {
+			continue
+		}
+		add(segs[i].Bot)
+		add(segs[i].Top)
+	}
+	sort.Slice(verts, func(i, j int) bool {
+		if verts[i].X != verts[j].X {
+			return verts[i].X < verts[j].X
+		}
+		return verts[i].Y < verts[j].Y
+	})
+	return verts
+}
+
+// interiorVertices returns the vertices in vertsByX (sorted by X, Y) that lie
+// strictly inside segment s — collinear with s, within its bounding box, and
+// not equal to either endpoint. These are exactly the T-junction split points
+// for s. The X-extent is located by binary search so only candidates in s's
+// X-range are tested; the on-segment test uses 128-bit [fixed.Orient2D].
+func interiorVertices(s Segment, vertsByX []fixed.Point) []fixed.Point {
+	minX, maxX := s.Bot.X, s.Top.X
+	if minX > maxX {
+		minX, maxX = maxX, minX
+	}
+	minY, maxY := s.Bot.Y, s.Top.Y // canonical: Bot.Y <= Top.Y
+	lo := sort.Search(len(vertsByX), func(i int) bool { return vertsByX[i].X >= minX })
+
+	var cuts []fixed.Point
+	for i := lo; i < len(vertsByX) && vertsByX[i].X <= maxX; i++ {
+		v := vertsByX[i]
+		if v == s.Bot || v == s.Top {
+			continue
+		}
+		if v.Y < minY || v.Y > maxY {
+			continue
+		}
+		if fixed.Orient2D(s.Bot, s.Top, v) != 0 {
+			continue // in the bounding box but off the supporting line
+		}
+		cuts = append(cuts, v)
+	}
+	return cuts
 }
 
 // DedupCoincidentEdges handles the same-source §11.7 cases:

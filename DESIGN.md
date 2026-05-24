@@ -285,14 +285,29 @@ needed only for the exact-coincidence residual above. All gated on
 `AEL.Ordered`, so the boolean (`FillNonZero`) path is untouched (differential
 `idU=idD=idX=0`). See `docs/offset-coincidence-perturbation.md`.
 
-### 7.3 Performance unverified at slicer scale
+### 7.3 Performance
 
-`DoIntersections` is `O(m²)` per scanbeam (§4.4, correctness-first). There are
-no benchmarks in the repo, so the "within 5–10× of Clipper2" goal (§1) is
-unmeasured. Slicer layers can be thousands of vertices over hundreds of
-layers. TODO: add `testing.B` benchmarks on representative slicer geometry,
-then implement the merge-sort inversion-counter crossing optimisation if the
-quadratic beam cost dominates.
+Benchmarked on representative slicer geometry (`perfbench_test.go`: disjoint
+contours, big circles, staggered brick walls, meshing gears). The bottleneck
+depends on the input shape:
+
+- **Sparse / disjoint / axis-aligned inputs** (the common slicer-layer case)
+  were dominated — ~95% of CPU — by the `O(n²)` preprocessing pair scans, NOT
+  by the scanbeam. `SplitOverlaps` and `SplitTJunctions` now resolve in a
+  single batch pass each: `SplitOverlaps` buckets segments by their exact
+  (128-bit) supporting line and splits within a line bucket; `SplitTJunctions`
+  cuts each segment at the interior vertices found through an X-sorted vertex
+  index. This dropped those benchmarks 24–89× (e.g. a 24×24 brick wall union
+  178 ms → 2 ms) with no change to the differential oracle.
+- **Dense mutually-intersecting inputs** (meshing gears) are now dominated
+  (~87% of CPU) by `DoIntersections`/`buildIntersectList`, the `O(m²)`-per-
+  scanbeam crossing enumeration (§4.4). This is the remaining lever: the
+  merge-sort inversion-counter crossing optimisation (à la Clipper2
+  `BuildIntersectList`) would replace the quadratic beam scan. TODO when dense
+  self-intersecting geometry matters; the disjoint slicer case is already fast.
+
+The "within 5–10× of Clipper2" goal (§1) is still not measured against
+Clipper2 directly (the differential oracle is Monte-Carlo, not Clipper2).
 
 ### 7.4 Open-path offset (`EndType`)
 

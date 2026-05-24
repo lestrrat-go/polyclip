@@ -334,9 +334,46 @@ revisitable.
 The legacy per-edge fallback can still return `ErrHorizontalNotSupported` on
 shared-vertex inputs where `BuildLocalMinima` fails (§12.10.7, `boolean.go`).
 Axis-aligned features are common in printed parts, so callers must handle the
-error path. TODO: confirm the bound model covers every shared-vertex
-horizontal case and retire the fallback, or document the residual inputs that
-trip it.
+error path.
+
+**Reachability — MEASURED, the fallback IS heavily reachable (do NOT retire it
+as-is).** `TestHorizontalFallbackReachability` runs ~78k boolean ops over
+random axis-aligned *skyline* polygons (dense in mid-bound horizontals) whose
+overlap creates shared vertices: ~9.1k fall back (`BuildLocalMinima` returns
+`ErrOpenRing` — "chain revisits … before closing the ring") and ~8.9k of those
+then surface `ErrHorizontalNotSupported`. So the bound model does **not** yet
+cover shared-vertex axis-aligned inputs: after preprocessing creates a degree-4
+collinear vertex, `BuildLocalMinima`'s segment-soup `traceRing` can't
+disambiguate the ring, and the legacy `ClassifyHorizontals` then rejects the
+staircase (mid-bound) horizontals those polygons contain. Retiring the fallback
+requires making minima reconstruction robust to shared vertices — the same L2
+ordered-ring reconstruction (`clip/sweep_ordered.go SweepRingsFill`,
+`splitOrderedRings`) built for §7.2, wired into the boolean path. That is the
+real §7.5 fix and is left for a future increment; until then the error path
+stands and is documented.
+
+**`processHorzJoins` infinite-loop hang — FIXED.** The reachability harness
+first surfaced a *hang* (not an error) on `Difference` of two skylines: the
+merge branch of `processHorzJoins` re-threaded only `or1`'s original arc
+(`op1b → j.op1`) of the unified cycle, leaving `or2`'s arc still pointing at the
+released (dead, `Pts==nil`) `or2`. A later join then read that stale OutRec,
+mis-detected a same-ring split as a cross-ring merge, and spliced one cycle into
+a broken one — an unterminating re-thread walk. Fix: re-thread the **entire**
+unified cycle (matching `JoinOutrecPaths`), so no OutPt is left on the dead
+ring and the `or1==or2` split/merge test always reads live pointers. Differential
+byte-identical (idU=idD=idX=0, gross 93/236). Regression: `TestHorizJoinHangRepro`.
+
+### 7.6 Axis-aligned Union over-count (collinear shared boundary edge)
+
+Pre-existing, distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds,
+on inputs the bound model DOES handle). On validated axis-aligned pairs that
+share a collinear boundary edge segment, the boolean ops can double-count the
+shared overlap: e.g. `A=[(0,0)(2,0)(2,1)(1,1)(0,1)]`, `B=[(1,-1)(3,-1)(3,3)
+(2,3)(2,1)(1,1)]` (sharing the segment (1,1)-(2,1)) gives `Union` area 7 where
+`A+B-I = 2+6-2 = 6`. `TestHorizontalFallbackReachability` counts ~106 such
+identity violations in its sweep (logged, not asserted); `TestHorizIdentityRepro`
+is the minimal repro (skipped until fixed). A §12.11-class coincident-edge
+classification bug — the next deep correctness target after §7.5.
 
 ---
 

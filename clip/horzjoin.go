@@ -221,11 +221,17 @@ func (s *sweep) processHorzJoins() {
 			}
 			continue
 		}
-		// Merge: op2's ring is absorbed into op1's. Re-thread the now-unified
-		// cycle onto or1 (polyclip's eager model) and release or2.
-		for op := op1b; ; op = op.Next {
+		// Merge: op2's ring is absorbed into op1's. Re-thread the ENTIRE
+		// now-unified cycle onto or1 (polyclip's eager model) and release or2.
+		// The whole cycle must be walked, not just or1's original arc: leaving
+		// or2's arc pointing at the released or2 makes a later join read a stale
+		// dead OutRec, mis-detect a same-ring split as a cross-ring merge, and
+		// splice a single cycle into a broken one — an infinite re-thread walk.
+		op := op1b
+		for {
 			op.Outrec = or1
-			if op == j.op1 {
+			op = op.Next
+			if op == op1b {
 				break
 			}
 		}

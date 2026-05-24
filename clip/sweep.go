@@ -115,6 +115,24 @@ type sweep struct {
 	// horizontals). False for the legacy per-edge fallback, which dispatches
 	// per (Y, X) point via [handleBatch].
 	boundModel bool
+
+	// coldMaxPlateaus records the spans of COLD max-plateau horizontals (a
+	// bound-last horizontal whose bound is non-contributing) processed during
+	// the current scanline's horizontal pass. A cold max-plateau is the top of
+	// a filling region (e.g. clip B's top edge, interior to the union because
+	// the region above is the other source's solid body and below is B's fill).
+	// A hot cross-source bound's trailing horizontal that coincides with such a
+	// span is a doubled INTERIOR boundary and must not extend the ring along it
+	// (DESIGN.md §12.11, max-plateau coincident hole-top). Reset each scanline.
+	coldMaxPlateaus []plateauSpan
+}
+
+// plateauSpan is a horizontal span [X0,X1] at Y produced by a cold max-plateau
+// of one source, used to detect coincident interior doubled boundaries.
+type plateauSpan struct {
+	Y      fixed.Coord
+	X0, X1 fixed.Coord
+	Src    Source
 }
 
 func newSweep(segs []Segment, op Operation) *sweep {
@@ -235,6 +253,7 @@ func (s *sweep) run() {
 		// Top/LocalMin events above. doHorizontal may promote a cursor onto a
 		// further horizontal at the same Y; it appends to pendingHoriz, so the
 		// loop drains until none remain. Per DESIGN.md §12.6 / §12.10.
+		s.coldMaxPlateaus = s.coldMaxPlateaus[:0]
 		s.flushPendingHoriz(y)
 		// A bound that reached a shared vertex via a horizontal (its far
 		// endpoint coincides with another source's local-min/through vertex)
@@ -1229,7 +1248,14 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		if outrec := ae.Outrec; outrec != nil && outrec.Pts != nil {
 			head := outrec.Pts
 			tail := head.Next
-			if maxPt != head.P && maxPt != tail.P {
+			// Skip maxPt when ae's trailing horizontal is a doubled INTERIOR
+			// boundary: a cold cross-source max-plateau (the filling shape's top)
+			// coincides with ae's span and ae's coupled cross-source edge tops out
+			// at ae's near endpoint, so the ring is already complete at that
+			// junction. Emitting maxPt (the interior far end) would drag the ring
+			// along the phantom span and over-grow the hole (DESIGN.md §12.11,
+			// max-plateau coincident hole-top: Union hole under-shrink).
+			if maxPt != head.P && maxPt != tail.P && !s.coincidesColdInteriorPlateau(ae, maxPt, coupled) {
 				AddOutPt(ae, maxPt)
 			}
 		}
@@ -1396,6 +1422,43 @@ func (s *sweep) plateauPartnerPending(ae *ActiveEdge, maxPt fixed.Point) bool {
 		// ae is orphaned, stranding it hot in the AEL where a later horizontal
 		// crosses it and drops a region (the holed-input coincident-plateau bug).
 		return h.WindOther != 0
+	}
+	return false
+}
+
+// coincidesColdInteriorPlateau reports whether ae's trailing horizontal (ending
+// at maxPt) is a doubled interior boundary: it is HOT and horizontal, its span
+// coincides with a cold cross-source max-plateau recorded earlier this scanline
+// (the other source's filling top), and its coupled cross-source ring edge tops
+// out at ae's NEAR endpoint (the opposite end from maxPt). In that configuration
+// the ring is geometrically complete at the near junction and maxPt is the
+// interior far end that must not be traced (DESIGN.md §12.11).
+func (s *sweep) coincidesColdInteriorPlateau(ae *ActiveEdge, maxPt fixed.Point, coupled *ActiveEdge) bool {
+	if s.op == OpXor || ae == nil || coupled == nil {
+		return false
+	}
+	if !ae.IsHotEdge() || !ae.Seg.Horizontal() || !ae.IsBoundLast() {
+		return false
+	}
+	if coupled.Seg.Src == ae.Seg.Src {
+		return false
+	}
+	// ae's near endpoint is the end of its horizontal segment that is NOT maxPt.
+	near := ae.Seg.Top
+	if near == maxPt {
+		near = ae.Seg.Bot
+	}
+	if coupled.Seg.Top != near {
+		return false
+	}
+	x0, x1 := ae.Seg.Bot.X, ae.Seg.Top.X
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	for _, p := range s.coldMaxPlateaus {
+		if p.Y == maxPt.Y && p.Src != ae.Seg.Src && p.X0 <= x0 && x1 <= p.X1 {
+			return true
+		}
 	}
 	return false
 }
@@ -1782,6 +1845,16 @@ func boundMaxPt(ae *ActiveEdge) fixed.Point {
 // like UpdateEdgeIntoAEL); if the horizontal is the bound's last segment the
 // ring closes via [closeBound].
 func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
+	// Record a COLD max-plateau (bound-last cold horizontal) span: it is the top
+	// of a filling region whose coincidence with a hot cross-source bound's
+	// trailing horizontal marks that boundary interior (DESIGN.md §12.11).
+	if s.op != OpXor && horz.Seg.Horizontal() && horz.IsBoundLast() && !horz.IsHotEdge() {
+		x0, x1 := horz.Seg.Bot.X, horz.Seg.Top.X
+		if x0 > x1 {
+			x0, x1 = x1, x0
+		}
+		s.coldMaxPlateaus = append(s.coldMaxPlateaus, plateauSpan{Y: y, X0: x0, X1: x1, Src: horz.Seg.Src})
+	}
 	for {
 		nearX := horz.CurrX
 		farX := boundHorizontalFarX(horz.Bound, horz.Seg)

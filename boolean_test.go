@@ -2608,3 +2608,53 @@ func TestBooleanHoledInputUnionHoleTopCoincidentWithFillingClip(t *testing.T) {
 		t.Errorf("union area: got %v want ~141.346", uA)
 	}
 }
+
+func TestBooleanHoledInputUnionHoleTopCoincidentMaxPlateau(t *testing.T) {
+	// A subject hole's TOP plateau (5,9)-(9,9) overlaps the TOP max-plateau of a
+	// clip B that fills the hole from below: B = triangle (0,2),(5,9),(8,9) whose
+	// top edge (5,9)-(8,9) is coincident with the hole top's left portion. Both
+	// tops are local-MAX plateaus (not bound continuations), so the earlier
+	// shared-apex winding fold does NOT fire. The hole-top piece (5,9)-(8,9) is an
+	// interior doubled boundary (solid A above, B fill below), but polyclip traced
+	// it — the void ring detoured to (5,9) and Union returned 126.167 (hole left
+	// too big) instead of ~130.902. closeBound's Case-B close now suppresses the
+	// interior maxPt when ae's trailing horizontal coincides with a cold
+	// cross-source max-plateau and its coupled cross-source edge tops at ae's near
+	// endpoint (DESIGN.md §12.11).
+	a := MultiPolygon{ExPolygon{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+		Holes: []Polygon{{{X: 5, Y: 9}, {X: 9, Y: 9}, {X: 9, Y: 4}, {X: 4, Y: 6}}},
+	}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 6, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 2}, {X: 8, Y: 9}}}}
+
+	u, err := Union(a, b)
+	if err != nil {
+		t.Fatalf("union: %v", err)
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		t.Fatalf("intersect: %v", err)
+	}
+	d, err := Difference(a, b)
+	if err != nil {
+		t.Fatalf("difference: %v", err)
+	}
+	x, err := Xor(a, b)
+	if err != nil {
+		t.Fatalf("xor: %v", err)
+	}
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	if math.Abs(uA-(aA+bA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identU, uA, aA+bA-iA)
+	}
+	if math.Abs(dA-(aA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identD, dA, aA-iA)
+	}
+	if math.Abs(xA-(uA-iA)) > 0.02 {
+		t.Errorf("%s: got %v want %v", identX, xA, uA-iA)
+	}
+	if math.Abs(uA-130.902) > 0.02 {
+		t.Errorf("union area: got %v want ~130.902", uA)
+	}
+}

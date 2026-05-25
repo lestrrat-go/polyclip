@@ -254,5 +254,96 @@ func aelLess(a, b *ActiveEdge) bool {
 	if a.CurrX != b.CurrX {
 		return a.CurrX < b.CurrX
 	}
-	return slope(a.Seg) < slope(b.Seg)
+	if sa, sb := slope(a.Seg), slope(b.Seg); sa != sb {
+		return sa < sb
+	}
+	// Coincident at this scanline (same CurrX and same slope). A static order
+	// here is wrong: two exactly-coincident cross-source edges (a doubled
+	// boundary, e.g. a shared vertical wall) are geometrically ordered by where
+	// their bounds first DIVERGE just above the scanline — the non-degenerate
+	// limit. Look ahead along both bounds to that divergence and order by which
+	// path runs left there. This is what makes the coincident-edge winding
+	// resolve correctly without a context-dependent guess (DESIGN.md §7.6).
+	less, decided := coincidentDivergeLess(a, b)
+	if decided {
+		return less
+	}
+	return false
+}
+
+// coincidentDivergeLess orders two edges that are coincident at the current
+// scanline by the first point where their bounds diverge above it. It walks
+// both bounds' upward vertex paths in lockstep; at the first vertex that
+// differs, the two divergence rays leave a shared vertex V, and a sorts left of
+// b iff a's ray is to the left of b's (cross product < 0). Returns (less,
+// decided); decided is false when a bound is unavailable or the paths never
+// diverge (no basis to order — caller keeps insertion order).
+func coincidentDivergeLess(a, b *ActiveEdge) (less, decided bool) {
+	pa := upwardVertices(a)
+	pb := upwardVertices(b)
+	n := min(len(pa), len(pb))
+	for k := 1; k < n; k++ {
+		if pa[k] == pb[k] {
+			continue
+		}
+		v := pa[k-1] // last common vertex (== pb[k-1])
+		ax := int64(pa[k].X) - int64(v.X)
+		ay := int64(pa[k].Y) - int64(v.Y)
+		bx := int64(pb[k].X) - int64(v.X)
+		by := int64(pb[k].Y) - int64(v.Y)
+		// cross = ax*by - ay*bx in 128 bits: at the 2^60 grid the int64 product
+		// overflows (a false zero), so use exact arithmetic.
+		cross := fixed.MulI64(ax, by).Sub(fixed.MulI64(ay, bx)).Sign()
+		if cross == 0 {
+			return false, false // collinear rays: cannot order from here
+		}
+		// Both rays leave V into the upper half-plane (ascending bounds).
+		// a runs left of b iff a's ray is counter-clockwise toward up-left,
+		// i.e. cross(a,b) < 0.
+		return cross < 0, true
+	}
+	return false, false
+}
+
+// upwardVertices returns the vertices ae's bound visits from its current
+// segment upward to the bound's local maximum, in traversal order. Used by
+// [coincidentDivergeLess] to compare two coincident bounds by their divergence.
+// Returns nil when ae has no bound.
+func upwardVertices(ae *ActiveEdge) []fixed.Point {
+	if ae.Bound == nil || ae.EdgeIdx >= len(ae.Bound.Segs) {
+		return nil
+	}
+	segs := ae.Bound.Segs[ae.EdgeIdx:]
+	cur := segs[0].Bot
+	// Orient the first segment so we leave from the lower (entry) end. For a
+	// non-horizontal segment that is Bot; for a leading horizontal pick the end
+	// that connects to the next segment as the exit.
+	if len(segs) > 1 {
+		n := segs[1]
+		if segs[0].Bot == n.Bot || segs[0].Bot == n.Top {
+			cur = segs[0].Top
+		}
+	}
+	pts := make([]fixed.Point, 0, len(segs)+2)
+	pts = append(pts, cur)
+	for _, s := range segs {
+		nxt := s.Top
+		if s.Top == cur {
+			nxt = s.Bot
+		}
+		pts = append(pts, nxt)
+		cur = nxt
+	}
+	// The bound ends at a local maximum (cur). The ring turns there toward this
+	// bound's maxima partner: a LEFT bound (interior to the right, WindDx < 0)
+	// turns right, a RIGHT bound (interior to the left, WindDx > 0) turns left.
+	// Append that turn direction so two bounds coincident up to a max still order
+	// correctly when one tops out while the other continues straight up
+	// (DESIGN.md §7.6).
+	if ae.WindDx < 0 {
+		pts = append(pts, fixed.Point{X: cur.X + 1, Y: cur.Y})
+	} else if ae.WindDx > 0 {
+		pts = append(pts, fixed.Point{X: cur.X - 1, Y: cur.Y})
+	}
+	return pts
 }

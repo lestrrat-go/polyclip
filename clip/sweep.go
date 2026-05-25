@@ -1310,6 +1310,24 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		} else {
 			if ae.IsHotEdge() && partner.IsHotEdge() {
 				AddLocalMaxPoly(s.ael, ae, partner, maxPt)
+			} else if ae.IsHotEdge() != partner.IsHotEdge() {
+				// Exactly one edge is hot: its maxima partner is a COLD same-source
+				// edge (e.g. a concave notch's wall topping out where the source's
+				// flat top resumes — the notch wall is hot, the resumed top edge is
+				// cold). When the hot edge's ring CONTINUES on a different still-active
+				// coupled edge (here the notch's other wall), it must emit its apex
+				// maxPt so the vertex is kept and Case B closes the ring later;
+				// dropping it loses the apex and dangles the ring, which a downstream
+				// join then splices with a spurious diagonal (DESIGN.md §7.6). If the
+				// ring instead closes here (no other active edge) the original
+				// drop-both is correct — emitting would dangle it.
+				hot, cold := ae, partner
+				if !ae.IsHotEdge() {
+					hot, cold = partner, ae
+				}
+				if oe := outrecOther(hot); oe != nil && oe != cold && s.ael.IndexOf(oe) >= 0 {
+					AddOutPt(hot, maxPt)
+				}
 			}
 			// Capture the edges flanking the removed pair: once both maxima edges
 			// leave, the edge to their left and the edge to their right become

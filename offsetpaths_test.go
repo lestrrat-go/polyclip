@@ -135,6 +135,93 @@ func TestOffsetPathsShortSkipped(t *testing.T) {
 	}
 }
 
+func TestOffsetPathsJoinedSquareLoop(t *testing.T) {
+	// A square loop (4 points, open) closed and banded by 1 each side with miter
+	// joins: outer square [-1,-1]..[11,11] = 144, inner hole [1,1]..[9,9] = 64,
+	// net 80. One piece with one hole.
+	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
+	res, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	if err != nil {
+		t.Fatalf("OffsetPaths joined: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("joined pieces = %d, want 1", len(res))
+	}
+	if len(res[0].Holes) != 1 {
+		t.Fatalf("joined holes = %d, want 1", len(res[0].Holes))
+	}
+	approx(t, res.Area(), 80, 1e-9, "joined square band area")
+	bb := res[0].Outer.BoundingBox()
+	approx(t, bb.Min.X, -1, 1e-9, "joined outer min x")
+	approx(t, bb.Max.X, 11, 1e-9, "joined outer max x")
+}
+
+func TestOffsetPathsJoinedClosingDuplicate(t *testing.T) {
+	// An explicit closing point (last == first) is the same loop as without it.
+	open := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
+	closed := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}, {X: 0, Y: 0}}
+	o, err := OffsetPaths([]Polyline{open}, 1, OffsetOptions{End: EndJoined})
+	if err != nil {
+		t.Fatalf("joined open: %v", err)
+	}
+	c, err := OffsetPaths([]Polyline{closed}, 1, OffsetOptions{End: EndJoined})
+	if err != nil {
+		t.Fatalf("joined closed: %v", err)
+	}
+	approx(t, c.Area(), o.Area(), 1e-9, "joined closing-dup area")
+}
+
+func TestOffsetPathsJoinedThinLoopSolid(t *testing.T) {
+	// A loop that encloses less than the band width on its short axis: the inner
+	// ring collapses, leaving a solid ribbon (no hole) rather than an annulus.
+	line := Polyline{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 1}, {X: 0, Y: 1}}
+	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	if err != nil {
+		t.Fatalf("OffsetPaths thin joined: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("thin joined pieces = %d, want 1", len(res))
+	}
+	if len(res[0].Holes) != 0 {
+		t.Errorf("thin joined holes = %d, want 0", len(res[0].Holes))
+	}
+	if a := res.Area(); a <= 0 {
+		t.Errorf("thin joined area = %g, want > 0", a)
+	}
+}
+
+func TestOffsetPathsJoinedNonLoopBandsClosingEdge(t *testing.T) {
+	// A non-closed L is closed into a triangle; the band wraps the whole loop
+	// including the implicit hypotenuse, so it differs from the open-cap ribbon.
+	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}}
+	joined, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	if err != nil {
+		t.Fatalf("OffsetPaths joined L: %v", err)
+	}
+	butt, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndButt, Join: JoinMiter})
+	if err != nil {
+		t.Fatalf("OffsetPaths butt L: %v", err)
+	}
+	// The triangle (legs 10, hypotenuse ~14.1) has perimeter ~34.1; a band of
+	// width 2 around it is much larger than the open two-arm ribbon (~37).
+	if joined.Area() <= butt.Area() {
+		t.Errorf("joined L area %g, want > butt L area %g", joined.Area(), butt.Area())
+	}
+}
+
+func TestOffsetPathsJoinedTwoPointFallback(t *testing.T) {
+	// A 2-point path cannot form a loop with area; it falls back to a capped
+	// ribbon so the result is still a non-empty band.
+	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
+	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndJoined})
+	if err != nil {
+		t.Fatalf("OffsetPaths joined 2-point: %v", err)
+	}
+	if a := res.Area(); a <= 0 {
+		t.Errorf("joined 2-point area = %g, want > 0", a)
+	}
+}
+
 func TestOffsetPathsZeroWidth(t *testing.T) {
 	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
 	_, err := OffsetPaths([]Polyline{line}, 0, OffsetOptions{End: EndButt})

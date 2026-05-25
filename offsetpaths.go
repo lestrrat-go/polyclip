@@ -22,9 +22,10 @@ var ErrOffsetEndType = errors.New("polyclip: invalid open-path end type")
 // the self-overlap of sharp interior turns are resolved by the same
 // positive-fill self-union [Offset] uses (DESIGN.md §7.1).
 //
-// opts.End must be one of [EndButt] (the default), [EndSquare], or [EndRound];
-// [EndPolygon] returns [ErrOffsetEndType]. If every path is too short or the
-// result is empty, OffsetPaths returns [ErrOffsetEmpty].
+// opts.End must be one of [EndButt] (the default), [EndSquare], [EndRound], or
+// [EndJoined]; [EndPolygon] returns [ErrOffsetEndType]. [EndJoined] closes each
+// path into a loop and bands it on both sides (see [EndJoined]). If every path
+// is too short or the result is empty, OffsetPaths returns [ErrOffsetEmpty].
 func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon, error) {
 	if opts.End == EndPolygon {
 		// EndPolygon is the closed-input behaviour of Offset; not a cap.
@@ -46,6 +47,10 @@ func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon,
 
 	result := MultiPolygon{}
 	for _, line := range lines {
+		if opts.End == EndJoined {
+			result = append(result, offsetJoinedBand(line, w, opts)...)
+			continue
+		}
 		ring := offsetRibbon(line, w, opts)
 		if len(ring) < 3 {
 			continue
@@ -94,6 +99,45 @@ func offsetRibbon(line Polyline, w float64, opts OffsetOptions) Polygon {
 		emitVertex(&out, pts[j], norms[j].Neg(), norms[j-1].Neg(), w, opts)
 	}
 	return out
+}
+
+// offsetJoinedBand builds the band for one polyline under [EndJoined]: the
+// polyline is closed into a loop (an implicit edge from its last vertex back to
+// its first) and offset w to each side, producing the loop outline as a band.
+// The outer boundary is the loop offset outward by w; the inner boundary is the
+// loop offset inward by w, reversed so it reads as a hole. resolveOffsetPiece
+// then emits an annulus when the loop encloses more than 2w, or a solid ribbon
+// (the inner ring collapses / crosses out) otherwise. Every corner — including
+// the former endpoints, now interior to the loop — uses opts.Join exactly as
+// [Offset] does. Mirrors Clipper2's EndType::Joined.
+func offsetJoinedBand(line Polyline, w float64, opts OffsetOptions) MultiPolygon {
+	pts := dedupPolyline(line)
+	for len(pts) >= 2 && pts[0] == pts[len(pts)-1] {
+		pts = pts[:len(pts)-1] // drop a closing duplicate; the loop is implicit
+	}
+	if len(pts) < 3 {
+		// Fewer than three distinct vertices cannot form a loop with area; fall
+		// back to the capped ribbon so a 2-point joined path still yields a band.
+		ring := offsetRibbon(line, w, opts)
+		if len(ring) < 3 {
+			return nil
+		}
+		return resolveOffsetPiece([]Polygon{ring})
+	}
+	loop := Polygon(pts)
+	if loop.SignedArea() < 0 {
+		loop.Reverse() // orient CCW so +w grows outward, -w shrinks inward
+	}
+	outer := offsetRing(loop, w, opts)
+	if len(outer) < 3 {
+		return nil
+	}
+	rings := []Polygon{outer}
+	if inner := offsetRing(loop, -w, opts); len(inner) >= 3 {
+		inner.Reverse() // CW so it contributes negative winding (a hole)
+		rings = append(rings, inner)
+	}
+	return resolveOffsetPiece(rings)
 }
 
 // emitEndCap appends the cap points for an open-path endpoint v. m is the

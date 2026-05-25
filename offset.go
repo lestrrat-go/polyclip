@@ -47,6 +47,12 @@ const (
 	// EndRound caps an open path with a semicircular arc of radius |d| centred
 	// on each endpoint, tessellated to [OffsetOptions.ArcTol].
 	EndRound
+	// EndJoined closes an open path into a loop — an implicit edge joins its
+	// last vertex back to its first — and offsets |d| to each side, so the
+	// result is a band tracing the closed loop: an annulus (filled ring with a
+	// hole) when the loop encloses more than the band width, a solid ribbon
+	// when it does not. Corners use [OffsetOptions.Join] like [Offset].
+	EndJoined
 )
 
 // OffsetOptions configures [Offset] and [OffsetPaths]. Zero values pick

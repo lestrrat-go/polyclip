@@ -233,9 +233,9 @@ directly (the oracle is Monte-Carlo, not Clipper2).
 ### 7.4 Open-path offset (`EndType`)
 
 Done via `OffsetPaths` (§7.8c). `EndType` now offers `EndButt`/`EndSquare`/
-`EndRound` open-path caps in addition to `EndPolygon` (the closed `Offset`
-behaviour); slicers can offset open polylines (thin-wall / gap-fill /
-single-extrusion features) into ribbons. `EndJoined` is the remaining gap.
+`EndRound` open-path caps plus `EndJoined` (closed-loop band), in addition to
+`EndPolygon` (the closed `Offset` behaviour); slicers can offset open polylines
+(thin-wall / gap-fill / single-extrusion features) into ribbons.
 
 ### 7.5 Reachable `ErrHorizontalNotSupported`
 
@@ -389,10 +389,17 @@ yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-forme
   new geometry is `emitEndCap` (a faithful transcription of Clipper2's
   `DoBevel`/`DoSquare`/`DoRound` endpoint case). No engine/clip change → the
   differential is structurally unaffected (byte-identical, gross 93/236).
-  `EndPolygon` is rejected (`ErrOffsetEndType`); `EndJoined` (open path closed
-  into a loop band) is not yet implemented. Tests: `offsetpaths_test.go`.
+  `EndPolygon` is rejected (`ErrOffsetEndType`). `EndJoined` closes each path
+  into a loop (implicit last→first edge) and bands it ±|d| via `offsetJoinedBand`:
+  the loop offset outward by |d| is the outer ring, offset inward by |d| and
+  reversed is the hole; `resolveOffsetPiece` yields an annulus when the loop
+  encloses more than 2|d|, a solid ribbon otherwise. It reuses `offsetRing`
+  unchanged (every corner, incl. the former endpoints, uses `opts.Join`); a
+  sub-3-vertex loop falls back to the capped ribbon. Mirrors Clipper2's
+  `EndType::Joined`. Tests: `offsetpaths_test.go`.
 
-Both halves of (c) have landed; `EndJoined` is the only remaining offset gap.
+Both halves of (c) plus `EndJoined` have landed; the offset parity items are
+complete.
 
 **(d) Nested `PolyTree` output (done).** Root `PolyTree{Children}` /
 `PolyTreeNode{Polygon; IsHole; Children}` plus `Builder.ExecuteTree(op)`.

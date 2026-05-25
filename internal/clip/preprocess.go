@@ -1,6 +1,7 @@
 package clip
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/lestrrat-go/polyclip/internal/fixed"
@@ -28,6 +29,13 @@ import (
 // For the common case of few collinear segments per line this is effectively
 // linear.
 func SplitOverlaps(segs []Segment) []Segment {
+	return appendSplitOverlaps(make([]Segment, 0, len(segs)), segs)
+}
+
+// appendSplitOverlaps is the allocation-reusing core of [SplitOverlaps]: it
+// appends the split result onto dst (which may be a reused scratch buffer) and
+// returns the grown slice. dst must not alias segs.
+func appendSplitOverlaps(dst, segs []Segment) []Segment {
 	byLine := make(map[lineKey][]int, len(segs))
 	for i := range segs {
 		if segs[i].Degenerate() {
@@ -37,35 +45,37 @@ func SplitOverlaps(segs []Segment) []Segment {
 		byLine[k] = append(byLine[k], i)
 	}
 
-	out := make([]Segment, 0, len(segs))
 	for i := range segs {
 		if segs[i].Degenerate() {
 			continue
 		}
 		group := byLine[lineOf(segs[i])]
 		if len(group) == 1 {
-			out = append(out, segs[i])
+			dst = append(dst, segs[i])
 			continue
 		}
-		out = append(out, splitAtInteriorEndpoints(segs[i], group, segs)...)
+		dst = appendSplitAtInteriorEndpoints(dst, segs[i], group, segs)
 	}
-	return out
+	return dst
 }
 
-// splitAtInteriorEndpoints cuts s at every endpoint of the other segments in
-// its collinear group that lies strictly inside s, returning the ordered
-// pieces. group holds indices into segs; all are collinear with s.
-func splitAtInteriorEndpoints(s Segment, group []int, segs []Segment) []Segment {
+// appendSplitAtInteriorEndpoints cuts s at every endpoint of the other segments
+// in its collinear group that lies strictly inside s, appending the ordered
+// pieces onto dst. group holds indices into segs; all are collinear with s.
+//
+// Cut points are deduplicated by a linear scan of the (tiny) cuts slice rather
+// than a per-segment map: a multi-segment bucket has very few interior
+// endpoints, so the scan is both cheaper and zero-alloc. Order is irrelevant
+// since the cuts are sorted afterward; only the set matters.
+func appendSplitAtInteriorEndpoints(dst []Segment, s Segment, group []int, segs []Segment) []Segment {
 	var cuts []fixed.Point
-	seen := map[fixed.Point]struct{}{}
 	consider := func(p fixed.Point) {
 		if !LessYX(s.Bot, p) || !LessYX(p, s.Top) {
 			return // not strictly interior to s
 		}
-		if _, dup := seen[p]; dup {
-			return
+		if slices.Contains(cuts, p) {
+			return // already collected
 		}
-		seen[p] = struct{}{}
 		cuts = append(cuts, p)
 	}
 	for _, k := range group {
@@ -73,18 +83,16 @@ func splitAtInteriorEndpoints(s Segment, group []int, segs []Segment) []Segment 
 		consider(segs[k].Top)
 	}
 	if len(cuts) == 0 {
-		return []Segment{s}
+		return append(dst, s)
 	}
 	sortPointsYX(cuts)
 
-	pieces := make([]Segment, 0, len(cuts)+1)
 	cur := s.Bot
 	for _, p := range cuts {
-		pieces = append(pieces, makeSegment(cur, p, s.Src, s.Reversed))
+		dst = append(dst, makeSegment(cur, p, s.Src, s.Reversed))
 		cur = p
 	}
-	pieces = append(pieces, makeSegment(cur, s.Top, s.Src, s.Reversed))
-	return pieces
+	return append(dst, makeSegment(cur, s.Top, s.Src, s.Reversed))
 }
 
 // sortPointsYX sorts points ascending in (Y, X) order.
@@ -199,9 +207,15 @@ func makeSegment(bot, top fixed.Point, src Source, reversed bool) Segment {
 // candidates actually inside each segment's bounding box, versus the previous
 // global O(n³) pairwise scan.
 func SplitTJunctions(segs []Segment) []Segment {
+	return appendSplitTJunctions(make([]Segment, 0, len(segs)), segs)
+}
+
+// appendSplitTJunctions is the allocation-reusing core of [SplitTJunctions]: it
+// appends the split result onto dst (which may be a reused scratch buffer) and
+// returns the grown slice. dst must not alias segs.
+func appendSplitTJunctions(dst, segs []Segment) []Segment {
 	verts := distinctVerticesByX(segs)
 
-	out := make([]Segment, 0, len(segs))
 	for i := range segs {
 		s := segs[i]
 		if s.Degenerate() {
@@ -209,18 +223,18 @@ func SplitTJunctions(segs []Segment) []Segment {
 		}
 		cuts := interiorVertices(s, verts)
 		if len(cuts) == 0 {
-			out = append(out, s)
+			dst = append(dst, s)
 			continue
 		}
 		sortPointsYX(cuts)
 		cur := s.Bot
 		for _, p := range cuts {
-			out = append(out, makeSegment(cur, p, s.Src, s.Reversed))
+			dst = append(dst, makeSegment(cur, p, s.Src, s.Reversed))
 			cur = p
 		}
-		out = append(out, makeSegment(cur, s.Top, s.Src, s.Reversed))
+		dst = append(dst, makeSegment(cur, s.Top, s.Src, s.Reversed))
 	}
-	return out
+	return dst
 }
 
 // distinctVerticesByX returns the distinct endpoints of the non-degenerate
@@ -295,6 +309,15 @@ func interiorVertices(s Segment, vertsByX []fixed.Point) []fixed.Point {
 //
 // Complexity O(n) per coincident group, O(n²) worst case via grouping.
 func DedupCoincidentEdges(segs []Segment) []Segment {
+	return appendDedupCoincidentEdges(make([]Segment, 0, len(segs)), segs)
+}
+
+// appendDedupCoincidentEdges is the allocation-reusing core of
+// [DedupCoincidentEdges]: when at least one segment is dropped it appends the
+// survivors onto dst (which may be a reused scratch buffer) and returns it;
+// when nothing is dropped it returns segs unchanged, allocating nothing. dst
+// must not alias segs.
+func appendDedupCoincidentEdges(dst, segs []Segment) []Segment {
 	type key struct{ bot, top fixed.Point }
 	groups := make(map[key][]int, len(segs))
 	for i := range segs {
@@ -306,10 +329,13 @@ func DedupCoincidentEdges(segs []Segment) []Segment {
 		groups[k] = append(groups[k], i)
 	}
 
-	dropped := make(map[int]struct{})
+	var dropped map[int]struct{}
 	for _, idxs := range groups {
 		if len(idxs) < 2 {
 			continue
+		}
+		if dropped == nil {
+			dropped = make(map[int]struct{})
 		}
 		applySameSrcRules(segs, idxs, dropped)
 	}
@@ -317,7 +343,6 @@ func DedupCoincidentEdges(segs []Segment) []Segment {
 	if len(dropped) == 0 {
 		return segs
 	}
-	out := make([]Segment, 0, len(segs)-len(dropped))
 	for i, s := range segs {
 		if _, drop := dropped[i]; drop {
 			continue
@@ -325,9 +350,23 @@ func DedupCoincidentEdges(segs []Segment) []Segment {
 		if s.Degenerate() {
 			continue
 		}
-		out = append(out, s)
+		dst = append(dst, s)
 	}
-	return out
+	return dst
+}
+
+// Preprocess runs the three preprocessing passes — [SplitOverlaps],
+// [SplitTJunctions], [DedupCoincidentEdges] — in order, ping-ponging two scratch
+// buffers across them so the whole pipeline allocates two []Segment buffers
+// instead of one per pass. The buffer being overwritten at each step is dead by
+// then, and each pass reads one backing array while writing the other, so the
+// reuse is safe.
+func Preprocess(segs []Segment) []Segment {
+	bufA := make([]Segment, 0, len(segs))
+	bufB := make([]Segment, 0, len(segs))
+	a := appendSplitOverlaps(bufA, segs)
+	b := appendSplitTJunctions(bufB, a)
+	return appendDedupCoincidentEdges(bufA[:0], b)
 }
 
 // applySameSrcRules processes one group of fully-coincident segments per

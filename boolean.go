@@ -189,9 +189,7 @@ func polyEqual(a, b Polygon) bool {
 // [runBooleanOp] and [Simplify]; op- and operand-specific post-filtering (the
 // subset invariant) stays in the caller.
 func sweepSegments(segs []clip.Segment, op clip.Operation, fill clip.FillRule, scale fixed.Scale, zt *zTracker) (MultiPolygon, error) {
-	segs = clip.SplitOverlaps(segs)
-	segs = clip.SplitTJunctions(segs)
-	segs = clip.DedupCoincidentEdges(segs)
+	segs = clip.Preprocess(segs)
 	// SweepFillZ additionally records crossings for Z assignment; it is X/Y-
 	// identical to SweepFill, so the standard (zt == nil) path is unchanged.
 	var sw *clip.SweepResult

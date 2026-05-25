@@ -538,12 +538,18 @@ not a bug — current behaviour is correct. Ordered by impact. Profiled on
    unjustified at n~hundreds. Complemented the existing `interiorPoint` hoist
    into `classifiedRing`; see §7.3 and §7.9 item 4.
 2. **Preprocessing reallocates and re-maps three times (`sweepSegments`,
-   `boolean.go`).** `SplitOverlaps → SplitTJunctions → DedupCoincidentEdges` each
-   allocate a fresh `[]Segment` plus maps; `ManyPieces` shows ~61k allocs/op. The
-   worst offender is the per-segment `seen := map[fixed.Point]struct{}{}` inside
-   `splitAtInteriorEndpoints` (`preprocess.go`) — a map allocated for every
-   segment in a collinear bucket; for the common bucket size 2–3 a small slice +
-   linear scan wins. Constant-factor only; lower priority than item 1.
+   `boolean.go`).** *Partly addressed.* The within-call churn is fixed: the three
+   passes now share "append into `dst`" cores driven by `clip.Preprocess`, which
+   ping-pongs two reusable `[]Segment` buffers across `SplitOverlaps →
+   SplitTJunctions → DedupCoincidentEdges` instead of allocating one per pass, and
+   the per-segment `seen := map[fixed.Point]struct{}{}` inside the overlap splitter
+   is replaced by a `slices.Contains` scan over the (tiny) cut list. Overlap-heavy
+   inputs drop ~20% allocs/op (BrickWall benchmarks) with no behavioural change
+   (differential byte-identical). *Remaining:* cross-call reuse — pooling the
+   scratch buffers and the per-call `byLine`/`groups` maps across the many
+   `sweepSegments` calls in `UnionAll`/`Offset`/`Simplify` — needs a scratch struct
+   threaded through `Builder` → `runBooleanOp`; deferred as the larger, riskier
+   step.
 
 **UX / API consistency**
 

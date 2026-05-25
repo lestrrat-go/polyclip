@@ -280,7 +280,37 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 		}
 		return nil, sw.Err
 	}
-	return assembleResult(sw.Rings, scale), nil
+	res := assembleResult(sw.Rings, scale)
+	// Subset invariant: A∖B ⊆ A and A∩B ⊆ A∩B. The sweep can over-trace a
+	// cross-source bound past where it exits the op-region (DESIGN.md §7.6),
+	// emitting a spurious piece that lies OUTSIDE the required superset. Drop any
+	// result piece whose interior point violates the op's subset invariant — a
+	// correct piece always satisfies it, so this never drops valid output. (Only
+	// whole entirely-spurious pieces are caught; a diagonal on an otherwise-valid
+	// piece is not — those are handled in the sweep.)
+	if op == clip.OpDifference || op == clip.OpIntersect {
+		kept := res[:0]
+		for _, ex := range res {
+			pt, ok := interiorPoint(ex.Outer)
+			// Only test hole-free pieces: interiorPoint(Outer) ignores holes and may
+			// land inside one of ex's own holes, where a.Contains is false, wrongly
+			// dropping a valid holed piece. Spurious over-traced fragments are simple
+			// (hole-free), so this still catches them.
+			if !ok || len(ex.Holes) > 0 {
+				kept = append(kept, ex)
+				continue
+			}
+			keep := a.Contains(pt) // Difference: ⊆ A
+			if op == clip.OpIntersect {
+				keep = a.Contains(pt) && b.Contains(pt)
+			}
+			if keep {
+				kept = append(kept, ex)
+			}
+		}
+		res = kept
+	}
+	return res, nil
 }
 
 // collectSegments converts every input edge into a fixed-point Segment and

@@ -43,6 +43,7 @@ const (
 	genRandom     genMode = iota // two independent random quads
 	genDegenerate                // B forced to share a degeneracy with A
 	genHole                      // A is a square with a hole; B touches the hole
+	genMultipiece                // A is two disjoint same-source rects; B carves one
 )
 
 type scenario struct {
@@ -93,6 +94,18 @@ var scenarios = []scenario{
 		seeds: 6, pairs: 3000, samples: 60000, tol: 0.6,
 		mode: genHole, checkMC: true, checkIdentity: true,
 	},
+	// Multipiece: A is two vertically-stacked disjoint axis-aligned rectangles
+	// (same Subject source) and B is an axis-aligned rectangle that carves the
+	// lower piece, frequently sharing a collinear top edge with it. Lattice
+	// coords on a small grid make coincident cross-source edges and shared
+	// vertices common. This exercises the bound model when one source contributes
+	// MULTIPLE disjoint rings whose confluences interact — a routine slicer input
+	// (DESIGN.md §7.7) that the single-piece scenarios above never reach.
+	{
+		name: "multipiece", ext: 6,
+		seeds: 10, pairs: 6000, samples: 40000, tol: 0.6,
+		mode: genMultipiece, checkMC: true, checkIdentity: true,
+	},
 }
 
 func main() {
@@ -135,8 +148,63 @@ func genPair(rng *rand.Rand, sc scenario) (polyclip.MultiPolygon, polyclip.Multi
 		return a, b, true
 	case genHole:
 		return genHolePair(rng, sc.ext)
+	case genMultipiece:
+		return genMultipiecePair(rng, sc.ext)
 	}
 	return nil, nil, false
+}
+
+// genMultipiecePair returns A = two vertically-stacked disjoint axis-aligned
+// rectangles (one Subject source, two rings) and B = an axis-aligned rectangle
+// carving the lower piece. All coords are lattice points on [0,ext] (with B's
+// bottom allowed below 0), so coincident edges and shared vertices between the
+// pieces and B are common — the confluences that mis-resolve on multipiece input.
+// Both inputs are Validate()-checked and the two A pieces are kept strictly
+// disjoint (a vertical gap), so only well-formed MultiPolygons reach the engine.
+func genMultipiecePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
+	rect := func(x0, x1, y0, y1 int) polyclip.Polygon {
+		return polyclip.Polygon{
+			{X: float64(x0), Y: float64(y0)}, {X: float64(x1), Y: float64(y0)},
+			{X: float64(x1), Y: float64(y1)}, {X: float64(x0), Y: float64(y1)},
+		}
+	}
+	rx := func() (int, int) {
+		a, b := rng.Intn(ext+1), rng.Intn(ext+1)
+		if a == b {
+			b = a + 1
+		}
+		if a > b {
+			a, b = b, a
+		}
+		return a, b
+	}
+	// Lower piece occupies y in [0, my]; upper piece y in [my+gap, top]; gap>=1
+	// keeps them strictly disjoint.
+	my := 1 + rng.Intn(2)            // 1..2
+	gap := 1 + rng.Intn(2)           // 1..2
+	uy := my + gap + 1 + rng.Intn(3) // upper top
+	lx0, lx1 := rx()
+	ux0, ux1 := rx()
+	piece1 := rect(lx0, lx1, 0, my)
+	piece2 := rect(ux0, ux1, my+gap, uy)
+	a := polyclip.MultiPolygon{
+		polyclip.ExPolygon{Outer: piece1},
+		polyclip.ExPolygon{Outer: piece2},
+	}
+	// B carves the lower piece: x within [0,ext], y from (often) below 0 up into
+	// the lower piece, frequently topping out exactly at my (shared top edge).
+	bx0, bx1 := rx()
+	by0 := -1 - rng.Intn(2)
+	by1 := my
+	if rng.Intn(3) == 0 {
+		by1 = 1 + rng.Intn(my) // sometimes a partial carve below the top edge
+	}
+	b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rect(bx0, bx1, by0, by1)}}
+
+	if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
+		return nil, nil, false
+	}
+	return a, b, true
 }
 
 // genHolePair returns A = an [0,ext] square with a single random CW hole, and

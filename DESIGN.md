@@ -369,6 +369,40 @@ crossings remain latent (masked by composition + the subset filter); a future
 per-segment winding model at confluences would let `OpXor` and the filtered
 Difference cases resolve in-sweep.
 
+### 7.7 Multipiece-subject Difference over-trace (OPEN)
+
+The §7.6 work drove identity violations to zero on inputs where each source is a
+SINGLE ring (the skyline reachability corpus and the differential, both of which
+only ever generated single-piece `A` and `B`). A routine slicer input it never
+exercised is a **multipiece** `MultiPolygon` — one source contributing several
+disjoint rings. The differential now covers it (the `multipiece` scenario: `A` is
+two vertically-stacked disjoint axis-aligned rectangles, `B` carves the lower one
+along a shared collinear top edge), and it surfaces a **Difference-only**
+violation class (`idD` ≈ 4% of interacting multipiece pairs; `U`/`I`/`X` clean).
+
+Minimal repro: `A = {[0,2]×[0,2]} ∪ {[0,3]×[3,5]}` (two Subject rings, a clear
+y-gap between them), `B = [1,2]×[−1,2]`. `Difference` should give the lower
+piece carved to `[0,1]×[0,2]` (area 2) plus the upper piece unchanged (area 6),
+total 8; instead it returns ≈5.5, mis-tracing the UPPER piece into a tangled ring
+`[(2,2)(1,5)(0,5)(0,3)(1,3)(1,2)]` with a spurious diagonal `(2,2)→(1,5)`.
+
+Root cause: at `(2,2)` the lower piece's right wall (Subject) and `B`'s right wall
+(Clip) are **coincident cross-source vertical walls both topping out** — exactly
+the §7.6 C-class confluence. The sweep over-traces a bound past where it exits the
+op-region (a maxing bound does not update an exiting neighbour's winding without a
+crossing event), so a spurious ring spawns at the confluence and, finding the
+upper piece's bounds next in the AEL, threads itself INTO the upper piece across
+the empty gap. For SINGLE-piece inputs this same over-trace produced a
+cleanly-spurious lobe that the **result-level subset filter** (§7.6 fix 5)
+dropped; with a second piece present the spurious trace MERGES with a valid ring,
+so the filter cannot drop it (the tangled ring contains real area) and the
+violation is unmaskable. This is therefore the SAME deferred sweep-level
+over-trace as §7.6 — the subset filter was a result-level shortcut, not an
+in-sweep resolution. The fix is the per-segment-winding-at-confluence model noted
+above (close/transfer the over-tracing bound's ring AT the maxing confluence,
+lifecycle-correctly); post-hoc ring surgery is a known dead end (DESIGN §7.6
+history). Left open; the differential `multipiece` scenario is the regression gate.
+
 ---
 
 ## 8. Conventions and constraints

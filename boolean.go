@@ -347,46 +347,119 @@ func simplifyCollinearRing(pts []fixed.Point) []fixed.Point {
 	return pts
 }
 
-// assembleResult converts the sweep's closed output rings into a user-space
-// MultiPolygon, classifying each ring as outer or hole by its signed area
-// and grouping holes into their containing outer.
-func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
-	type classified struct {
-		poly Polygon
-		bbox BBox
-		area float64 // absolute (unsigned) area
-		// interior is a point of poly's OPEN interior, precomputed once per ring
-		// (it depends only on poly). hasInterior is false for a degenerate ring
-		// with no interior. Hoisted out of ringInside so the O(n^2) containment
-		// scan does not recompute it on every candidate container.
-		interior    Point
-		hasInterior bool
-	}
-	var rings2 []classified
+// classifiedRing is an output ring prepared for containment classification: its
+// polygon, bounding box, absolute area, and a precomputed interior point.
+type classifiedRing struct {
+	poly Polygon
+	bbox BBox
+	area float64 // absolute (unsigned) area
+	// interior is a point of poly's OPEN interior, precomputed once per ring
+	// (it depends only on poly). hasInterior is false for a degenerate ring
+	// with no interior. Hoisted out of ringContains so the O(n^2) containment
+	// scan does not recompute it on every candidate container.
+	interior    Point
+	hasInterior bool
+}
 
-	// ringInside reports whether inner is nested within outer. The sweep's
-	// output rings have pairwise-disjoint interiors (they partition the plane
-	// into in/out), so two rings are either disjoint or one strictly contains
-	// the other — never partially overlapping. Under that invariant, inner is
-	// nested in outer iff a point of inner's OPEN interior lies inside outer.
-	//
-	// The sample must be a genuine interior point of inner, not a vertex or the
-	// vertex centroid. When two rings merely touch, their shared vertices — and,
-	// for a collinear shared edge, even the vertex centroid — land ON the other
-	// ring's boundary, which Polygon.Contains counts as inside, wrongly nesting
-	// polygons that only touch (the shared-vertex bug, DESIGN.md §12.11).
-	// Conversely a hole emitted by the sweep can have ALL its vertices on the
-	// enclosing outer's boundary (e.g. the Xor overlap rectangle whose corners
-	// sit on the union outline), so a vertex-based test gives the opposite false
-	// negative. An interior point of inner avoids both: if inner is nested it is
-	// strictly inside outer; if the rings only touch it is strictly outside.
-	ringInside := func(inner, outer classified) bool {
-		if !inner.hasInterior {
-			return false
+// newClassifiedRing precomputes the classification fields for poly.
+func newClassifiedRing(poly Polygon) classifiedRing {
+	interior, hasInterior := interiorPoint(poly)
+	return classifiedRing{
+		poly: poly, bbox: poly.BoundingBox(),
+		area:        math.Abs(poly.SignedArea()),
+		interior:    interior,
+		hasInterior: hasInterior,
+	}
+}
+
+// ringContains reports whether inner is nested within outer. The sweep's
+// output rings have pairwise-disjoint interiors (they partition the plane
+// into in/out), so two rings are either disjoint or one strictly contains
+// the other — never partially overlapping. Under that invariant, inner is
+// nested in outer iff a point of inner's OPEN interior lies inside outer.
+//
+// The sample must be a genuine interior point of inner, not a vertex or the
+// vertex centroid. When two rings merely touch, their shared vertices — and,
+// for a collinear shared edge, even the vertex centroid — land ON the other
+// ring's boundary, which Polygon.Contains counts as inside, wrongly nesting
+// polygons that only touch (the shared-vertex bug, DESIGN.md §12.11).
+// Conversely a hole emitted by the sweep can have ALL its vertices on the
+// enclosing outer's boundary (e.g. the Xor overlap rectangle whose corners
+// sit on the union outline), so a vertex-based test gives the opposite false
+// negative. An interior point of inner avoids both: if inner is nested it is
+// strictly inside outer; if the rings only touch it is strictly outside.
+func ringContains(inner, outer classifiedRing) bool {
+	if !inner.hasInterior {
+		return false
+	}
+	return outer.bbox.Contains(inner.interior) && outer.poly.Contains(inner.interior)
+}
+
+// canContainRing reports whether outer may be inner's container. A strictly
+// larger ring can. Two coincident rings have EQUAL area and mutually contain
+// each other (same boundary; e.g. Difference/Xor of identical inputs emits the
+// region once CCW and once CW, which must cancel to zero area): the tie is
+// broken by orientation — the filled (CCW) ring is the parent, the hole (CW)
+// ring the child — so the pair nests as outer+hole and cancels.
+func canContainRing(outer, inner classifiedRing) bool {
+	if outer.area > inner.area {
+		return true
+	}
+	return outer.area == inner.area &&
+		outer.poly.SignedArea() > 0 && inner.poly.SignedArea() < 0
+}
+
+// buildContainmentForest computes, for each ring, the index of its immediate
+// (smallest) container, or -1 if it is top-level. The rings' interiors are
+// pairwise disjoint, so any two are either disjoint or one strictly contains
+// the other. The sweep's own CCW/CW orientation is NOT used to classify
+// outer-vs-hole: it is locally meaningful but does not encode nesting depth
+// (an island inside a hole is CCW yet must become a filled top-level piece;
+// an Intersect cycle can emit a sole region CW). Depth parity over this forest
+// is the only reliable signal — see DESIGN.md §11.9 / §12.10.
+func buildContainmentForest(rings []classifiedRing) []int {
+	parent := make([]int, len(rings))
+	for i := range rings {
+		parent[i] = -1
+		if len(rings[i].poly) == 0 {
+			continue
 		}
-		return outer.bbox.Contains(inner.interior) && outer.poly.Contains(inner.interior)
+		for j := range rings {
+			if i == j || len(rings[j].poly) == 0 {
+				continue
+			}
+			if !canContainRing(rings[j], rings[i]) {
+				continue
+			}
+			if !ringContains(rings[i], rings[j]) {
+				continue
+			}
+			// Prefer the smallest container; among equal-area coincident
+			// containers any is fine (there is normally just one).
+			if parent[i] == -1 || rings[j].area < rings[parent[i]].area {
+				parent[i] = j
+			}
+		}
 	}
+	return parent
+}
 
+// ringDepth returns the number of rings strictly containing ring i, walking the
+// parent chain of a forest produced by [buildContainmentForest].
+func ringDepth(parent []int, i int) int {
+	d := 0
+	for parent[i] != -1 {
+		i = parent[i]
+		d++
+	}
+	return d
+}
+
+// classifyOutRecs turns the sweep's closed output rings into classifiedRings:
+// dedup consecutive points, split self-touching cycles into simple loops, and
+// unsnap to user space at scale.
+func classifyOutRecs(rings []*clip.OutRec, scale fixed.Scale) []classifiedRing {
+	var rings2 []classifiedRing
 	for _, r := range rings {
 		if r.Pts == nil {
 			continue
@@ -410,62 +483,18 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 			for i, fp := range fixedPts {
 				poly[i].X, poly[i].Y = scale.Unsnap(fp)
 			}
-			interior, hasInterior := interiorPoint(poly)
-			rings2 = append(rings2, classified{
-				poly: poly, bbox: poly.BoundingBox(),
-				area:        math.Abs(poly.SignedArea()),
-				interior:    interior,
-				hasInterior: hasInterior,
-			})
+			rings2 = append(rings2, newClassifiedRing(poly))
 		}
 	}
+	return rings2
+}
 
-	// Containment forest over ALL rings, regardless of orientation. The sweep's
-	// output rings have pairwise-disjoint interiors, so any two are either
-	// disjoint or one strictly contains the other. parent[i] is the smallest
-	// ring containing ring i (its immediate container), or -1 if i is
-	// top-level. The sweep's own CCW/CW orientation is NOT used to classify
-	// outer-vs-hole: it is locally meaningful but does not encode nesting depth
-	// (an island inside a hole is CCW yet must become a filled top-level piece;
-	// an Intersect cycle can emit a sole region CW). Depth parity is the only
-	// reliable signal — see DESIGN.md §11.9 / §12.10.
-	//
-	// canContain reports whether j may be i's container. A strictly larger ring
-	// can. Two coincident rings have EQUAL area and mutually contain each other
-	// (same boundary; e.g. Difference/Xor of identical inputs emits the region
-	// once CCW and once CW, which must cancel to zero area): the tie is broken
-	// by orientation — the filled (CCW) ring is the parent, the hole (CW) ring
-	// the child — so the pair nests as outer+hole and cancels.
-	canContain := func(j, i int) bool {
-		if rings2[j].area > rings2[i].area {
-			return true
-		}
-		return rings2[j].area == rings2[i].area &&
-			rings2[j].poly.SignedArea() > 0 && rings2[i].poly.SignedArea() < 0
-	}
-	parent := make([]int, len(rings2))
-	for i := range rings2 {
-		parent[i] = -1
-		if len(rings2[i].poly) == 0 {
-			continue
-		}
-		for j := range rings2 {
-			if i == j || len(rings2[j].poly) == 0 {
-				continue
-			}
-			if !canContain(j, i) {
-				continue
-			}
-			if !ringInside(rings2[i], rings2[j]) {
-				continue
-			}
-			// Prefer the smallest container; among equal-area coincident
-			// containers any is fine (there is normally just one).
-			if parent[i] == -1 || rings2[j].area < rings2[parent[i]].area {
-				parent[i] = j
-			}
-		}
-	}
+// assembleResult converts the sweep's closed output rings into a user-space
+// MultiPolygon, classifying each ring as outer or hole by its signed area
+// and grouping holes into their containing outer.
+func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
+	rings2 := classifyOutRecs(rings, scale)
+	parent := buildContainmentForest(rings2)
 
 	// depth(i) = number of rings strictly containing i. Even depth = a filled
 	// region (the outer of an ExPolygon); odd depth = a hole. A hole's parent
@@ -473,12 +502,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	// the hole directly to it. A filled ring at depth ≥ 2 (an island inside a
 	// hole) is a top-level ExPolygon of its own (MultiPolygon is flat).
 	depth := func(i int) int {
-		d := 0
-		for parent[i] != -1 {
-			i = parent[i]
-			d++
-		}
-		return d
+		return ringDepth(parent, i)
 	}
 
 	idxMap := make(map[int]int, len(rings2))
@@ -506,6 +530,64 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	}
 
 	return result
+}
+
+// buildPolyTree reconstructs the full nested containment hierarchy of m as a
+// [PolyTree]. A MultiPolygon is flat — an island inside a hole is a top-level
+// ExPolygon — so the depth-≥2 nesting is recovered by rebuilding the
+// containment forest (§11.9) over every ring of m (each outer and each hole).
+// Operating on the finished MultiPolygon, rather than the sweep's raw rings,
+// lets ExecuteTree reuse every execOp path (short-circuits, Xor composition,
+// per-piece Difference, alternate fills) unchanged: each yields a well-formed
+// MultiPolygon whose rings have pairwise-disjoint interiors, exactly the
+// invariant the forest needs.
+//
+// Each ring becomes a node; a node's Children are the rings whose immediate
+// container is it. Even depth = a filled region, odd depth = a hole; winding is
+// normalized as elsewhere (filled CCW, hole CW). Top-level nodes (no container)
+// are the tree's roots.
+func buildPolyTree(m MultiPolygon) *PolyTree {
+	var rings []classifiedRing
+	for _, ex := range m {
+		if len(ex.Outer) >= 3 {
+			rings = append(rings, newClassifiedRing(ex.Outer))
+		}
+		for _, h := range ex.Holes {
+			if len(h) >= 3 {
+				rings = append(rings, newClassifiedRing(h))
+			}
+		}
+	}
+
+	parent := buildContainmentForest(rings)
+
+	nodes := make([]*PolyTreeNode, len(rings))
+	for i := range rings {
+		isHole := ringDepth(parent, i)%2 == 1
+		// Copy so the tree owns its rings: execOp short-circuits (e.g.
+		// Union(s,∅)→s) can return the caller's own polygons, which Reverse must
+		// not mutate. For a well-formed MultiPolygon the orientation already
+		// matches depth parity, so the reversal below is normally a no-op.
+		poly := append(Polygon(nil), rings[i].poly...)
+		switch {
+		case isHole && poly.SignedArea() > 0: // a hole must be CW
+			poly.Reverse()
+		case !isHole && poly.SignedArea() < 0: // a filled ring must be CCW
+			poly.Reverse()
+		}
+		nodes[i] = &PolyTreeNode{Polygon: poly, IsHole: isHole}
+	}
+
+	tree := &PolyTree{}
+	for i := range rings {
+		if parent[i] == -1 {
+			tree.Children = append(tree.Children, nodes[i])
+			continue
+		}
+		p := parent[i]
+		nodes[p].Children = append(nodes[p].Children, nodes[i])
+	}
+	return tree
 }
 
 // dedupConsecutive removes consecutive identical points from a closed ring,

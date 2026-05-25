@@ -76,6 +76,25 @@ type Result struct {
 	Open   []Polyline
 }
 
+// PolyTree is the nested containment hierarchy returned by
+// [Builder.ExecuteTree]. Its Children are the top-level filled regions; each
+// node's Children are the rings nested one level deeper. Unlike a flat
+// MultiPolygon — where an island inside a hole is promoted to a top-level piece
+// — a PolyTree preserves arbitrary nesting depth: a filled region's children
+// are its holes, and a hole's children are the islands inside it.
+type PolyTree struct {
+	Children []*PolyTreeNode
+}
+
+// PolyTreeNode is one ring in a [PolyTree]. Polygon is the ring (filled regions
+// wound CCW, holes CW); IsHole reports whether it bounds a hole (odd nesting
+// depth); Children are the rings nested directly inside it.
+type PolyTreeNode struct {
+	Polygon  Polygon
+	IsHole   bool
+	Children []*PolyTreeNode
+}
+
 // Builder accumulates subject and clip polygons, then runs a boolean op over
 // them with [Builder.Execute]. It is the general entry point that the named
 // free functions ([Union], [Intersect], [Difference], [Xor]) wrap.
@@ -142,6 +161,20 @@ func (b *Builder) Execute(op Operation) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Closed: closed}, nil
+}
+
+// ExecuteTree runs op like [Builder.Execute] but returns the result as a nested
+// [PolyTree] instead of a flat MultiPolygon. The tree preserves containment
+// depth: a filled region's children are its holes, and a hole's children are
+// the islands nested inside it (recursively). It does not mutate the
+// accumulated inputs. Open paths are a planned feature and do not yet appear in
+// the tree.
+func (b *Builder) ExecuteTree(op Operation) (*PolyTree, error) {
+	closed, err := execOp(b.subj, b.clip, op, b.fill)
+	if err != nil {
+		return nil, err
+	}
+	return buildPolyTree(closed), nil
 }
 
 // execOp is the single home for the per-op short-circuits, Xor-by-composition,

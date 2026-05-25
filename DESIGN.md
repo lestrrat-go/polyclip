@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), a nested `PolyTree` output, Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`.
+Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`).
 
 ---
 
@@ -307,7 +307,7 @@ state vs. Clipper2's planar API:
 | Fill rules incl. EvenOdd     | done     | (b)  |
 | Open-path clipping           | gap      | (c)  |
 | Open-path offset (end caps)  | gap      | (c) / §7.4 |
-| Nested `PolyTree` output     | gap      | (d)  |
+| Nested `PolyTree` output     | done     | (d)  |
 | Minkowski sum / difference   | gap      | (e)  |
 | RectClip / RectClipLines     | gap      | (f)  |
 | Path reduction (Douglas–Peucker) | gap  | (g)  |
@@ -326,8 +326,8 @@ thin wrappers over the unexported `execOp`, which is now the single home for the
 per-op short-circuits, Xor-by-composition (§7.6), and per-piece Difference (§7.7).
 `Execute` is non-destructive and `Reset` clears the inputs for reuse. Landed
 behavior-preserving: differential byte-identical (random 0, degenerate 93,
-holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection, `AddOpenSubject`,
-and `ExecuteTree` are reserved for steps (b)/(c)/(d).
+holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection (b) and `ExecuteTree`
+(d) have since landed; `AddOpenSubject` is reserved for step (c).
 
 **(a) Bevel join.** Add `JoinBevel` to `JoinType`; at a convex corner emit the
 straight chord between the two offset-edge endpoints (no apex) — `emitVertex`'s
@@ -371,11 +371,19 @@ yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-forme
 Phase: ribbon offset first, then clipping. Medium–high effort; only the clipping
 half touches the sweep.
 
-**(d) Nested `PolyTree` output.** Postprocess already builds a containment forest
-over all output rings (§11.9) and merely flattens it into `MultiPolygon`. Expose
-the forest: a `PolyTree`/`PolyTreeNode{Polygon; IsHole; Children}` type and a
-variant (or option) that returns the hierarchy instead of flattening. Pure
-post-processing, no engine change. Low–medium effort.
+**(d) Nested `PolyTree` output (done).** Root `PolyTree{Children}` /
+`PolyTreeNode{Polygon; IsHole; Children}` plus `Builder.ExecuteTree(op)`.
+Rather than thread tree assembly through the sweep, `ExecuteTree` runs the same
+`execOp` as `Execute` (so it reuses every path — short-circuits, Xor
+composition, per-piece Difference, alternate fills — unchanged) and rebuilds the
+containment forest (§11.9) over the finished `MultiPolygon`'s rings to recover
+the depth-≥2 nesting a flat `MultiPolygon` discards (an island inside a hole is a
+top-level piece in the flat form, a depth-2 child in the tree). The forest logic
+is shared with `assembleResult` via `classifiedRing`/`buildContainmentForest`/
+`ringDepth`. `IsHole` = odd depth; winding normalized as elsewhere (filled CCW,
+hole CW). Pure post-processing, no engine change. Acceptance: the tree flattened
+(filled nodes → ExPolygon with their hole-children, islands promoted) equals the
+flat `Result.Closed`. Tests: `builder_tree_test.go`.
 
 **(e) Minkowski sum / difference.** `MinkowskiSum(pattern, path, closed)` places a
 copy of `pattern` at each `path` vertex and unions the copies plus the quads swept

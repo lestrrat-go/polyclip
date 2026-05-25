@@ -1,7 +1,8 @@
 package clip
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 
 	"github.com/lestrrat-go/polyclip/fixed"
 )
@@ -301,11 +302,11 @@ func (s *sweep) doIntersections(botY, topY fixed.Coord) {
 	if len(nodes) == 0 {
 		return
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		if nodes[i].pt.Y != nodes[j].pt.Y {
-			return nodes[i].pt.Y < nodes[j].pt.Y
+	slices.SortFunc(nodes, func(a, b intersectNode) int {
+		if c := cmp.Compare(a.pt.Y, b.pt.Y); c != 0 {
+			return c
 		}
-		return nodes[i].pt.X < nodes[j].pt.X
+		return cmp.Compare(a.pt.X, b.pt.X)
 	})
 	s.processIntersectList(nodes)
 }
@@ -359,24 +360,28 @@ func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
 		items = append(items, xEdge{pos: i, seg: e.Seg})
 	}
 
-	// Candidate (lower, higher) AEL-position pairs to test exactly.
-	var pairs [][2]int
+	// Candidate (lower, higher) AEL-position pairs to test exactly. Each pair is
+	// packed into one uint64 as (lower<<32 | higher) — AEL positions are small
+	// non-negative ints, so this is lossless and its ascending uint64 order is
+	// exactly the (lower, higher) lexicographic order. Packing lets the dedup
+	// sort below use the specialized slices.Sort over a comparator closure.
+	var pairs []uint64
 	add := func(p, q int) {
 		if p > q {
 			p, q = q, p
 		}
-		pairs = append(pairs, [2]int{p, q})
+		pairs = append(pairs, uint64(p)<<32|uint64(q))
 	}
 
 	if len(items) >= 2 {
-		sort.Slice(items, func(i, j int) bool {
-			if c := cmpXAtY(items[i].seg, items[j].seg, botY); c != 0 {
-				return c < 0
+		slices.SortFunc(items, func(a, b xEdge) int {
+			if c := cmpXAtY(a.seg, b.seg, botY); c != 0 {
+				return c
 			}
-			if c := cmpXAtY(items[i].seg, items[j].seg, topY); c != 0 {
-				return c < 0
+			if c := cmpXAtY(a.seg, b.seg, topY); c != 0 {
+				return c
 			}
-			return items[i].pos < items[j].pos
+			return cmp.Compare(a.pos, b.pos)
 		})
 
 		// Edges concurrent at botY (cmpXAtY == 0) have no defined left-right
@@ -423,20 +428,15 @@ func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
 	// Sort + dedup: a pair found twice would otherwise be dispatched twice and
 	// swap the edges back. Sorted (lower, higher) order also makes the node list
 	// deterministic and matches the old full-scan ordering.
-	sort.Slice(pairs, func(i, j int) bool {
-		if pairs[i][0] != pairs[j][0] {
-			return pairs[i][0] < pairs[j][0]
-		}
-		return pairs[i][1] < pairs[j][1]
-	})
+	slices.Sort(pairs)
 	var nodes []intersectNode
-	var prev [2]int
-	for i, pr := range pairs {
-		if i > 0 && pr == prev {
+	var prev uint64
+	for i, key := range pairs {
+		if i > 0 && key == prev {
 			continue
 		}
-		prev = pr
-		s.addCrossing(pr[0], pr[1], botY, topY, &nodes)
+		prev = key
+		s.addCrossing(int(key>>32), int(key&0xffffffff), botY, topY, &nodes)
 	}
 	return nodes
 }

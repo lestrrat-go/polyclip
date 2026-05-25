@@ -174,116 +174,80 @@ across the random, large, degenerate, and holed differential buckets
 known gaps between current state and a complete drop-in for `makislicer`,
 roughly in priority order.
 
-### 7.1 Offset: inward-offset topology changes — DONE
+### 7.1 Offset: inward-offset topology changes
 
-`Offset` now re-resolves topology changes via a per-piece positive-fill
-self-union (§4.3). A dumbbell offset inward past its neck yields the two
-island pads; a U-shape / notch that closes resolves to the correct connected
-shape; an over-shrunk convex ring collapses to empty. Validated by
-`TestOffsetDumbbellSplits` (eight orientations), `TestOffsetUNotchCloses`, and
-`TestOffsetInwardErosionOracle` (a Monte-Carlo erosion oracle over random
-concave polygons), with the existing offset suite unchanged and the boolean
-differential still `idU=idD=idX=0`.
+`Offset` re-resolves topology changes via a per-piece positive-fill self-union
+(§4.3). A dumbbell offset inward past its neck yields the two island pads; a
+U-shape / notch that closes resolves to the correct connected shape; an
+over-shrunk convex ring collapses to empty. Covered by `TestOffsetDumbbellSplits`
+(eight orientations), `TestOffsetUNotchCloses`, and `TestOffsetInwardErosionOracle`
+(a Monte-Carlo erosion oracle over random concave polygons).
 
-Residual: robustness leans on a multi-frame (rotated) majority vote because the
-boolean sweep mis-resolves *snapped* same-source collinear coincident edges
-(common in axis-aligned and thin-neck inward offsets). The clean fix is to make
-the sweep handle same-source coincident edges directly under `FillPositive` —
-the in-sweep gap detailed in §7.2. Until then the multi-frame vote (≈8 sweeps
-per topology-changing piece) is the cost; non-topology-change offsets keep the
-exact `O(n)` fast path.
+Robustness leans on a multi-frame (rotated) majority vote because the boolean
+sweep mis-resolves *snapped* same-source collinear coincident edges (common in
+axis-aligned and thin-neck inward offsets) — the in-sweep gap detailed in §7.2.
+The vote costs ≈8 sweeps per topology-changing piece; non-topology-change
+offsets keep the exact `O(n)` fast path.
 
-### 7.2 Public `Simplify` — DONE; in-sweep coincident fix remains
+### 7.2 Public `Simplify` and the in-sweep coincident-edge limit
 
-**Public entry point (DONE).** `Simplify(m MultiPolygon)` (`boolean.go`) runs
-the Vatti engine over `m` as a single source (`clip.Sweep`, non-zero fill),
-bypassing the `mpolyEqual` idempotency short-circuit that made the old "run
-`Union` of `m` with itself" advice a no-op. A figure-eight splits into its two
-oppositely-wound loops, a doubly-traced ring collapses to one, a doubled-back
-spur cancels. Transversal (general-position) self-intersections resolve
-exactly; the snapped collinear degeneracy below is the residual limit. The
-misleading doc comments in `polygon.go` (`ExPolygon`, `Clean`) and `validate.go`
-(`IssueSelfIntersecting`) now point at `Simplify`. Tests: `simplify_test.go`.
+`Simplify(m MultiPolygon)` (`boolean.go`) runs the Vatti engine over `m` as a
+single source (`clip.Sweep`, non-zero fill), bypassing the `mpolyEqual`
+idempotency short-circuit. A figure-eight splits into its two oppositely-wound
+loops, a doubly-traced ring collapses to one, a doubled-back spur cancels.
+Transversal (general-position) self-intersections resolve exactly; the snapped
+collinear degeneracy below is the residual limit. The doc comments in
+`polygon.go` (`ExPolygon`, `Clean`) and `validate.go` (`IssueSelfIntersecting`)
+point at `Simplify`. Tests: `simplify_test.go`.
 
-**In-sweep same-source coincident edges (REMAINS — the deeper root cause).**
-The boolean sweep still mis-resolves a *single* self-overlapping ring with
-same-source collinear coincident edges (axis-aligned and thin-neck inward
-offsets produce them; it is why §7.1's offset self-union needs the multi-frame
-rotated majority vote). The minimal repro is the dumbbell offset by `-2`: its
-raw offset ring traces the left-pad right wall twice over `y∈[4,6]`, so
-`SplitOverlaps` makes a doubled coincident edge there. Investigation
-(2026-05-24) pinned the mechanism precisely:
+**In-sweep same-source coincident edges (the residual limit).** The boolean
+sweep mis-resolves a *single* self-overlapping ring with same-source collinear
+coincident edges (axis-aligned and thin-neck inward offsets produce them; it is
+why §7.1's offset self-union needs the rotated majority vote). The minimal case
+is the dumbbell offset by `-2`: its raw offset ring traces the left-pad right
+wall twice over `y∈[4,6]`, so `SplitOverlaps` makes a doubled coincident edge
+there. The problem resolves into three coupled layers:
 
-- A self-overlapping ring's winding genuinely reaches 2 across a doubled wall;
-  the pad interior is `+1`, the dropped neck fold `−1`, and the doubled wall is
-  a `+1 → 0 → −1` step represented by two coincident unit edges. So the wall's
-  true boundary edge has `WindSelf == 0` on its right (the infinitesimal sliver),
-  not `1`.
-- `DedupCoincidentEdges` collapses the doubled edge to one, destroying the `+1`
-  count the second pass carries — making winding locally inconsistent (the
-  sweep then emits 3 spurious pieces / area 40 instead of 2 pads / area 72).
-  Keeping both edges instead is necessary but not sufficient.
-- `FillPositive`'s contributing test is `WindSelf == 1` (exact), which wrongly
-  drops the `+1/0` boundary edge; the correct rule is a winding-`>0` *boundary*
-  test, `(WindSelf > 0) != (WindSelf - WindDx > 0)`.
-A second investigation (2026-05-24, WIP branch `fix-positive-fill-coincident`)
-disproved the "keep both edges + boundary test + pure incremental" theory as
-*sufficient* and resolved the problem into three coupled layers:
-
-- **L1 — winding core.** Under `FillPositive`/`FillNegative` `Classify` must
-  compute `WindSelf` as a pure signed prefix sum of same-source `WindDx` (the
-  NonZero "reversing direction" heuristic wrongly keeps `WindSelf` at magnitude
-  1 across a doubled wall instead of stepping `+1 → 0 → −1`); the contributing
-  test must be the boundary form `(WindSelf>0) != (WindSelf−WindDx>0)`; and the
-  `poly_ops.go` incremental update must be a pure `+=`/`−=` (no NonZero
-  reflection). All gated on the fill rule so the boolean differential is
-  untouched. *Implemented and verified correct on the vertical walls.*
+- **L1 — winding core.** Under `FillPositive`/`FillNegative`, `Classify` computes
+  `WindSelf` as a pure signed prefix sum of same-source `WindDx` (the NonZero
+  "reversing direction" heuristic wrongly holds `WindSelf` at magnitude 1 across
+  a doubled wall instead of stepping `+1 → 0 → −1`); the contributing test is the
+  boundary form `(WindSelf>0) != (WindSelf−WindDx>0)`; and the `poly_ops.go`
+  incremental update is a pure `+=`/`−=` (no NonZero reflection). All gated on the
+  fill rule so the boolean (NonZero) path is untouched.
 - **L2 — bound reconstruction.** `BuildLocalMinima`'s segment-soup walker
-  (`traceRing` via input-direction adjacency) cannot disambiguate the
-  *collinear degree-4 vertices* the doubled wall creates after `SplitOverlaps`
-  (two identical out-edges at one vertex, indistinguishable by angle), so it
-  traces spurious sub-cycles. The fix is to build local minima from the ring in
-  *traversal order* (Clipper2-style), splitting each ordered segment only at
-  the endpoints the soup passes introduce — the two wall passes then occupy
-  distinct sequence positions. *Implemented as `SweepRingsFill` /
-  `splitOrderedRings` (`clip/sweep_ordered.go`); with L1+L2 the canonical
-  dumbbell's left island resolves exactly (area 36).*
-- **L3 — exact-coincidence ambiguity (FUNDAMENTAL — the vote is the answer).**
-  Two parts. (a) A local-min bound that *leads with a horizontal* is ordered in
-  the AEL at the horizontal's near X, so the prefix sum runs before the bound's
-  real wall is placed. *Fixed* by ordering the prefix sum by each bound's
-  position just **above** the scanline (the far end of a leading horizontal);
-  this resolves the dumbbell's left island and excludes the neck from it.
-  (b) The residual is fundamental: two **exactly coincident** ascending walls
-  over a Y-range (the dumbbell's `x=22` over `y∈[4,6]` — the right square's
-  left wall and the neck's right wall) are geometrically indistinguishable at
-  the local-min scanline. Being parallel they *never cross*, so no event ever
-  orders them, and the winding prefix cannot tell which carries the `0` sliver
-  vs the `+1` boundary. Deferring the ring-start decision does not help (no
-  ordering event ever arrives); a topology look-ahead to where the walls
-  diverge is itself degenerate because they diverge through horizontals at the
-  same `Y`.
+  (`traceRing` via input-direction adjacency) cannot disambiguate the *collinear
+  degree-4 vertices* the doubled wall creates after `SplitOverlaps` (two identical
+  out-edges at one vertex, indistinguishable by angle), so it traces spurious
+  sub-cycles. `SweepRingsFill` / `splitOrderedRings` (`clip/sweep_ordered.go`)
+  instead build local minima from the ring in *traversal order* (Clipper2-style),
+  so the two wall passes occupy distinct sequence positions.
+- **L3 — exact-coincidence ambiguity (fundamental).** Two parts. (a) A local-min
+  bound that *leads with a horizontal* is ordered in the AEL at the horizontal's
+  near X, so the prefix sum runs before the bound's real wall is placed; resolved
+  by ordering the prefix sum by each bound's position just **above** the scanline
+  (the far end of a leading horizontal). (b) The residual is fundamental: two
+  **exactly coincident** ascending walls over a Y-range (the dumbbell's `x=22`
+  over `y∈[4,6]`) are geometrically indistinguishable at the local-min scanline.
+  Being parallel they *never cross*, so no event ever orders them, and the winding
+  prefix cannot tell which carries the `0` sliver vs the `+1` boundary; a topology
+  look-ahead to where they diverge is itself degenerate because they diverge
+  through horizontals at the same `Y`.
 
 The standard computational-geometry resolution for such exact degeneracies is
 **perturbation** — and the multi-frame rotation vote (§7.1) *is* perturbation
-that breaks the coincidence so a clean transversal sweep resolves it. So
-"retire the vote" is reframed: the vote is the **correct design** for the
-exact-coincidence residual, not a stopgap, until/unless the engine gains
-principled symbolic perturbation (Simulation-of-Simplicity style) letting a
-single sweep break ties deterministically.
-
-**Crossing-dispatch restructure (DONE).** `Offset` now runs its self-union on
-the ordered-minima engine (`SweepRingsFill`) plus the rotation vote, replacing
-the soup path. The blocker that previously made the ordered path worse —
-transversal self-crossings (rotated pinches) merging into one island — was a
-NonZero assumption in `IntersectEdges`: `branchNeitherHot` and the edge
-eligibility guard keyed on `absInt(WindSelf) == 1`, which drops a positive-fill
-boundary whose `WindSelf` is `0` (the doubled-wall sliver). Under `AEL.Ordered`
-both are now driven by the `Contributing` (winding-`>0` boundary) flag instead;
-general-position self-intersections resolve at a single sweep, and the vote is
-needed only for the exact-coincidence residual above. All gated on
-`AEL.Ordered`, so the boolean (`FillNonZero`) path is untouched (differential
-`idU=idD=idX=0`). See `docs/offset-coincidence-perturbation.md`.
+that breaks the coincidence so a clean transversal sweep resolves it. The vote is
+therefore the **correct design** for the exact-coincidence residual, not a
+stopgap, until/unless the engine gains principled symbolic perturbation
+(Simulation-of-Simplicity style) letting a single sweep break ties
+deterministically. `Offset` runs its self-union on the ordered-minima engine
+(`SweepRingsFill`) plus the rotation vote; under `AEL.Ordered` the edge
+eligibility guards in `IntersectEdges` (`branchNeitherHot` and the dispatch
+guard) key on the `Contributing` (winding-`>0` boundary) flag rather than
+`absInt(WindSelf) == 1`, so a positive-fill boundary whose `WindSelf` is `0`
+(the doubled-wall sliver) is not dropped and general-position self-intersections
+resolve in a single sweep. All gated on `AEL.Ordered`, so the boolean
+(`FillNonZero`) path is untouched. See `docs/offset-coincidence-perturbation.md`.
 
 ### 7.3 Performance
 
@@ -352,29 +316,25 @@ ordered-ring reconstruction (`clip/sweep_ordered.go SweepRingsFill`,
 real §7.5 fix and is left for a future increment; until then the error path
 stands and is documented.
 
-**`processHorzJoins` infinite-loop hang — FIXED.** The reachability harness
-first surfaced a *hang* (not an error) on `Difference` of two skylines: the
-merge branch of `processHorzJoins` re-threaded only `or1`'s original arc
-(`op1b → j.op1`) of the unified cycle, leaving `or2`'s arc still pointing at the
-released (dead, `Pts==nil`) `or2`. A later join then read that stale OutRec,
-mis-detected a same-ring split as a cross-ring merge, and spliced one cycle into
-a broken one — an unterminating re-thread walk. Fix: re-thread the **entire**
-unified cycle (matching `JoinOutrecPaths`), so no OutPt is left on the dead
-ring and the `or1==or2` split/merge test always reads live pointers. Differential
-byte-identical (idU=idD=idX=0, gross 93/236). Regression: `TestHorizJoinHangRepro`.
+### 7.6 Axis-aligned identity violations (collinear shared edge)
 
-### 7.6 Axis-aligned identity violations (collinear shared edge) — DONE
+Distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds, on inputs the
+bound model handles). A class of algebraic-identity violations on axis-aligned
+pairs sharing collinear boundary segments, dominated by a **coincident
+cross-source vertical wall** (one polygon's wall lies exactly on the other's,
+overlapping in Y). `TestHorizontalFallbackReachability` asserts zero such
+violations over ~78k ops, and `TestHorizIdentityRepro` covers the minimal case.
+Five fixes resolve them, in two layers — sweep-level resolution of the coincident
+confluences, and a result-level subset invariant for the residue:
 
-Pre-existing, distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds,
-on inputs the bound model DOES handle). A class of algebraic-identity violations
-on axis-aligned pairs sharing collinear boundary segments, dominated by a
-**coincident cross-source vertical wall** (one polygon's wall lies exactly on the
-other's, overlapping in Y). `TestHorizontalFallbackReachability` logged ~106 such
-violations over ~78k ops; that count is now **0** and asserted there. Five fixes
-landed, in two layers — sweep-level resolution of the coincident confluences, and
-a result-level subset invariant for the residue:
-
-1. **Intersect spurious-lobe** (below) — the outer-max coincident-horizontal apex.
+1. **Intersect spurious-lobe at an outer-max coincident-horizontal apex**
+   (`clip/sweep.go`). The shared segment is one source's outer local maximum (its
+   two bounds meet there and it is absent above), so the intersection ring should
+   close along that edge. When the coupled edge reaches the apex along a coincident
+   horizontal, `closeBound` decides "continues above" with `otherSourceWindingAbove`
+   — a winding probe at the apex column counting only edges that span **strictly
+   above** the scanline, so a same-Y local maximum of the other source does not
+   register as present and the ring closes. Scoped to `OpIntersect`.
 2. **Coincident AEL edge ordering by divergence** (`aelLess` / `coincidentDivergeLess`,
    `clip/ael.go`). Two exactly-coincident edges tie on both CurrX and slope, so a
    static order is arbitrary and decides each wall's `WindOther` (hence which
@@ -384,8 +344,7 @@ a result-level subset invariant for the residue:
    bounds' upward vertex paths to the first differing vertex and order by which
    ray runs left (128-bit cross product — the 2^60 grid overflows int64). A bound
    that tops out at the divergence contributes a synthetic turn vertex from its
-   `WindDx` (interior side). Differential byte-identical (idU=idD=idX=0).
-
+   `WindDx` (interior side).
 3. **`closeBound` cross-source self-closure by above-membership** — decides
    "ring continues above the coincident apex" from the winding STRICTLY ABOVE the
    scanline (all ops, via `opMember`), closing at the seam via `AddLocalMaxPoly`
@@ -404,46 +363,11 @@ a result-level subset invariant for the residue:
 
 **Xor** is computed by composition — `Difference(Union(a,b), Intersect(a,b))` —
 rather than the direct `OpXor` sweep, which mis-resolves a residual class of these
-confluences that U/I/D (now correct) handle. The symmetric difference is exact.
-
-All five fixes are differential byte-identical (idU=idD=idX=0, gross 93/236);
-`TestHorizontalFallbackReachability` idFails == 0 is asserted as the regression
-guard, and `TestHorizIdentityRepro` covers the minimal case. The direct `OpXor`
-sweep and the sweep-level over-trace at clip-exits-subject crossings remain (now
-masked by composition + the subset filter); a future per-segment winding model at
-confluences would let `OpXor` and the filtered Difference cases resolve in-sweep.
-
-**Intersect spurious lobe — FIXED.** The symptom was an algebraic-identity
-violation on axis-aligned pairs sharing a collinear boundary segment — e.g.
-`A=[(0,0)(2,0)(2,1)(1,1)(0,1)]`, `B=[(1,-1)(3,-1)(3,3)(2,3)(2,1)(1,1)]` (sharing
-(1,1)-(2,1)): `Union` returns 7 and `Intersect` returns 2, so `U = A+B−I`
-breaks. The root cause was in **`Intersect`, not `Union`**: the true union *is*
-7 (A=2, B=6, true I=1), and the bug was that Intersect emitted a **spurious
-second lobe** — a triangle `(2,1)-(3,3)-(2,3)` lying inside B's upper-right
-region but entirely *outside* A — making I=2 instead of 1.
-
-The shared segment (1,1)-(2,1) is **A's outer local maximum**: A's two bounds
-meet there and A is absent above it. The intersection ring (the unit square
-[1,2]x[0,1]) should close along that edge. Instead, when A's right wall reached
-the apex, `closeBound`'s cross-source self-closure check (which removes the
-maxing edge and reclassifies the coupled hot edge to test whether the region
-continues above) was fooled: the coupled edge reaches the apex along a
-*coincident horizontal*, and A's *other* bound (the left wall) is still in the
-AEL at that scanline — it tops out at the same Y but at a different X/event — so
-the scanline reclassify still counts A as present and kept the ring open. B's
-hot bound was then dragged up out of A, threading the spurious lobe (a figure-8
-pinched at (2,1) that `splitSelfTouchingRings` split into the square + the stray
-triangle).
-
-Fix (`clip/sweep.go`): when the coupled edge reaches the apex along a coincident
-horizontal, decide "continues above" with `otherSourceWindingAbove` — a winding
-probe at the apex column counting only edges that span **strictly above** the
-scanline (so a same-Y local maximum of the other source does not register as
-present). When the other source is absent above, the coincident edge is the top
-of the intersection region and the ring closes. Scoped to `OpIntersect`;
-differential byte-identical (idU=idD=idX=0, gross 93/236). Regression:
-`TestHorizIdentityRepro`. This cut the reachability harness's logged identity
-violations from ~106 to 73 (the remainder are the residual staircase cases).
+confluences that U/I/D handle correctly. The symmetric difference is exact. The
+direct `OpXor` sweep and the sweep-level over-trace at clip-exits-subject
+crossings remain latent (masked by composition + the subset filter); a future
+per-segment winding model at confluences would let `OpXor` and the filtered
+Difference cases resolve in-sweep.
 
 ---
 

@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), Minkowski sum/difference, and a fast rectangle clip. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`.
+Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset) and a fast rectangle clip. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`.
 
 ---
 
@@ -308,7 +308,7 @@ state vs. Clipper2's planar API:
 | Open-path clipping           | gap      | (c)  |
 | Open-path offset (end caps)  | gap      | (c) / §7.4 |
 | Nested `PolyTree` output     | done     | (d)  |
-| Minkowski sum / difference   | gap      | (e)  |
+| Minkowski sum / difference   | done     | (e)  |
 | RectClip / RectClipLines     | gap      | (f)  |
 | Path reduction (Douglas–Peucker) | done | (g)  |
 | Z-coords / vertex callback   | gap      | (h)  |
@@ -387,10 +387,16 @@ hole CW). Pure post-processing, no engine change. Acceptance: the tree flattened
 (filled nodes → ExPolygon with their hole-children, islands promoted) equals the
 flat `Result.Closed`. Tests: `builder_tree_test.go`.
 
-**(e) Minkowski sum / difference.** `MinkowskiSum(pattern, path, closed)` places a
-copy of `pattern` at each `path` vertex and unions the copies plus the quads swept
-between consecutive placements (`UnionAll`); `MinkowskiDiff` reflects the pattern.
-Built entirely on existing `Union`. Medium effort, low risk.
+**(e) Minkowski sum / difference (done).** `MinkowskiSum(pattern, path, closed)`
+emits, for each consecutive pair of `path` vertices, the quadrilateral strip
+between the two `pattern` placements (normalized to positive winding) and unions
+all the strips with `UnionAll` under the non-zero rule; `MinkowskiDiff` reflects
+the pattern through the origin (`path[i] - pattern[k]`). `closed` strips between
+the last and first vertices as well. A faithful port of Clipper2's
+`Minkowski`/`MinkowskiSum`/`MinkowskiDiff`. Built entirely on existing `Union`, no
+engine change, so the differential is structurally unaffected. Tests:
+`minkowski_test.go` (open-segment sweep → exact rectangle, closed square loop →
+frame with hole, empty inputs).
 
 **(f) RectClip / RectClipLines.** A specialized `O(n)` per-path Sutherland–Hodgman
 clip against an axis-aligned rectangle (closed paths) and an open-path variant,

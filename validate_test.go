@@ -3,6 +3,8 @@ package polyclip
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateNoIssues(t *testing.T) {
@@ -12,17 +14,13 @@ func TestValidateNoIssues(t *testing.T) {
 			{{X: 2, Y: 2}, {X: 2, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 2}}, // CW
 		},
 	}}
-	if got := m.Validate(); got != nil {
-		t.Errorf("expected no issues, got %v", got)
-	}
+	require.Nil(t, m.Validate(), "expected no issues, got %v", m.Validate())
 }
 
 func TestValidateTooFewVertices(t *testing.T) {
 	m := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}} // only 2 vertices
 	issues := m.Validate()
-	if len(issues) != 1 || issues[0].Kind != IssueTooFewVertices {
-		t.Errorf("expected one too-few-vertices issue, got %v", issues)
-	}
+	require.True(t, len(issues) == 1 && issues[0].Kind == IssueTooFewVertices, "expected one too-few-vertices issue, got %v", issues)
 }
 
 func TestValidateWrongWindingOuter(t *testing.T) {
@@ -31,9 +29,7 @@ func TestValidateWrongWindingOuter(t *testing.T) {
 		{X: 0, Y: 0}, {X: 0, Y: 10}, {X: 10, Y: 10}, {X: 10, Y: 0},
 	}}}
 	issues := m.Validate()
-	if len(issues) != 1 || issues[0].Kind != IssueWrongWinding {
-		t.Errorf("expected wrong-winding issue, got %v", issues)
-	}
+	require.True(t, len(issues) == 1 && issues[0].Kind == IssueWrongWinding, "expected wrong-winding issue, got %v", issues)
 }
 
 func TestValidateWrongWindingHole(t *testing.T) {
@@ -43,9 +39,7 @@ func TestValidateWrongWindingHole(t *testing.T) {
 		Holes: []Polygon{{{X: 4, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 4, Y: 6}}}, // CCW
 	}}
 	issues := m.Validate()
-	if len(issues) != 1 || issues[0].Kind != IssueWrongWinding || issues[0].Ring != 0 {
-		t.Errorf("expected wrong-winding hole issue, got %v", issues)
-	}
+	require.True(t, len(issues) == 1 && issues[0].Kind == IssueWrongWinding && issues[0].Ring == 0, "expected wrong-winding hole issue, got %v", issues)
 }
 
 func TestValidateSelfIntersecting(t *testing.T) {
@@ -61,9 +55,7 @@ func TestValidateSelfIntersecting(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Errorf("expected self-intersecting issue, got %v", issues)
-	}
+	require.True(t, found, "expected self-intersecting issue, got %v", issues)
 }
 
 func TestValidateHoleOutsideOuter(t *testing.T) {
@@ -79,9 +71,7 @@ func TestValidateHoleOutsideOuter(t *testing.T) {
 			foundOutside = true
 		}
 	}
-	if !foundOutside {
-		t.Errorf("expected hole-outside-outer, got %v", issues)
-	}
+	require.True(t, foundOutside, "expected hole-outside-outer, got %v", issues)
 }
 
 func TestValidateOverlappingHoles(t *testing.T) {
@@ -100,19 +90,13 @@ func TestValidateOverlappingHoles(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Errorf("expected holes-overlap issue, got %v", issues)
-	}
+	require.True(t, found, "expected holes-overlap issue, got %v", issues)
 }
 
 func TestValidateIssueString(t *testing.T) {
 	iss := ValidationIssue{Kind: IssueWrongWinding, ExIdx: 1, Ring: 2, Msg: "test"}
 	s := iss.String()
-	if !strings.Contains(s, "wrong-winding") || !strings.Contains(s, "ex[1]") || !strings.Contains(s, "hole[2]") {
-		t.Errorf("unexpected format: %s", s)
-	}
+	require.True(t, strings.Contains(s, "wrong-winding") && strings.Contains(s, "ex[1]") && strings.Contains(s, "hole[2]"), "unexpected format: %s", s)
 	iss.Ring = -1
-	if s := iss.String(); !strings.Contains(s, "outer") {
-		t.Errorf("expected 'outer' for ring=-1, got %s", s)
-	}
+	require.Contains(t, iss.String(), "outer", "expected 'outer' for ring=-1, got %s", iss.String())
 }

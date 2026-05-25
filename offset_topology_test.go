@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // dumbbellShape: two 10×10 pads joined by a thin neck (y in [4,6]).
@@ -33,16 +35,9 @@ func TestOffsetDumbbellSplits(t *testing.T) {
 	for _, deg := range []float64{0, 17, 90, 45, 30, 60, 7, 123} {
 		in := MultiPolygon{ExPolygon{Outer: rotatePoly(dumbbellShape(), deg)}}
 		got, err := Offset(in, -2, OffsetOptions{Join: JoinMiter})
-		if err != nil {
-			t.Fatalf("deg=%g: unexpected error %v", deg, err)
-		}
-		if len(got) != 2 {
-			t.Errorf("deg=%g: got %d pieces, want 2 islands (area %.1f)", deg, len(got), got.Area())
-			continue
-		}
-		if a := got.Area(); math.Abs(a-72) > 4 {
-			t.Errorf("deg=%g: total area %.1f, want ~72", deg, a)
-		}
+		require.NoError(t, err, "deg=%g: unexpected error", deg)
+		require.Len(t, got, 2, "deg=%g: got %d pieces, want 2 islands (area %.1f)", deg, len(got), got.Area())
+		require.InDelta(t, 72, got.Area(), 4, "deg=%g: total area %.1f, want ~72", deg, got.Area())
 	}
 }
 
@@ -59,19 +54,13 @@ func TestOffsetUNotchCloses(t *testing.T) {
 	in := MultiPolygon{ExPolygon{Outer: u}}
 	// Slot half-width is 1, so d=-1.5 (>1) closes it.
 	got, err := Offset(in, -1.5, OffsetOptions{Join: JoinMiter})
-	if err != nil {
-		t.Fatalf("err %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("got %d pieces, want 1 solid blob", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "got %d pieces, want 1 solid blob", len(got))
 	// The eroded U with the slot closed has no interior hole and the slot
 	// region is filled: a point in the former slot mouth (6, 9) should now be
 	// inside the eroded body's bounding extent only if filled. We mainly assert
 	// the result is a single simple piece with no holes.
-	if len(got[0].Holes) != 0 {
-		t.Errorf("eroded U should have no holes, got %d", len(got[0].Holes))
-	}
+	require.Len(t, got[0].Holes, 0, "eroded U should have no holes, got %d", len(got[0].Holes))
 }
 
 // TestOffsetInwardErosionOracle is the Monte-Carlo erosion oracle (DESIGN.md
@@ -90,9 +79,7 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 		if err == ErrOffsetEmpty {
 			continue // collapsed entirely — acceptable if input is small
 		}
-		if err != nil {
-			t.Fatalf("trial %d: err %v", trial, err)
-		}
+		require.NoError(t, err, "trial %d", trial)
 		band := 0.15 * d // skip points within this distance of the decision boundary
 		bb := poly.BoundingBox()
 		mism, checked := 0, 0
@@ -119,10 +106,9 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 		}
 		// Allow a small mismatch rate for residual near-boundary / round-join
 		// tessellation effects.
-		if checked > 0 && float64(mism)/float64(checked) > 0.02 {
-			t.Errorf("trial %d (d=%.2f): erosion mismatch %d/%d (%.1f%%)",
-				trial, d, mism, checked, 100*float64(mism)/float64(checked))
-		}
+		require.False(t, checked > 0 && float64(mism)/float64(checked) > 0.02,
+			"trial %d (d=%.2f): erosion mismatch %d/%d (%.1f%%)",
+			trial, d, mism, checked, 100*float64(mism)/float64(checked))
 	}
 }
 

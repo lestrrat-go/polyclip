@@ -1,6 +1,10 @@
 package polyclip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 // TestSelfUnionPositiveRobustDegenerate guards the two ways the multi-frame
 // self-union resolver used to abort the whole process on a degenerate input
@@ -42,9 +46,7 @@ func TestSelfUnionPositiveRobustDegenerate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res := selfUnionPositive(tc.rings)
-			if len(res) == 0 || res.Area() <= 0 {
-				t.Fatalf("selfUnionPositive returned no usable region: pieces=%d area=%v", len(res), res.Area())
-			}
+			require.False(t, len(res) == 0 || res.Area() <= 0, "selfUnionPositive returned no usable region: pieces=%d area=%v", len(res), res.Area())
 		})
 	}
 }

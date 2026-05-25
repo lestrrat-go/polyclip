@@ -1,6 +1,10 @@
 package polyclip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestBBoxIntersects(t *testing.T) {
 	cases := []struct {
@@ -58,12 +62,8 @@ func TestBBoxIntersects(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		if got := c.a.Intersects(c.b); got != c.want {
-			t.Errorf("%s: %v want %v", c.name, got, c.want)
-		}
+		require.Equal(t, c.want, c.a.Intersects(c.b), "%s: %v want %v", c.name, c.a.Intersects(c.b), c.want)
 		// Symmetric.
-		if got := c.b.Intersects(c.a); got != c.want {
-			t.Errorf("%s (symmetric): %v want %v", c.name, got, c.want)
-		}
+		require.Equal(t, c.want, c.b.Intersects(c.a), "%s (symmetric): %v want %v", c.name, c.b.Intersects(c.a), c.want)
 	}
 }

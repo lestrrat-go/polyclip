@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // polylinesEqual (rectclip_test.go) compares open-path result sets for exact
@@ -12,9 +14,7 @@ import (
 func openResult(t *testing.T, b *Builder, op Operation) []Polyline {
 	t.Helper()
 	res, err := b.Execute(op)
-	if err != nil {
-		t.Fatalf("Execute(%v): %v", op, err)
-	}
+	require.NoError(t, err, "Execute(%v): %v", op, err)
 	return res.Open
 }
 
@@ -42,9 +42,7 @@ func TestOpenPathCrossingClip(t *testing.T) {
 	for _, c := range cases {
 		b := NewBuilder().AddOpenSubject(line).AddClip(clip)
 		got := openResult(t, b, c.op)
-		if !polylinesEqual(got, c.want) {
-			t.Errorf("op %v: got %v, want %v", c.op, got, c.want)
-		}
+		require.True(t, polylinesEqual(got, c.want), "op %v: got %v, want %v", c.op, got, c.want)
 	}
 }
 
@@ -59,9 +57,7 @@ func TestOpenPathUnionWithSubject(t *testing.T) {
 	got := openResult(t, b, OpUnion)
 	// Inside subject∪clip is x in (0,8); keep outside: [-1,0] and [8,11].
 	want := []Polyline{pl(pt(-1, 5), pt(0, 5)), pl(pt(8, 5), pt(11, 5))}
-	if !polylinesEqual(got, want) {
-		t.Errorf("Union open got %v, want %v", got, want)
-	}
+	require.True(t, polylinesEqual(got, want), "Union open got %v, want %v", got, want)
 }
 
 // TestOpenPathStitchAcrossVertex checks that a kept run continues across a path
@@ -73,9 +69,7 @@ func TestOpenPathStitchAcrossVertex(t *testing.T) {
 	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
 	want := []Polyline{pl(pt(2, 5), pt(5, 5), pt(5, 2))}
-	if !polylinesEqual(got, want) {
-		t.Errorf("stitch got %v, want %v", got, want)
-	}
+	require.True(t, polylinesEqual(got, want), "stitch got %v, want %v", got, want)
 }
 
 // TestOpenPathThroughVertex clips a diagonal that enters and exits a square
@@ -87,9 +81,7 @@ func TestOpenPathThroughVertex(t *testing.T) {
 	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
 	want := []Polyline{pl(pt(2, 2), pt(8, 8))}
-	if !polylinesEqual(got, want) {
-		t.Errorf("through-vertex got %v, want %v", got, want)
-	}
+	require.True(t, polylinesEqual(got, want), "through-vertex got %v, want %v", got, want)
 }
 
 // TestOpenPathMultipleClips clips a line crossing two disjoint clip squares;
@@ -101,9 +93,7 @@ func TestOpenPathMultipleClips(t *testing.T) {
 		AddClip(mpRect(12, 2, 16, 8))
 	got := openResult(t, b, OpIntersect)
 	want := []Polyline{pl(pt(2, 5), pt(6, 5)), pl(pt(12, 5), pt(16, 5))}
-	if !polylinesEqual(got, want) {
-		t.Errorf("multi-clip got %v, want %v", got, want)
-	}
+	require.True(t, polylinesEqual(got, want), "multi-clip got %v, want %v", got, want)
 }
 
 // TestOpenPathEmptyClip checks degenerate operands: Intersect with no clip
@@ -112,14 +102,10 @@ func TestOpenPathEmptyClip(t *testing.T) {
 	line := pl(pt(0, 0), pt(10, 0))
 
 	gotI := openResult(t, NewBuilder().AddOpenSubject(line), OpIntersect)
-	if len(gotI) != 0 {
-		t.Errorf("Intersect empty clip: got %v, want none", gotI)
-	}
+	require.Empty(t, gotI, "Intersect empty clip: got %v, want none", gotI)
 	gotD := openResult(t, NewBuilder().AddOpenSubject(line), OpDifference)
 	want := []Polyline{line}
-	if !polylinesEqual(gotD, want) {
-		t.Errorf("Difference empty clip: got %v, want %v", gotD, want)
-	}
+	require.True(t, polylinesEqual(gotD, want), "Difference empty clip: got %v, want %v", gotD, want)
 }
 
 // TestOpenPathFullyInside / outside need no splitting.
@@ -128,25 +114,17 @@ func TestOpenPathWholeRuns(t *testing.T) {
 	inside := pl(pt(2, 2), pt(8, 8))
 
 	gotI := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpIntersect)
-	if !polylinesEqual(gotI, []Polyline{inside}) {
-		t.Errorf("inside Intersect: got %v, want whole line", gotI)
-	}
+	require.True(t, polylinesEqual(gotI, []Polyline{inside}), "inside Intersect: got %v, want whole line", gotI)
 	gotD := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpDifference)
-	if len(gotD) != 0 {
-		t.Errorf("inside Difference: got %v, want none", gotD)
-	}
+	require.Empty(t, gotD, "inside Difference: got %v, want none", gotD)
 }
 
 // TestOpenPathNoOpenSubject confirms closed-only Execute leaves Open nil.
 func TestOpenPathNoOpenSubject(t *testing.T) {
 	res, err := NewBuilder().AddSubject(mpRect(0, 0, 4, 4)).
 		AddClip(mpRect(2, 2, 6, 6)).Execute(OpIntersect)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Open != nil {
-		t.Errorf("closed-only Open = %v, want nil", res.Open)
-	}
+	require.NoError(t, err)
+	require.Nil(t, res.Open, "closed-only Open = %v, want nil", res.Open)
 }
 
 // TestOpenPathShortDropped checks polylines with fewer than two points produce
@@ -157,9 +135,7 @@ func TestOpenPathShortDropped(t *testing.T) {
 		AddOpenSubject(pl()).         // empty
 		AddClip(mpRect(0, 0, 10, 10))
 	got := openResult(t, b, OpIntersect)
-	if len(got) != 0 {
-		t.Errorf("short polylines: got %v, want none", got)
-	}
+	require.Empty(t, got, "short polylines: got %v, want none", got)
 }
 
 // TestOpenPathReset confirms Reset clears accumulated open subjects.
@@ -167,12 +143,8 @@ func TestOpenPathReset(t *testing.T) {
 	b := NewBuilder().AddOpenSubject(pl(pt(0, 0), pt(10, 0)))
 	b.Reset()
 	res, err := b.Execute(OpDifference)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Open != nil {
-		t.Errorf("after Reset, Open = %v, want nil", res.Open)
-	}
+	require.NoError(t, err)
+	require.Nil(t, res.Open, "after Reset, Open = %v, want nil", res.Open)
 }
 
 // distToSeg returns the Euclidean distance from p to segment ab.
@@ -254,10 +226,9 @@ func TestOpenPathSampledOracle(t *testing.T) {
 					if nearAnyRing(rings, p, margin) {
 						continue
 					}
-					if keep(p) != onPolylines(out, p, margin) {
-						t.Fatalf("iter %d op %v: point %v keep=%v on-output=%v\nline=%v clip=%v subj=%v\nout=%v",
-							iter, op, p, keep(p), onPolylines(out, p, margin), line, clip, subj, out)
-					}
+					require.Equal(t, keep(p), onPolylines(out, p, margin),
+						"iter %d op %v: point %v keep=%v on-output=%v\nline=%v clip=%v subj=%v\nout=%v",
+						iter, op, p, keep(p), onPolylines(out, p, margin), line, clip, subj, out)
 				}
 			}
 		}

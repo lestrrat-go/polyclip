@@ -3,6 +3,8 @@ package polyclip
 import (
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Fuzz infrastructure for the boolean engine. Each FuzzXxx target accepts
@@ -101,9 +103,7 @@ func FuzzUnion(f *testing.F) {
 		skipFuzzInputs(t, a, b)
 
 		got, err := Union(a, b)
-		if err != nil && err != ErrHorizontalNotSupported {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.True(t, err == nil || err == ErrHorizontalNotSupported, "unexpected error: %v", err)
 		if err != nil {
 			return
 		}
@@ -114,12 +114,8 @@ func FuzzUnion(f *testing.F) {
 			lo = bArea
 		}
 		hi := aArea + bArea
-		if gotArea < lo-fuzzAreaEps {
-			t.Errorf("Union area %g < max(a=%g,b=%g)", gotArea, aArea, bArea)
-		}
-		if gotArea > hi+fuzzAreaEps {
-			t.Errorf("Union area %g > a+b=%g", gotArea, hi)
-		}
+		require.False(t, gotArea < lo-fuzzAreaEps, "Union area %g < max(a=%g,b=%g)", gotArea, aArea, bArea)
+		require.False(t, gotArea > hi+fuzzAreaEps, "Union area %g > a+b=%g", gotArea, hi)
 	})
 }
 
@@ -133,9 +129,7 @@ func FuzzIntersect(f *testing.F) {
 		skipFuzzInputs(t, a, b)
 
 		got, err := Intersect(a, b)
-		if err != nil && err != ErrHorizontalNotSupported {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.True(t, err == nil || err == ErrHorizontalNotSupported, "unexpected error: %v", err)
 		if err != nil {
 			return
 		}
@@ -145,12 +139,8 @@ func FuzzIntersect(f *testing.F) {
 		if bArea < hi {
 			hi = bArea
 		}
-		if gotArea > hi+fuzzAreaEps {
-			t.Errorf("Intersect area %g > min(a=%g,b=%g)", gotArea, aArea, bArea)
-		}
-		if gotArea < -fuzzAreaEps {
-			t.Errorf("Intersect area negative: %g", gotArea)
-		}
+		require.False(t, gotArea > hi+fuzzAreaEps, "Intersect area %g > min(a=%g,b=%g)", gotArea, aArea, bArea)
+		require.False(t, gotArea < -fuzzAreaEps, "Intersect area negative: %g", gotArea)
 	})
 }
 
@@ -164,19 +154,13 @@ func FuzzDifference(f *testing.F) {
 		skipFuzzInputs(t, a, b)
 
 		got, err := Difference(a, b)
-		if err != nil && err != ErrHorizontalNotSupported {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.True(t, err == nil || err == ErrHorizontalNotSupported, "unexpected error: %v", err)
 		if err != nil {
 			return
 		}
 		// Area bound: |A\B| ≤ a.
-		if got.Area() > a.Area()+fuzzAreaEps {
-			t.Errorf("Difference area %g > a=%g", got.Area(), a.Area())
-		}
-		if got.Area() < -fuzzAreaEps {
-			t.Errorf("Difference area negative: %g", got.Area())
-		}
+		require.False(t, got.Area() > a.Area()+fuzzAreaEps, "Difference area %g > a=%g", got.Area(), a.Area())
+		require.False(t, got.Area() < -fuzzAreaEps, "Difference area negative: %g", got.Area())
 	})
 }
 
@@ -190,18 +174,12 @@ func FuzzXor(f *testing.F) {
 		skipFuzzInputs(t, a, b)
 
 		got, err := Xor(a, b)
-		if err != nil && err != ErrHorizontalNotSupported {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.True(t, err == nil || err == ErrHorizontalNotSupported, "unexpected error: %v", err)
 		if err != nil {
 			return
 		}
 		// Area bound: |A⊕B| ≤ a+b. Lower bound 0.
-		if got.Area() > a.Area()+b.Area()+fuzzAreaEps {
-			t.Errorf("Xor area %g > a+b=%g", got.Area(), a.Area()+b.Area())
-		}
-		if got.Area() < -fuzzAreaEps {
-			t.Errorf("Xor area negative: %g", got.Area())
-		}
+		require.False(t, got.Area() > a.Area()+b.Area()+fuzzAreaEps, "Xor area %g > a+b=%g", got.Area(), a.Area()+b.Area())
+		require.False(t, got.Area() < -fuzzAreaEps, "Xor area negative: %g", got.Area())
 	})
 }

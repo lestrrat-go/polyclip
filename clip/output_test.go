@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 // makeEdge returns an ActiveEdge with a synthetic Segment whose canonical
@@ -29,36 +30,25 @@ func TestAddLocalMinPolyCreatesRing(t *testing.T) {
 	pt := fixed.Point{X: 5, Y: 0}
 	op := AddLocalMinPoly(ael, e1, e2, pt, true)
 
-	if op == nil {
-		t.Fatal("nil op")
-	}
-	if op.P != pt {
-		t.Errorf("op.P = %v want %v", op.P, pt)
-	}
-	if op.Next != op || op.Prev != op {
-		t.Errorf("single-vertex cycle broken: Next=%p Prev=%p self=%p", op.Next, op.Prev, op)
-	}
-	if e1.Outrec == nil || e2.Outrec == nil || e1.Outrec != e2.Outrec {
-		t.Fatalf("Outrec not shared: e1=%p e2=%p", e1.Outrec, e2.Outrec)
-	}
+	require.NotNil(t, op, "nil op")
+	require.Equal(t, pt, op.P, "op.P = %v want %v", op.P, pt)
+	require.True(t, op.Next == op && op.Prev == op, "single-vertex cycle broken: Next=%p Prev=%p self=%p", op.Next, op.Prev, op)
+	require.NotNil(t, e1.Outrec, "Outrec not shared: e1=%p e2=%p", e1.Outrec, e2.Outrec)
+	require.NotNil(t, e2.Outrec, "Outrec not shared: e1=%p e2=%p", e1.Outrec, e2.Outrec)
+	require.Equal(t, e1.Outrec, e2.Outrec, "Outrec not shared: e1=%p e2=%p", e1.Outrec, e2.Outrec)
 	outrec := e1.Outrec
-	if outrec.Pts != op {
-		t.Errorf("outrec.Pts != op")
-	}
+	require.Equal(t, op, outrec.Pts, "outrec.Pts != op")
 	// With no prior hot edge and isNew=true the FrontEdge is the RIGHT-side
 	// edge (e2, at x=10), so the Pts cycle reads CCW (polyclip's mirror of
 	// Clipper2's convention — see AddLocalMinPoly). Orientation is resolved
 	// from AEL position, not argument order.
-	if outrec.FrontEdge != e2 || outrec.BackEdge != e1 {
-		t.Errorf("sides wrong: front=%p back=%p (want front=e2=%p back=e1=%p)",
-			outrec.FrontEdge, outrec.BackEdge, e2, e1)
-	}
-	if !e1.IsHotEdge() || !e2.IsHotEdge() {
-		t.Errorf("edges should be hot")
-	}
-	if e1.IsFront() || !e2.IsFront() {
-		t.Errorf("IsFront: e1=%v e2=%v want false true", e1.IsFront(), e2.IsFront())
-	}
+	require.Equal(t, e2, outrec.FrontEdge, "sides wrong: front=%p back=%p (want front=e2=%p back=e1=%p)",
+		outrec.FrontEdge, outrec.BackEdge, e2, e1)
+	require.Equal(t, e1, outrec.BackEdge, "sides wrong: front=%p back=%p (want front=e2=%p back=e1=%p)",
+		outrec.FrontEdge, outrec.BackEdge, e2, e1)
+	require.True(t, e1.IsHotEdge() && e2.IsHotEdge(), "edges should be hot")
+	require.False(t, e1.IsFront(), "IsFront: e1=%v e2=%v want false true", e1.IsFront(), e2.IsFront())
+	require.True(t, e2.IsFront(), "IsFront: e1=%v e2=%v want false true", e1.IsFront(), e2.IsFront())
 }
 
 func TestAddOutPtAppendsAndPrepends(t *testing.T) {
@@ -75,23 +65,17 @@ func TestAddOutPtAppendsAndPrepends(t *testing.T) {
 	// Add a point via e2 (front) — should prepend (become new head).
 	p1 := fixed.Point{X: 0, Y: 5}
 	newFront := AddOutPt(e2, p1)
-	if e2.Outrec.Pts != newFront {
-		t.Errorf("front add did not update Pts to new head")
-	}
+	require.Equal(t, newFront, e2.Outrec.Pts, "front add did not update Pts to new head")
 
 	// Add a point via e1 (back) — should append (head stays put).
 	p2 := fixed.Point{X: 10, Y: 5}
 	oldHead := e1.Outrec.Pts
 	AddOutPt(e1, p2)
-	if e1.Outrec.Pts != oldHead {
-		t.Errorf("back add changed the head pointer")
-	}
+	require.Equal(t, oldHead, e1.Outrec.Pts, "back add changed the head pointer")
 
 	// Walk the cycle: should visit 3 distinct points in some order.
 	pts := e1.Outrec.Points()
-	if len(pts) != 3 {
-		t.Fatalf("ring size: %d want 3 (pts=%v)", len(pts), pts)
-	}
+	require.Len(t, pts, 3, "ring size: %d want 3 (pts=%v)", len(pts), pts)
 }
 
 func TestAddOutPtDedupsConsecutive(t *testing.T) {
@@ -106,12 +90,8 @@ func TestAddOutPtDedupsConsecutive(t *testing.T) {
 
 	// Adding the same point on the front side should return the existing head.
 	got := AddOutPt(e1, startPt)
-	if got != op {
-		t.Errorf("front dedup failed: got=%p want=%p", got, op)
-	}
-	if len(e1.Outrec.Points()) != 1 {
-		t.Errorf("ring grew on dedup: %v", e1.Outrec.Points())
-	}
+	require.Equal(t, op, got, "front dedup failed: got=%p want=%p", got, op)
+	require.Len(t, e1.Outrec.Points(), 1, "ring grew on dedup: %v", e1.Outrec.Points())
 }
 
 func TestAddLocalMaxPolySameRingCloses(t *testing.T) {
@@ -127,12 +107,9 @@ func TestAddLocalMaxPolySameRingCloses(t *testing.T) {
 	// Now close at a local maximum.
 	maxPt := fixed.Point{X: 5, Y: 10}
 	result := AddLocalMaxPoly(ael, e1, e2, maxPt)
-	if result == nil {
-		t.Fatal("AddLocalMaxPoly returned nil")
-	}
-	if e1.Outrec != nil || e2.Outrec != nil {
-		t.Errorf("edges not uncoupled after close")
-	}
+	require.NotNil(t, result, "AddLocalMaxPoly returned nil")
+	require.Nil(t, e1.Outrec, "edges not uncoupled after close")
+	require.Nil(t, e2.Outrec, "edges not uncoupled after close")
 }
 
 func TestSwapOutrecsAcrossTwoRings(t *testing.T) {
@@ -148,22 +125,16 @@ func TestSwapOutrecsAcrossTwoRings(t *testing.T) {
 	AddLocalMinPoly(ael, e3, e4, fixed.Point{X: 25, Y: 0}, true)
 
 	or1, or2 := e1.Outrec, e3.Outrec
-	if or1 == or2 {
-		t.Fatal("test setup: rings should be distinct")
-	}
+	require.NotEqual(t, or1, or2, "test setup: rings should be distinct")
 	SwapOutrecs(e1, e3)
-	if e1.Outrec != or2 || e3.Outrec != or1 {
-		t.Errorf("SwapOutrecs did not exchange: e1.Outrec=%p e3.Outrec=%p want %p %p",
-			e1.Outrec, e3.Outrec, or2, or1)
-	}
+	require.Equal(t, or2, e1.Outrec, "SwapOutrecs did not exchange: e1.Outrec=%p e3.Outrec=%p want %p %p",
+		e1.Outrec, e3.Outrec, or2, or1)
+	require.Equal(t, or1, e3.Outrec, "SwapOutrecs did not exchange: e1.Outrec=%p e3.Outrec=%p want %p %p",
+		e1.Outrec, e3.Outrec, or2, or1)
 	// e1 and e3 are the BACK edges of their rings (front = right edge, e2/e4),
 	// so the swap updates the BackEdge pointers.
-	if or1.BackEdge != e3 {
-		t.Errorf("or1.BackEdge = %p want %p", or1.BackEdge, e3)
-	}
-	if or2.BackEdge != e1 {
-		t.Errorf("or2.BackEdge = %p want %p", or2.BackEdge, e1)
-	}
+	require.Equal(t, e3, or1.BackEdge, "or1.BackEdge = %p want %p", or1.BackEdge, e3)
+	require.Equal(t, e1, or2.BackEdge, "or2.BackEdge = %p want %p", or2.BackEdge, e1)
 }
 
 func TestSwapOutrecsSameRingSwapsSides(t *testing.T) {
@@ -176,9 +147,8 @@ func TestSwapOutrecsSameRingSwapsSides(t *testing.T) {
 
 	originalFront, originalBack := e1.Outrec.FrontEdge, e1.Outrec.BackEdge
 	SwapOutrecs(e1, e2)
-	if e1.Outrec.FrontEdge != originalBack || e1.Outrec.BackEdge != originalFront {
-		t.Errorf("same-ring swap did not swap front/back")
-	}
+	require.Equal(t, originalBack, e1.Outrec.FrontEdge, "same-ring swap did not swap front/back")
+	require.Equal(t, originalFront, e1.Outrec.BackEdge, "same-ring swap did not swap front/back")
 }
 
 func TestJoinOutrecPathsMerges(t *testing.T) {
@@ -206,10 +176,6 @@ func TestJoinOutrecPathsMerges(t *testing.T) {
 	JoinOutrecPaths(e2, e3)
 
 	merged := or1.Points()
-	if len(merged) != originalCount {
-		t.Errorf("merged ring size: %d want %d", len(merged), originalCount)
-	}
-	if or2.Pts != nil {
-		t.Errorf("or2.Pts should be nil after merge")
-	}
+	require.Len(t, merged, originalCount, "merged ring size: %d want %d", len(merged), originalCount)
+	require.Nil(t, or2.Pts, "or2.Pts should be nil after merge")
 }

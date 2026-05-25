@@ -6,6 +6,7 @@ import (
 
 	"github.com/lestrrat-go/polyclip/clip"
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 // rawOp runs the engine pipeline with NO result-level masking: no subset filter,
@@ -88,9 +89,7 @@ func TestRawInSweepIdFailRatchet(t *testing.T) {
 	const ratchet = 6
 	tot, nU, nD, nX := countRawIdFails()
 	t.Logf("raw in-sweep idfails: total=%d U=%d D=%d X=%d (ratchet=%d)", tot, nU, nD, nX, ratchet)
-	if tot > ratchet {
-		t.Errorf("raw in-sweep idfails regressed: got %d, ratchet %d", tot, ratchet)
-	}
+	require.False(t, tot > ratchet, "raw in-sweep idfails regressed: got %d, ratchet %d", tot, ratchet)
 }
 
 // TestRawIntersectOuterCornerCloses guards the §7.6 confluence force-close rule.
@@ -106,12 +105,8 @@ func TestRawIntersectOuterCornerCloses(t *testing.T) {
 		{X: 2, Y: -1}, {X: 7, Y: -1}, {X: 7, Y: 5}, {X: 6, Y: 5}, {X: 6, Y: 3}, {X: 5, Y: 3}, {X: 5, Y: 2}, {X: 4, Y: 2}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 5}, {X: 2, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpIntersect)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := 5.0; abs(got.Area()-want) > 1e-6 {
-		t.Errorf("raw Intersect area = %v, want %v (spurious lobe not closed)", got.Area(), want)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 5.0, got.Area(), 1e-6, "raw Intersect area = %v, want %v (spurious lobe not closed)", got.Area(), 5.0)
 }
 
 // TestRawXorCoincidentReconnect guards the §7.6 raw-Xor horizontal-join fix.
@@ -127,10 +122,6 @@ func TestRawXorCoincidentReconnect(t *testing.T) {
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 4, Y: 5}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 3, Y: 5}, {X: 2, Y: 5}, {X: 2, Y: 3}, {X: 1, Y: 3}, {X: 1, Y: 5}, {X: 0, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpXor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := 5.0; abs(got.Area()-want) > 1e-6 {
-		t.Errorf("raw Xor area = %v, want %v (coincident horizontals over-traced)", got.Area(), want)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 5.0, got.Area(), 1e-6, "raw Xor area = %v, want %v (coincident horizontals over-traced)", got.Area(), 5.0)
 }

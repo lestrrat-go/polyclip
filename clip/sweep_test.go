@@ -4,24 +4,19 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSweepEmpty(t *testing.T) {
 	r := Sweep(nil, OpUnion)
-	if len(r.Trace) != 0 {
-		t.Errorf("empty input produced trace: %+v", r.Trace)
-	}
+	require.Empty(t, r.Trace, "empty input produced trace: %+v", r.Trace)
 }
 
 func TestSweepSingleSegment(t *testing.T) {
 	segs := []Segment{segSrc(0, 0, 10, 5, Subject)}
 	r := Sweep(segs, OpUnion)
-	if len(r.Trace) != 2 {
-		t.Fatalf("trace length: %d want 2", len(r.Trace))
-	}
-	if r.Trace[0].Kind != EventBot || r.Trace[1].Kind != EventTop {
-		t.Errorf("trace kinds: %v %v want Bot Top", r.Trace[0].Kind, r.Trace[1].Kind)
-	}
+	require.Len(t, r.Trace, 2, "trace length: %d want 2", len(r.Trace))
+	require.True(t, r.Trace[0].Kind == EventBot && r.Trace[1].Kind == EventTop, "trace kinds: %v %v want Bot Top", r.Trace[0].Kind, r.Trace[1].Kind)
 }
 
 func TestSweepTwoNonCrossing(t *testing.T) {
@@ -31,15 +26,9 @@ func TestSweepTwoNonCrossing(t *testing.T) {
 		segSrc(20, 0, 30, 10, Clip),
 	}
 	r := Sweep(segs, OpUnion)
-	if got := countKind(r.Trace, EventIntersection); got != 0 {
-		t.Errorf("intersection events: %d want 0", got)
-	}
-	if got := countKind(r.Trace, EventBot); got != 2 {
-		t.Errorf("Bot events: %d want 2", got)
-	}
-	if got := countKind(r.Trace, EventTop); got != 2 {
-		t.Errorf("Top events: %d want 2", got)
-	}
+	require.Equal(t, 0, countKind(r.Trace, EventIntersection), "intersection events: %d want 0", countKind(r.Trace, EventIntersection))
+	require.Equal(t, 2, countKind(r.Trace, EventBot), "Bot events: %d want 2", countKind(r.Trace, EventBot))
+	require.Equal(t, 2, countKind(r.Trace, EventTop), "Top events: %d want 2", countKind(r.Trace, EventTop))
 }
 
 func TestSweepTwoCrossing(t *testing.T) {
@@ -49,9 +38,7 @@ func TestSweepTwoCrossing(t *testing.T) {
 		segSrc(0, 10, 10, 0, Clip),
 	}
 	r := Sweep(segs, OpUnion)
-	if got := countKind(r.Trace, EventIntersection); got != 1 {
-		t.Errorf("intersection events: %d want 1", got)
-	}
+	require.Equal(t, 1, countKind(r.Trace, EventIntersection), "intersection events: %d want 1", countKind(r.Trace, EventIntersection))
 	// Find the intersection event and verify location.
 	var found bool
 	for _, te := range r.Trace {
@@ -61,9 +48,7 @@ func TestSweepTwoCrossing(t *testing.T) {
 			}
 		}
 	}
-	if !found {
-		t.Errorf("no intersection event at (5,5); trace=%+v", r.Trace)
-	}
+	require.True(t, found, "no intersection event at (5,5); trace=%+v", r.Trace)
 }
 
 func TestSweepEventOrdering(t *testing.T) {
@@ -74,14 +59,10 @@ func TestSweepEventOrdering(t *testing.T) {
 	}
 	r := Sweep(segs, OpUnion)
 	// Trace should be (Bot at Y=0, Top at Y=1, Bot at Y=10, Top at Y=11).
-	if len(r.Trace) != 4 {
-		t.Fatalf("trace length: %d", len(r.Trace))
-	}
+	require.Len(t, r.Trace, 4, "trace length: %d", len(r.Trace))
 	wantY := []int64{0, 1, 10, 11}
 	for i, want := range wantY {
-		if int64(r.Trace[i].P.Y) != want {
-			t.Errorf("Trace[%d].P.Y = %d want %d", i, r.Trace[i].P.Y, want)
-		}
+		require.Equal(t, want, int64(r.Trace[i].P.Y), "Trace[%d].P.Y = %d want %d", i, r.Trace[i].P.Y, want)
 	}
 }
 
@@ -89,21 +70,15 @@ func TestSweepHorizontalRecorded(t *testing.T) {
 	// A horizontal segment generates a single EventHoriz, not Bot+Top.
 	segs := []Segment{segSrc(0, 5, 10, 5, Subject)}
 	r := Sweep(segs, OpUnion)
-	if len(r.Trace) != 1 {
-		t.Fatalf("trace length: %d want 1", len(r.Trace))
-	}
-	if r.Trace[0].Kind != EventHoriz {
-		t.Errorf("kind: %v want EventHoriz", r.Trace[0].Kind)
-	}
+	require.Len(t, r.Trace, 1, "trace length: %d want 1", len(r.Trace))
+	require.Equal(t, EventHoriz, r.Trace[0].Kind, "kind: %v want EventHoriz", r.Trace[0].Kind)
 }
 
 func TestSweepDegenerateDropped(t *testing.T) {
 	p := fixed.Point{X: 1, Y: 1}
 	segs := []Segment{{Bot: p, Top: p, Src: Subject}}
 	r := Sweep(segs, OpUnion)
-	if len(r.Trace) != 0 {
-		t.Errorf("degenerate produced trace: %+v", r.Trace)
-	}
+	require.Empty(t, r.Trace, "degenerate produced trace: %+v", r.Trace)
 }
 
 func TestSweepThreeCrossings(t *testing.T) {
@@ -117,9 +92,7 @@ func TestSweepThreeCrossings(t *testing.T) {
 	r := Sweep(segs, OpUnion)
 	// The two diagonals cross at (5, 5). The horizontal is not added to
 	// the AEL in this skeleton, so it does not produce intersection events.
-	if got := countKind(r.Trace, EventIntersection); got != 1 {
-		t.Errorf("intersection events: %d want 1; trace=%+v", got, r.Trace)
-	}
+	require.Equal(t, 1, countKind(r.Trace, EventIntersection), "intersection events: %d want 1; trace=%+v", countKind(r.Trace, EventIntersection), r.Trace)
 }
 
 func countKind(trace []TraceEvent, k EventKind) int {

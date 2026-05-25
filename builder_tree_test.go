@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip"
+	"github.com/stretchr/testify/require"
 )
 
 // treeRect returns an axis-aligned rectangle ring (CCW).
@@ -61,17 +62,11 @@ func mpolySignature(m polyclip.MultiPolygon) []float64 {
 
 func sameShape(t *testing.T, want, got polyclip.MultiPolygon) {
 	t.Helper()
-	if len(want) != len(got) {
-		t.Fatalf("piece count: want %d got %d", len(want), len(got))
-	}
+	require.Len(t, got, len(want), "piece count: want %d got %d", len(want), len(got))
 	ws, gs := mpolySignature(want), mpolySignature(got)
-	if len(ws) != len(gs) {
-		t.Fatalf("ring count: want %d got %d", len(ws), len(gs))
-	}
+	require.Len(t, gs, len(ws), "ring count: want %d got %d", len(ws), len(gs))
 	for i := range ws {
-		if math.Abs(ws[i]-gs[i]) > 1e-9 {
-			t.Fatalf("ring areas differ at %d: want %v got %v", i, ws, gs)
-		}
+		require.InDelta(t, ws[i], gs[i], 1e-9, "ring areas differ at %d: want %v got %v", i, ws, gs)
 	}
 }
 
@@ -115,13 +110,9 @@ func TestExecuteTreeFlattensToClosed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			res, err := polyclip.NewBuilder().AddSubject(tt.subj).AddClip(tt.clip).Execute(tt.op)
-			if err != nil {
-				t.Fatalf("Execute: %v", err)
-			}
+			require.NoError(t, err, "Execute")
 			tree, err := polyclip.NewBuilder().AddSubject(tt.subj).AddClip(tt.clip).ExecuteTree(tt.op)
-			if err != nil {
-				t.Fatalf("ExecuteTree: %v", err)
-			}
+			require.NoError(t, err, "ExecuteTree")
 			sameShape(t, res.Closed, flattenPolyTree(tree))
 		})
 	}
@@ -136,49 +127,33 @@ func TestExecuteTreeIslandInHole(t *testing.T) {
 		polyclip.MultiPolygon{{Outer: treeRect(0, 0, 12, 12)}},
 		polyclip.MultiPolygon{{Outer: treeRect(2, 2, 10, 10)}},
 	)
-	if err != nil {
-		t.Fatalf("Difference: %v", err)
-	}
+	require.NoError(t, err, "Difference")
 	donut, err := polyclip.Union(annulus, polyclip.MultiPolygon{{Outer: treeRect(4, 4, 8, 8)}})
-	if err != nil {
-		t.Fatalf("Union: %v", err)
-	}
-	if len(donut) != 2 { // flat form: annulus-with-hole + island
-		t.Fatalf("donut pieces: want 2 got %d", len(donut))
-	}
+	require.NoError(t, err, "Union")
+	require.Len(t, donut, 2, "donut pieces: want 2 got %d", len(donut)) // flat form: annulus-with-hole + island
 
 	tree, err := polyclip.NewBuilder().AddSubject(donut).ExecuteTree(polyclip.OpUnion)
-	if err != nil {
-		t.Fatalf("ExecuteTree: %v", err)
-	}
+	require.NoError(t, err, "ExecuteTree")
 
-	if len(tree.Children) != 1 {
-		t.Fatalf("top-level regions: want 1 got %d", len(tree.Children))
-	}
+	require.Len(t, tree.Children, 1, "top-level regions: want 1 got %d", len(tree.Children))
 	root := tree.Children[0]
-	if root.IsHole || len(root.Children) != 1 {
-		t.Fatalf("root: IsHole=%v children=%d, want filled with 1 hole", root.IsHole, len(root.Children))
-	}
+	require.False(t, root.IsHole, "root: IsHole=%v children=%d, want filled with 1 hole", root.IsHole, len(root.Children))
+	require.Len(t, root.Children, 1, "root: IsHole=%v children=%d, want filled with 1 hole", root.IsHole, len(root.Children))
 	hole := root.Children[0]
-	if !hole.IsHole || len(hole.Children) != 1 {
-		t.Fatalf("hole: IsHole=%v children=%d, want hole with 1 island", hole.IsHole, len(hole.Children))
-	}
+	require.True(t, hole.IsHole, "hole: IsHole=%v children=%d, want hole with 1 island", hole.IsHole, len(hole.Children))
+	require.Len(t, hole.Children, 1, "hole: IsHole=%v children=%d, want hole with 1 island", hole.IsHole, len(hole.Children))
 	island := hole.Children[0]
-	if island.IsHole || len(island.Children) != 0 {
-		t.Fatalf("island: IsHole=%v children=%d, want filled leaf", island.IsHole, len(island.Children))
-	}
-	if a := math.Abs(island.Polygon.SignedArea()); math.Abs(a-16.0) > 1e-9 {
-		t.Fatalf("island area: want 16 got %v", a)
-	}
+	require.False(t, island.IsHole, "island: IsHole=%v children=%d, want filled leaf", island.IsHole, len(island.Children))
+	require.Len(t, island.Children, 0, "island: IsHole=%v children=%d, want filled leaf", island.IsHole, len(island.Children))
+	a := math.Abs(island.Polygon.SignedArea())
+	require.InDelta(t, 16.0, a, 1e-9, "island area: want 16 got %v", a)
 
 	// Orientation: filled CCW (>0), hole CW (<0).
-	if root.Polygon.SignedArea() <= 0 || island.Polygon.SignedArea() <= 0 {
-		t.Fatalf("filled rings must be CCW: root=%v island=%v",
-			root.Polygon.SignedArea(), island.Polygon.SignedArea())
-	}
-	if hole.Polygon.SignedArea() >= 0 {
-		t.Fatalf("hole must be CW: %v", hole.Polygon.SignedArea())
-	}
+	require.Greater(t, root.Polygon.SignedArea(), 0.0, "filled rings must be CCW: root=%v island=%v",
+		root.Polygon.SignedArea(), island.Polygon.SignedArea())
+	require.Greater(t, island.Polygon.SignedArea(), 0.0, "filled rings must be CCW: root=%v island=%v",
+		root.Polygon.SignedArea(), island.Polygon.SignedArea())
+	require.Less(t, hole.Polygon.SignedArea(), 0.0, "hole must be CW: %v", hole.Polygon.SignedArea())
 
 	sameShape(t, donut, flattenPolyTree(tree))
 }
@@ -188,10 +163,6 @@ func TestExecuteTreeEmpty(t *testing.T) {
 	pt, err := polyclip.NewBuilder().
 		AddSubject(square).AddClip(square).
 		ExecuteTree(polyclip.OpDifference) // A∖A = ∅
-	if err != nil {
-		t.Fatalf("ExecuteTree: %v", err)
-	}
-	if len(pt.Children) != 0 {
-		t.Fatalf("empty result: want 0 children got %d", len(pt.Children))
-	}
+	require.NoError(t, err, "ExecuteTree")
+	require.Len(t, pt.Children, 0, "empty result: want 0 children got %d", len(pt.Children))
 }

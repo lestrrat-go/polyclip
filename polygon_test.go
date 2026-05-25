@@ -3,6 +3,8 @@ package polyclip
 import (
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func square(cx, cy, half float64) Polygon {
@@ -16,43 +18,27 @@ func square(cx, cy, half float64) Polygon {
 
 func TestPolygonSignedArea(t *testing.T) {
 	ccw := square(0, 0, 5) // CCW in (Y-up) convention
-	if got := ccw.SignedArea(); got != 100 {
-		t.Errorf("ccw SignedArea: got %v want 100", got)
-	}
+	require.Equal(t, 100.0, ccw.SignedArea(), "ccw SignedArea: got %v want 100", ccw.SignedArea())
 	cw := Polygon{{X: -5, Y: -5}, {X: -5, Y: 5}, {X: 5, Y: 5}, {X: 5, Y: -5}} // CW
-	if got := cw.SignedArea(); got != -100 {
-		t.Errorf("cw SignedArea: got %v want -100", got)
-	}
+	require.Equal(t, -100.0, cw.SignedArea(), "cw SignedArea: got %v want -100", cw.SignedArea())
 	// Triangle.
 	tri := Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 0, Y: 3}}
-	if got := tri.SignedArea(); got != 6 {
-		t.Errorf("tri SignedArea: got %v want 6", got)
-	}
+	require.Equal(t, 6.0, tri.SignedArea(), "tri SignedArea: got %v want 6", tri.SignedArea())
 	// Degenerate.
-	if got := (Polygon{}).SignedArea(); got != 0 {
-		t.Errorf("empty SignedArea: %v want 0", got)
-	}
-	if got := (Polygon{{X: 1, Y: 2}, {X: 3, Y: 4}}).SignedArea(); got != 0 {
-		t.Errorf("2-point SignedArea: %v want 0", got)
-	}
+	require.Equal(t, 0.0, (Polygon{}).SignedArea(), "empty SignedArea: want 0")
+	require.Equal(t, 0.0, (Polygon{{X: 1, Y: 2}, {X: 3, Y: 4}}).SignedArea(), "2-point SignedArea: want 0")
 }
 
 func TestPolygonArea(t *testing.T) {
 	for _, p := range []Polygon{square(0, 0, 5), {{X: -5, Y: -5}, {X: -5, Y: 5}, {X: 5, Y: 5}, {X: 5, Y: -5}}} {
-		if got := p.Area(); got != 100 {
-			t.Errorf("Area: got %v want 100", got)
-		}
+		require.Equal(t, 100.0, p.Area(), "Area: got %v want 100", p.Area())
 	}
 }
 
 func TestPolygonIsCCW(t *testing.T) {
-	if !square(0, 0, 1).IsCCW() {
-		t.Error("square (Y-up) should be CCW")
-	}
+	require.True(t, square(0, 0, 1).IsCCW(), "square (Y-up) should be CCW")
 	cw := Polygon{{X: -1, Y: -1}, {X: -1, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: -1}}
-	if cw.IsCCW() {
-		t.Error("cw should not be CCW")
-	}
+	require.False(t, cw.IsCCW(), "cw should not be CCW")
 }
 
 func TestPolygonReverse(t *testing.T) {
@@ -60,27 +46,19 @@ func TestPolygonReverse(t *testing.T) {
 	want := Polygon{p[3], p[2], p[1], p[0]}
 	p.Reverse()
 	for i := range p {
-		if p[i] != want[i] {
-			t.Fatalf("Reverse[%d]: got %v want %v", i, p[i], want[i])
-		}
+		require.Equal(t, want[i], p[i], "Reverse[%d]: got %v want %v", i, p[i], want[i])
 	}
 	// Odd length.
 	q := Polygon{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 0, Y: 1}}
 	q.Reverse()
-	if q[0] != (Point{X: 0, Y: 1}) || q[1] != (Point{X: 1, Y: 0}) || q[2] != (Point{X: 0, Y: 0}) {
-		t.Errorf("Reverse odd: %v", q)
-	}
+	require.Equal(t, Polygon{{X: 0, Y: 1}, {X: 1, Y: 0}, {X: 0, Y: 0}}, q, "Reverse odd: %v", q)
 }
 
 func TestPolygonBoundingBox(t *testing.T) {
 	p := Polygon{{X: 1, Y: -2}, {X: 4, Y: 3}, {X: -1, Y: 5}}
 	want := BBox{Min: Point{X: -1, Y: -2}, Max: Point{X: 4, Y: 5}}
-	if got := p.BoundingBox(); got != want {
-		t.Errorf("BoundingBox: got %+v want %+v", got, want)
-	}
-	if !(Polygon{}).BoundingBox().Empty() {
-		t.Error("empty Polygon BoundingBox should be empty")
-	}
+	require.Equal(t, want, p.BoundingBox(), "BoundingBox: got %+v want %+v", p.BoundingBox(), want)
+	require.True(t, (Polygon{}).BoundingBox().Empty(), "empty Polygon BoundingBox should be empty")
 }
 
 func TestPolygonContains(t *testing.T) {
@@ -100,9 +78,7 @@ func TestPolygonContains(t *testing.T) {
 		{Point{X: 10, Y: 10}, false, "far outside"},
 	}
 	for _, c := range cases {
-		if got := sq.Contains(c.q); got != c.in {
-			t.Errorf("Contains %s %v: got %v want %v", c.label, c.q, got, c.in)
-		}
+		require.Equal(t, c.in, sq.Contains(c.q), "Contains %s %v: got %v want %v", c.label, c.q, sq.Contains(c.q), c.in)
 	}
 }
 
@@ -123,9 +99,7 @@ func TestExPolygonContainsHole(t *testing.T) {
 		{Point{X: 15, Y: 0}, false},    // outside outer
 	}
 	for _, c := range cases {
-		if got := ex.Contains(c.q); got != c.in {
-			t.Errorf("ExPolygon.Contains %v: got %v want %v", c.q, got, c.in)
-		}
+		require.Equal(t, c.in, ex.Contains(c.q), "ExPolygon.Contains %v: got %v want %v", c.q, ex.Contains(c.q), c.in)
 	}
 }
 
@@ -134,9 +108,7 @@ func TestExPolygonArea(t *testing.T) {
 	hole := square(0, 0, 3)   // 36
 	hole.Reverse()
 	ex := ExPolygon{Outer: outer, Holes: []Polygon{hole}}
-	if got := ex.Area(); got != 400-36 {
-		t.Errorf("ExPolygon.Area: got %v want %v", got, 400-36)
-	}
+	require.Equal(t, float64(400-36), ex.Area(), "ExPolygon.Area: got %v want %v", ex.Area(), 400-36)
 }
 
 func TestMultiPolygonBoundingBox(t *testing.T) {
@@ -145,12 +117,8 @@ func TestMultiPolygonBoundingBox(t *testing.T) {
 		{Outer: square(10, 10, 2)},
 	}
 	want := BBox{Min: Point{X: -1, Y: -1}, Max: Point{X: 12, Y: 12}}
-	if got := m.BoundingBox(); got != want {
-		t.Errorf("MultiPolygon.BoundingBox: got %+v want %+v", got, want)
-	}
-	if !(MultiPolygon{}).BoundingBox().Empty() {
-		t.Error("empty MultiPolygon BoundingBox should be empty")
-	}
+	require.Equal(t, want, m.BoundingBox(), "MultiPolygon.BoundingBox: got %+v want %+v", m.BoundingBox(), want)
+	require.True(t, (MultiPolygon{}).BoundingBox().Empty(), "empty MultiPolygon BoundingBox should be empty")
 }
 
 func TestMultiPolygonArea(t *testing.T) {
@@ -158,9 +126,7 @@ func TestMultiPolygonArea(t *testing.T) {
 		{Outer: square(0, 0, 1)},   // 4
 		{Outer: square(10, 10, 2)}, // 16
 	}
-	if got := m.Area(); got != 20 {
-		t.Errorf("MultiPolygon.Area: got %v want 20", got)
-	}
+	require.Equal(t, 20.0, m.Area(), "MultiPolygon.Area: got %v want 20", m.Area())
 }
 
 func TestMultiPolygonContains(t *testing.T) {
@@ -168,15 +134,9 @@ func TestMultiPolygonContains(t *testing.T) {
 		{Outer: square(0, 0, 1)},
 		{Outer: square(10, 10, 2)},
 	}
-	if !m.Contains(Point{X: 0, Y: 0}) {
-		t.Error("Contains centre of first")
-	}
-	if !m.Contains(Point{X: 10, Y: 10}) {
-		t.Error("Contains centre of second")
-	}
-	if m.Contains(Point{X: 5, Y: 5}) {
-		t.Error("should not contain gap between")
-	}
+	require.True(t, m.Contains(Point{X: 0, Y: 0}), "Contains centre of first")
+	require.True(t, m.Contains(Point{X: 10, Y: 10}), "Contains centre of second")
+	require.False(t, m.Contains(Point{X: 5, Y: 5}), "should not contain gap between")
 }
 
 func TestCleanRemovesConsecutiveDuplicates(t *testing.T) {
@@ -188,12 +148,8 @@ func TestCleanRemovesConsecutiveDuplicates(t *testing.T) {
 		{X: 0, Y: 10},
 	}}}
 	got := in.Clean(0.001, 0)
-	if len(got) != 1 {
-		t.Fatalf("len=%d want 1", len(got))
-	}
-	if n := len(got[0].Outer); n != 4 {
-		t.Errorf("vertex count=%d want 4: %+v", n, got[0].Outer)
-	}
+	require.Len(t, got, 1, "len=%d want 1", len(got))
+	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4: %+v", len(got[0].Outer), got[0].Outer)
 }
 
 func TestCleanRemovesCollinear(t *testing.T) {
@@ -203,12 +159,8 @@ func TestCleanRemovesCollinear(t *testing.T) {
 		{X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got := in.Clean(1e-9, 0)
-	if len(got) != 1 {
-		t.Fatalf("len=%d want 1", len(got))
-	}
-	if n := len(got[0].Outer); n != 4 {
-		t.Errorf("vertex count=%d want 4 (square): %+v", n, got[0].Outer)
-	}
+	require.Len(t, got, 1, "len=%d want 1", len(got))
+	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4 (square): %+v", len(got[0].Outer), got[0].Outer)
 }
 
 func TestCleanWrapAroundDuplicate(t *testing.T) {
@@ -218,9 +170,7 @@ func TestCleanWrapAroundDuplicate(t *testing.T) {
 		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}, {X: 0, Y: 0},
 	}}}
 	got := in.Clean(0, 0)
-	if n := len(got[0].Outer); n != 4 {
-		t.Errorf("vertex count=%d want 4 (closing duplicate dropped)", n)
-	}
+	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4 (closing duplicate dropped)", len(got[0].Outer))
 }
 
 func TestCleanDropsTinyRing(t *testing.T) {
@@ -229,9 +179,7 @@ func TestCleanDropsTinyRing(t *testing.T) {
 		ExPolygon{Outer: Polygon{{X: 100, Y: 100}, {X: 100.1, Y: 100}, {X: 100.1, Y: 100.1}, {X: 100, Y: 100.1}}}, // area 0.01
 	}
 	got := in.Clean(0, 1.0)
-	if len(got) != 1 {
-		t.Fatalf("len=%d want 1 (tiny piece dropped)", len(got))
-	}
+	require.Len(t, got, 1, "len=%d want 1 (tiny piece dropped)", len(got))
 }
 
 func TestCleanDropsTinyHole(t *testing.T) {
@@ -243,12 +191,8 @@ func TestCleanDropsTinyHole(t *testing.T) {
 		},
 	}}
 	got := in.Clean(0, 1.0)
-	if len(got) != 1 {
-		t.Fatalf("piece dropped unexpectedly")
-	}
-	if len(got[0].Holes) != 1 {
-		t.Errorf("holes=%d want 1 (tiny hole dropped)", len(got[0].Holes))
-	}
+	require.Len(t, got, 1, "piece dropped unexpectedly")
+	require.Len(t, got[0].Holes, 1, "holes=%d want 1 (tiny hole dropped)", len(got[0].Holes))
 }
 
 func TestCleanCollapseDegenerate(t *testing.T) {
@@ -257,9 +201,7 @@ func TestCleanCollapseDegenerate(t *testing.T) {
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0}, {X: 5, Y: 0},
 	}}}
 	got := in.Clean(1e-9, 0)
-	if len(got) != 0 {
-		t.Errorf("degenerate ring not dropped: %+v", got)
-	}
+	require.Empty(t, got, "degenerate ring not dropped: %+v", got)
 }
 
 // Sanity: signed-area sign should be consistent with cross-product winding.
@@ -273,8 +215,6 @@ func TestSignedAreaSign(t *testing.T) {
 		for _, p := range base {
 			rot = append(rot, Point{X: c*p.X - s*p.Y, Y: s*p.X + c*p.Y})
 		}
-		if !rot.IsCCW() {
-			t.Errorf("rotated CCW square at theta=%v lost CCW: SignedArea=%v", theta, rot.SignedArea())
-		}
+		require.True(t, rot.IsCCW(), "rotated CCW square at theta=%v lost CCW: SignedArea=%v", theta, rot.SignedArea())
 	}
 }

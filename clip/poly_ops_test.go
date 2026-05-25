@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 // makeClassifiedEdge returns an ActiveEdge with pre-set classification state
@@ -38,9 +39,8 @@ func TestIntersectEdgesStaleEventDropped(t *testing.T) {
 	ael.Insert(e2)
 	// e3 is not in the AEL — stale event.
 	e3 := makeClassifiedEdge(100, Subject, 1, 0)
-	if got := IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 50, Y: 5}); got != nil {
-		t.Errorf("stale event should return nil, got %+v", got)
-	}
+	got := IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 50, Y: 5})
+	require.Nil(t, got, "stale event should return nil, got %+v", got)
 }
 
 func TestIntersectEdgesNonAdjacentDropped(t *testing.T) {
@@ -51,9 +51,7 @@ func TestIntersectEdgesNonAdjacentDropped(t *testing.T) {
 	ael.Insert(e1)
 	ael.Insert(e2)
 	ael.Insert(e3)
-	if got := IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 15, Y: 5}); got != nil {
-		t.Error("non-adjacent edges should return nil")
-	}
+	require.Nil(t, IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 15, Y: 5}), "non-adjacent edges should return nil")
 }
 
 func TestIntersectEdgesBranchCUnionFresh(t *testing.T) {
@@ -67,15 +65,9 @@ func TestIntersectEdgesBranchCUnionFresh(t *testing.T) {
 
 	pt := fixed.Point{X: 5, Y: 50}
 	op := IntersectEdges(ael, OpUnion, e1, e2, pt)
-	if op == nil {
-		t.Fatal("expected AddLocalMinPoly to emit a vertex")
-	}
-	if op.P != pt {
-		t.Errorf("op.P = %v want %v", op.P, pt)
-	}
-	if !e1.IsHotEdge() || !e2.IsHotEdge() {
-		t.Errorf("edges should be hot after AddLocalMinPoly")
-	}
+	require.NotNil(t, op, "expected AddLocalMinPoly to emit a vertex")
+	require.Equal(t, pt, op.P, "op.P = %v want %v", op.P, pt)
+	require.True(t, e1.IsHotEdge() && e2.IsHotEdge(), "edges should be hot after AddLocalMinPoly")
 }
 
 func TestIntersectEdgesBranchCUnionSamePolyType(t *testing.T) {
@@ -91,9 +83,7 @@ func TestIntersectEdgesBranchCUnionSamePolyType(t *testing.T) {
 	ael.Insert(e2)
 
 	op := IntersectEdges(ael, OpUnion, e1, e2, fixed.Point{X: 5, Y: 50})
-	if op == nil {
-		t.Fatal("expected AddLocalMinPoly")
-	}
+	require.NotNil(t, op, "expected AddLocalMinPoly")
 }
 
 func TestIntersectEdgesBranchCUnionInsideOther(t *testing.T) {
@@ -105,9 +95,8 @@ func TestIntersectEdgesBranchCUnionInsideOther(t *testing.T) {
 	ael.Insert(e1)
 	ael.Insert(e2)
 
-	if op := IntersectEdges(ael, OpUnion, e1, e2, fixed.Point{X: 5, Y: 50}); op != nil {
-		t.Errorf("expected no emission, got %+v", op)
-	}
+	op := IntersectEdges(ael, OpUnion, e1, e2, fixed.Point{X: 5, Y: 50})
+	require.Nil(t, op, "expected no emission, got %+v", op)
 }
 
 func TestIntersectEdgesBranchCIntersect(t *testing.T) {
@@ -119,9 +108,8 @@ func TestIntersectEdgesBranchCIntersect(t *testing.T) {
 	e2 := makeClassifiedEdgeRev(10, Subject, false, 1, 1)
 	ael.Insert(e1)
 	ael.Insert(e2)
-	if op := IntersectEdges(ael, OpIntersect, e1, e2, fixed.Point{X: 5, Y: 50}); op == nil {
-		t.Errorf("Intersect with both inside other should emit")
-	}
+	op := IntersectEdges(ael, OpIntersect, e1, e2, fixed.Point{X: 5, Y: 50})
+	require.NotNil(t, op, "Intersect with both inside other should emit")
 }
 
 func TestIntersectEdgesBranchCXor(t *testing.T) {
@@ -132,9 +120,8 @@ func TestIntersectEdgesBranchCXor(t *testing.T) {
 	e2 := makeClassifiedEdgeRev(10, Subject, false, 1, 0)
 	ael.Insert(e1)
 	ael.Insert(e2)
-	if op := IntersectEdges(ael, OpXor, e1, e2, fixed.Point{X: 5, Y: 50}); op == nil {
-		t.Errorf("Xor should always emit at intersection")
-	}
+	op := IntersectEdges(ael, OpXor, e1, e2, fixed.Point{X: 5, Y: 50})
+	require.NotNil(t, op, "Xor should always emit at intersection")
 }
 
 func TestIntersectEdgesBranchBOneHot(t *testing.T) {
@@ -146,26 +133,16 @@ func TestIntersectEdgesBranchBOneHot(t *testing.T) {
 	ael.Insert(helperFront)
 	ael.Insert(e1)
 	AddLocalMinPoly(ael, helperFront, e1, fixed.Point{X: 0, Y: 0}, true)
-	if !e1.IsHotEdge() {
-		t.Fatal("setup: e1 should be hot")
-	}
+	require.True(t, e1.IsHotEdge(), "setup: e1 should be hot")
 
 	e2 := makeClassifiedEdge(10, Clip, 1, 1)
 	ael.Insert(e2)
 
 	pt := fixed.Point{X: 5, Y: 50}
 	op := IntersectEdges(ael, OpUnion, e1, e2, pt)
-	if op == nil {
-		t.Fatal("expected AddOutPt to emit")
-	}
-	if op.P != pt {
-		t.Errorf("op.P = %v want %v", op.P, pt)
-	}
+	require.NotNil(t, op, "expected AddOutPt to emit")
+	require.Equal(t, pt, op.P, "op.P = %v want %v", op.P, pt)
 	// After SwapOutrecs, e2 should now hold the OutRec that was e1's.
-	if !e2.IsHotEdge() {
-		t.Error("e2 should have inherited the OutRec via SwapOutrecs")
-	}
-	if e1.IsHotEdge() {
-		t.Error("e1 should have lost its OutRec via SwapOutrecs")
-	}
+	require.True(t, e2.IsHotEdge(), "e2 should have inherited the OutRec via SwapOutrecs")
+	require.False(t, e1.IsHotEdge(), "e1 should have lost its OutRec via SwapOutrecs")
 }

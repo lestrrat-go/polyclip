@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 // TestInvariantsOverlappingDiamonds runs the sweep on two overlapping
@@ -15,12 +16,8 @@ func TestInvariantsOverlappingDiamonds(t *testing.T) {
 	segs = SplitOverlaps(segs)
 	segs = DedupCoincidentEdges(segs)
 	sw := Sweep(segs, OpUnion)
-	if sw.Err != nil {
-		t.Fatalf("sweep: %v", err(sw.Err))
-	}
-	if err := CheckInvariants(sw, segs); err != nil {
-		t.Errorf("invariant violation: %v", err)
-	}
+	require.NoError(t, sw.Err, "sweep")
+	require.NoError(t, CheckInvariants(sw, segs), "invariant violation")
 }
 
 // TestInvariantsAxialSquares checks the §11.7 synth-intersect path's
@@ -31,12 +28,8 @@ func TestInvariantsAxialSquares(t *testing.T) {
 	segs = SplitOverlaps(segs)
 	segs = DedupCoincidentEdges(segs)
 	sw := Sweep(segs, OpUnion)
-	if sw.Err != nil {
-		t.Fatalf("sweep: %v", err(sw.Err))
-	}
-	if err := CheckInvariants(sw, segs); err != nil {
-		t.Errorf("invariant violation: %v", err)
-	}
+	require.NoError(t, sw.Err, "sweep")
+	require.NoError(t, CheckInvariants(sw, segs), "invariant violation")
 }
 
 func squareSegs(cx, cy, half fixed.Coord, src Source) []Segment {
@@ -69,11 +62,4 @@ func ringSegs(pts []fixed.Point, src Source) []Segment {
 		}
 	}
 	return out
-}
-
-func err(e error) string {
-	if e == nil {
-		return "<nil>"
-	}
-	return e.Error()
 }

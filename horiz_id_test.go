@@ -1,6 +1,10 @@
 package polyclip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 // TestHorizIdentityRepro is the regression for the §7.6 axis-aligned Intersect
 // spurious-lobe bug. A and B share the collinear boundary segment (1,1)-(2,1);
@@ -28,16 +32,8 @@ func TestHorizIdentityRepro(t *testing.T) {
 	t.Logf("A=%v B=%v U=%v I=%v D=%v X=%v", aA, bA, uA, iA, dA, xA)
 	// The intersection is the unit square [1,2]x[0,1]; the spurious triangle
 	// lobe (which made I=2) must be gone.
-	if abs(iA-1) > 1e-6 {
-		t.Errorf("intersect area: got %v want 1 (spurious lobe?)", iA)
-	}
-	if abs(uA-(aA+bA-iA)) > 1e-6 {
-		t.Errorf("U identity: U=%v want %v", uA, aA+bA-iA)
-	}
-	if abs(dA-(aA-iA)) > 1e-6 {
-		t.Errorf("D identity: D=%v want %v", dA, aA-iA)
-	}
-	if abs(xA-(uA-iA)) > 1e-6 {
-		t.Errorf("X identity: X=%v want %v", xA, uA-iA)
-	}
+	require.InDelta(t, 1, iA, 1e-6, "intersect area: got %v want 1 (spurious lobe?)", iA)
+	require.InDelta(t, aA+bA-iA, uA, 1e-6, "U identity: U=%v want %v", uA, aA+bA-iA)
+	require.InDelta(t, aA-iA, dA, 1e-6, "D identity: D=%v want %v", dA, aA-iA)
+	require.InDelta(t, uA-iA, xA, 1e-6, "X identity: X=%v want %v", xA, uA-iA)
 }

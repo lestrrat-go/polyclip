@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func vert(xv int64, src Source, reversed bool) Segment {
@@ -22,15 +23,9 @@ func TestClassifyLeftmostEdge(t *testing.T) {
 	ae := &ActiveEdge{Seg: &s, CurrX: 0, WindDx: signedContribution(&s)}
 	ael.Insert(ae)
 	Classify(ael, ae, OpUnion)
-	if ae.WindSelf != 1 {
-		t.Errorf("WindSelf: %d want 1", ae.WindSelf)
-	}
-	if ae.WindOther != 0 {
-		t.Errorf("WindOther: %d want 0", ae.WindOther)
-	}
-	if !ae.Contributing {
-		t.Error("leftmost edge should be contributing for Union")
-	}
+	require.Equal(t, 1, ae.WindSelf, "WindSelf: %d want 1", ae.WindSelf)
+	require.Equal(t, 0, ae.WindOther, "WindOther: %d want 0", ae.WindOther)
+	require.True(t, ae.Contributing, "leftmost edge should be contributing for Union")
 }
 
 func TestClassifyTwoSameSource(t *testing.T) {
@@ -50,12 +45,8 @@ func TestClassifyTwoSameSource(t *testing.T) {
 	// the two regions touching the edge — so both sides of the square read 1
 	// (interior region has winding 1; exterior 0). The right edge reverses
 	// direction relative to the left, so it inherits the left's count.
-	if aeL.WindSelf != 1 || aeR.WindSelf != 1 {
-		t.Errorf("WindSelf: L=%d R=%d want 1 1", aeL.WindSelf, aeR.WindSelf)
-	}
-	if !aeL.Contributing || !aeR.Contributing {
-		t.Errorf("Contributing: L=%v R=%v want both true", aeL.Contributing, aeR.Contributing)
-	}
+	require.True(t, aeL.WindSelf == 1 && aeR.WindSelf == 1, "WindSelf: L=%d R=%d want 1 1", aeL.WindSelf, aeR.WindSelf)
+	require.True(t, aeL.Contributing && aeR.Contributing, "Contributing: L=%v R=%v want both true", aeL.Contributing, aeR.Contributing)
 }
 
 func TestClassifyEvenOddSameSourceNested(t *testing.T) {
@@ -80,12 +71,8 @@ func TestClassifyEvenOddSameSourceNested(t *testing.T) {
 		Classify(ael, ae, OpUnion)
 	}
 	for i, ae := range edges {
-		if ae.WindOther != 0 {
-			t.Errorf("edge %d: WindOther=%d want 0 (no clip)", i, ae.WindOther)
-		}
-		if !ae.Contributing {
-			t.Errorf("edge %d: not contributing; even-odd treats every edge as a boundary", i)
-		}
+		require.Equal(t, 0, ae.WindOther, "edge %d: WindOther=%d want 0 (no clip)", i, ae.WindOther)
+		require.True(t, ae.Contributing, "edge %d: not contributing; even-odd treats every edge as a boundary", i)
 	}
 }
 
@@ -111,12 +98,8 @@ func TestClassifyEvenOddCrossSourceParity(t *testing.T) {
 		Classify(ael, ae, OpIntersect)
 	}
 	sa := edges[2] // the subject wall
-	if sa.WindOther != 0 {
-		t.Errorf("subject WindOther=%d want 0 (even clip parity)", sa.WindOther)
-	}
-	if sa.Contributing {
-		t.Error("subject wall should NOT contribute to Intersect: even clip parity = outside clip")
-	}
+	require.Equal(t, 0, sa.WindOther, "subject WindOther=%d want 0 (even clip parity)", sa.WindOther)
+	require.False(t, sa.Contributing, "subject wall should NOT contribute to Intersect: even clip parity = outside clip")
 }
 
 func TestClassifyTwoOverlappingSquares(t *testing.T) {
@@ -166,11 +149,10 @@ func TestClassifyTwoOverlappingSquares(t *testing.T) {
 		{"aeCR", aeCR, 1, 0, true},
 	}
 	for _, c := range cases {
-		if c.ae.WindSelf != c.wantSelf || c.ae.WindOther != c.wantOther || c.ae.Contributing != c.wantContrib {
-			t.Errorf("%s: WindSelf=%d WindOther=%d Contributing=%v; want %d %d %v",
-				c.name, c.ae.WindSelf, c.ae.WindOther, c.ae.Contributing,
-				c.wantSelf, c.wantOther, c.wantContrib)
-		}
+		require.True(t, c.ae.WindSelf == c.wantSelf && c.ae.WindOther == c.wantOther && c.ae.Contributing == c.wantContrib,
+			"%s: WindSelf=%d WindOther=%d Contributing=%v; want %d %d %v",
+			c.name, c.ae.WindSelf, c.ae.WindOther, c.ae.Contributing,
+			c.wantSelf, c.wantOther, c.wantContrib)
 	}
 }
 
@@ -199,9 +181,7 @@ func TestClassifyOpIntersect(t *testing.T) {
 	// For Intersect: contribute iff WindOther != 0.
 	wantContrib := []bool{false, true, true, false}
 	for i, w := range wantContrib {
-		if aes[i].Contributing != w {
-			t.Errorf("Intersect[%d].Contributing=%v want %v", i, aes[i].Contributing, w)
-		}
+		require.Equal(t, w, aes[i].Contributing, "Intersect[%d].Contributing=%v want %v", i, aes[i].Contributing, w)
 	}
 }
 
@@ -226,9 +206,7 @@ func TestClassifyOpXor(t *testing.T) {
 		Classify(ael, ae, OpXor)
 	}
 	for i, ae := range aes {
-		if !ae.Contributing {
-			t.Errorf("Xor[%d]: not contributing — should be (every flip contributes)", i)
-		}
+		require.True(t, ae.Contributing, "Xor[%d]: not contributing — should be (every flip contributes)", i)
 	}
 }
 
@@ -243,8 +221,6 @@ func TestSignedContribution(t *testing.T) {
 		{"horizontal", Segment{Bot: fixed.Point{X: 0, Y: 5}, Top: fixed.Point{X: 10, Y: 5}}, 0},
 	}
 	for _, c := range cases {
-		if got := signedContribution(&c.seg); got != c.want {
-			t.Errorf("%s: %d want %d", c.name, got, c.want)
-		}
+		require.Equal(t, c.want, signedContribution(&c.seg), "%s: want %d", c.name, c.want)
 	}
 }

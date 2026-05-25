@@ -1,10 +1,10 @@
 package clip
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyHorizontalsAxialRectangle(t *testing.T) {
@@ -12,12 +12,8 @@ func TestClassifyHorizontalsAxialRectangle(t *testing.T) {
 	// top horizontal is a local maximum.
 	segs := axialRect(0, 0, 10, 5, Subject)
 	info, err := ClassifyHorizontals(segs)
-	if err != nil {
-		t.Fatalf("ClassifyHorizontals err: %v", err)
-	}
-	if len(info) != 2 {
-		t.Fatalf("expected 2 horizontals classified, got %d", len(info))
-	}
+	require.NoError(t, err)
+	require.Len(t, info, 2, "expected 2 horizontals classified, got %d", len(info))
 
 	var bot, top *Segment
 	for i := range segs {
@@ -31,27 +27,17 @@ func TestClassifyHorizontalsAxialRectangle(t *testing.T) {
 			top = s
 		}
 	}
-	if bot == nil || top == nil {
-		t.Fatal("missing bottom or top horizontal")
-	}
+	require.True(t, bot != nil && top != nil, "missing bottom or top horizontal")
 
-	if info[bot].Class != HorizClassMin {
-		t.Errorf("bottom horiz class: %v want HorizClassMin", info[bot].Class)
-	}
-	if info[top].Class != HorizClassMax {
-		t.Errorf("top horiz class: %v want HorizClassMax", info[top].Class)
-	}
+	require.Equal(t, HorizClassMin, info[bot].Class, "bottom horiz class: %v want HorizClassMin", info[bot].Class)
+	require.Equal(t, HorizClassMax, info[top].Class, "top horiz class: %v want HorizClassMax", info[top].Class)
 
 	// Adjacency: LeftAdj endpoint should match h.Bot.X; RightAdj should
 	// match h.Top.X. For the bottom horiz those endpoints are the verticals'
 	// Bot.X; for the top horiz they are the verticals' Top.X.
 	checkAdj := func(label string, h *Segment, i *HorizInfo, leftMatch, rightMatch func(*Segment) bool) {
-		if !leftMatch(i.LeftAdj) {
-			t.Errorf("%s LeftAdj %v→%v does not match h.Bot=%v", label, i.LeftAdj.Start(), i.LeftAdj.End(), h.Bot)
-		}
-		if !rightMatch(i.RightAdj) {
-			t.Errorf("%s RightAdj %v→%v does not match h.Top=%v", label, i.RightAdj.Start(), i.RightAdj.End(), h.Top)
-		}
+		require.True(t, leftMatch(i.LeftAdj), "%s LeftAdj %v→%v does not match h.Bot=%v", label, i.LeftAdj.Start(), i.LeftAdj.End(), h.Bot)
+		require.True(t, rightMatch(i.RightAdj), "%s RightAdj %v→%v does not match h.Top=%v", label, i.RightAdj.Start(), i.RightAdj.End(), h.Top)
 	}
 	checkAdj("bottom-horiz", bot, info[bot],
 		func(s *Segment) bool { return s.Bot == bot.Bot },
@@ -73,16 +59,10 @@ func TestClassifyHorizontalsLoneSegmentIsUnknown(t *testing.T) {
 		Src: Subject,
 	}}
 	info, err := ClassifyHorizontals(segs)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(info) != 1 {
-		t.Fatalf("expected 1 classification, got %d", len(info))
-	}
+	require.NoError(t, err)
+	require.Len(t, info, 1, "expected 1 classification, got %d", len(info))
 	for _, hi := range info {
-		if hi.Class != HorizClassUnknown {
-			t.Errorf("class: %v want HorizClassUnknown", hi.Class)
-		}
+		require.Equal(t, HorizClassUnknown, hi.Class, "class: %v want HorizClassUnknown", hi.Class)
 	}
 }
 
@@ -113,7 +93,5 @@ func TestClassifyHorizontalsMidBoundRejected(t *testing.T) {
 		}
 	}
 	_, err := ClassifyHorizontals(segs)
-	if !errors.Is(err, ErrUnsupportedHorizontal) {
-		t.Fatalf("expected ErrUnsupportedHorizontal, got %v", err)
-	}
+	require.ErrorIs(t, err, ErrUnsupportedHorizontal, "expected ErrUnsupportedHorizontal, got %v", err)
 }

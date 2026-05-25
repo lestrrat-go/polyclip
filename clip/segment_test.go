@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewSegmentCanonicalisation(t *testing.T) {
@@ -11,15 +12,9 @@ func TestNewSegmentCanonicalisation(t *testing.T) {
 	b := fixed.Point{X: 0, Y: 0}
 
 	s := NewSegment(a, b, Subject)
-	if s.Bot != b || s.Top != a {
-		t.Fatalf("Bot/Top: %+v want Bot=%v Top=%v", s, b, a)
-	}
-	if !s.Reversed {
-		t.Error("Reversed should be true when input a→b runs Top→Bot")
-	}
-	if s.Start() != a || s.End() != b {
-		t.Errorf("Start/End: got %v/%v want %v/%v", s.Start(), s.End(), a, b)
-	}
+	require.True(t, s.Bot == b && s.Top == a, "Bot/Top: %+v want Bot=%v Top=%v", s, b, a)
+	require.True(t, s.Reversed, "Reversed should be true when input a→b runs Top→Bot")
+	require.True(t, s.Start() == a && s.End() == b, "Start/End: got %v/%v want %v/%v", s.Start(), s.End(), a, b)
 }
 
 func TestNewSegmentSameY(t *testing.T) {
@@ -27,20 +22,14 @@ func TestNewSegmentSameY(t *testing.T) {
 	a := fixed.Point{X: 10, Y: 5}
 	b := fixed.Point{X: -5, Y: 5}
 	s := NewSegment(a, b, Clip)
-	if s.Bot != b || s.Top != a {
-		t.Fatalf("Bot/Top tie-break: %+v", s)
-	}
-	if !s.Horizontal() {
-		t.Error("expected horizontal")
-	}
+	require.True(t, s.Bot == b && s.Top == a, "Bot/Top tie-break: %+v", s)
+	require.True(t, s.Horizontal(), "expected horizontal")
 }
 
 func TestSegmentDegenerate(t *testing.T) {
 	p := fixed.Point{X: 1, Y: 2}
 	s := NewSegment(p, p, Subject)
-	if !s.Degenerate() {
-		t.Error("zero-length segment not degenerate")
-	}
+	require.True(t, s.Degenerate(), "zero-length segment not degenerate")
 }
 
 func TestLessYX(t *testing.T) {
@@ -54,8 +43,6 @@ func TestLessYX(t *testing.T) {
 		{fixed.Point{X: 0, Y: 0}, fixed.Point{X: 0, Y: 0}, false}, // equal
 	}
 	for _, c := range cases {
-		if got := LessYX(c.a, c.b); got != c.want {
-			t.Errorf("LessYX(%v,%v)=%v want %v", c.a, c.b, got, c.want)
-		}
+		require.Equal(t, c.want, LessYX(c.a, c.b), "LessYX(%v,%v)=%v want %v", c.a, c.b, LessYX(c.a, c.b), c.want)
 	}
 }

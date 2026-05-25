@@ -4,6 +4,8 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // triArea returns the absolute area of a triangle.
@@ -31,41 +33,27 @@ func triCentroid(t Triangle) Point {
 func TestTriangulateSquare(t *testing.T) {
 	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}}}
 	tris := Triangulate(m)
-	if len(tris) != 2 {
-		t.Fatalf("got %d triangles, want 2", len(tris))
-	}
-	if got, want := triSumArea(tris), 16.0; math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.Len(t, tris, 2, "got %d triangles, want 2", len(tris))
+	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 16.0)
 	for i, tri := range tris {
-		if orient(tri[0], tri[1], tri[2]) <= 0 {
-			t.Errorf("triangle %d not CCW: %v", i, tri)
-		}
+		require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "triangle %d not CCW: %v", i, tri)
 	}
 }
 
 func TestTriangulateTriangle(t *testing.T) {
 	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 0, Y: 6}}}}
 	tris := Triangulate(m)
-	if len(tris) != 1 {
-		t.Fatalf("got %d triangles, want 1", len(tris))
-	}
-	if got := triSumArea(tris); math.Abs(got-18) > 1e-9 {
-		t.Fatalf("area %v, want 18", got)
-	}
+	require.Len(t, tris, 1, "got %d triangles, want 1", len(tris))
+	require.InDelta(t, 18.0, triSumArea(tris), 1e-9, "area %v, want 18", triSumArea(tris))
 }
 
 func TestTriangulateCWInputNormalized(t *testing.T) {
 	// Clockwise outer ring must be normalized to CCW output.
 	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 0}}}}
 	tris := Triangulate(m)
-	if got := triSumArea(tris); math.Abs(got-16) > 1e-9 {
-		t.Fatalf("area %v, want 16", got)
-	}
+	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want 16", triSumArea(tris))
 	for i, tri := range tris {
-		if orient(tri[0], tri[1], tri[2]) <= 0 {
-			t.Errorf("triangle %d not CCW: %v", i, tri)
-		}
+		require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "triangle %d not CCW: %v", i, tri)
 	}
 }
 
@@ -75,13 +63,10 @@ func TestTriangulateConcave(t *testing.T) {
 		{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 6, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 6}, {X: 0, Y: 6},
 	}}}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 	for i, tri := range tris {
-		if c := triCentroid(tri); !m.Contains(c) {
-			t.Errorf("triangle %d centroid %v outside region", i, c)
-		}
+		c := triCentroid(tri)
+		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
 	}
 }
 
@@ -91,16 +76,11 @@ func TestTriangulateWithHole(t *testing.T) {
 		Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
 	}}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), 100.0-16.0; math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, 100.0-16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 100.0-16.0)
 	for i, tri := range tris {
-		if orient(tri[0], tri[1], tri[2]) <= 0 {
-			t.Errorf("triangle %d not CCW: %v", i, tri)
-		}
-		if c := triCentroid(tri); !m.Contains(c) {
-			t.Errorf("triangle %d centroid %v outside region", i, c)
-		}
+		require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "triangle %d not CCW: %v", i, tri)
+		c := triCentroid(tri)
+		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
 	}
 }
 
@@ -113,13 +93,10 @@ func TestTriangulateTouchingHole(t *testing.T) {
 		Holes: []Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
 	}}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 	for i, tri := range tris {
-		if c := triCentroid(tri); !m.Contains(c) {
-			t.Errorf("triangle %d centroid %v outside region", i, c)
-		}
+		c := triCentroid(tri)
+		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
 	}
 }
 
@@ -132,13 +109,10 @@ func TestTriangulateTwoHoles(t *testing.T) {
 		},
 	}}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 	for i, tri := range tris {
-		if c := triCentroid(tri); !m.Contains(c) {
-			t.Errorf("triangle %d centroid %v outside region", i, c)
-		}
+		c := triCentroid(tri)
+		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
 	}
 }
 
@@ -148,9 +122,7 @@ func TestTriangulateMultiPiece(t *testing.T) {
 		{Outer: Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
 	}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 }
 
 func TestTriangulateDegenerate(t *testing.T) {
@@ -161,9 +133,8 @@ func TestTriangulateDegenerate(t *testing.T) {
 		nil,
 		{{Outer: Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}}}}, // collinear → zero area
 	} {
-		if tris := Triangulate(m); len(tris) != 0 {
-			t.Errorf("Triangulate(%v) = %d triangles, want 0", m, len(tris))
-		}
+		tris := Triangulate(m)
+		require.Empty(t, tris, "Triangulate(%v) = %d triangles, want 0", m, len(tris))
 	}
 }
 
@@ -174,13 +145,9 @@ func TestTriangulateCollinearVertices(t *testing.T) {
 		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4}, {X: 0, Y: 4}, {X: 0, Y: 2},
 	}}}
 	tris := Triangulate(m)
-	if got, want := triSumArea(tris), 16.0; math.Abs(got-want) > 1e-9 {
-		t.Fatalf("area %v, want %v", got, want)
-	}
+	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 16.0)
 	for i, tri := range tris {
-		if triArea(tri) < 1e-12 {
-			t.Errorf("triangle %d is degenerate: %v", i, tri)
-		}
+		require.GreaterOrEqual(t, triArea(tri), 1e-12, "triangle %d is degenerate: %v", i, tri)
 	}
 }
 
@@ -201,13 +168,9 @@ func TestTriangulateAreaOracle(t *testing.T) {
 		}
 		tris := Triangulate(m)
 		got := triSumArea(tris)
-		if math.Abs(got-want) > 1e-6*want {
-			t.Fatalf("iter %d: area %v, want %v\nring=%v", iter, got, want, ring)
-		}
+		require.InDelta(t, want, got, 1e-6*want, "iter %d: area %v, want %v\nring=%v", iter, got, want, ring)
 		for i, tri := range tris {
-			if orient(tri[0], tri[1], tri[2]) <= 0 {
-				t.Fatalf("iter %d: triangle %d not CCW: %v\nring=%v", iter, i, tri, ring)
-			}
+			require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "iter %d: triangle %d not CCW: %v\nring=%v", iter, i, tri, ring)
 		}
 	}
 }
@@ -237,13 +200,10 @@ func TestTriangulateBooleanOutput(t *testing.T) {
 		}
 		tris := Triangulate(res)
 		got := triSumArea(tris)
-		if math.Abs(got-want) > 1e-6*math.Max(want, 1) {
-			t.Fatalf("iter %d: area %v, want %v\nres=%v", iter, got, want, res)
-		}
+		require.InDelta(t, want, got, 1e-6*math.Max(want, 1), "iter %d: area %v, want %v\nres=%v", iter, got, want, res)
 		for i, tri := range tris {
-			if c := triCentroid(tri); !res.Contains(c) {
-				t.Fatalf("iter %d: triangle %d centroid %v outside region", iter, i, c)
-			}
+			c := triCentroid(tri)
+			require.True(t, res.Contains(c), "iter %d: triangle %d centroid %v outside region", iter, i, c)
 		}
 	}
 }
@@ -275,13 +235,10 @@ func TestTriangulateHolesOracle(t *testing.T) {
 		want := m.Area()
 		tris := Triangulate(m)
 		got := triSumArea(tris)
-		if math.Abs(got-want) > 1e-6*want {
-			t.Fatalf("iter %d: area %v, want %v (%d holes)", iter, got, want, len(ex.Holes))
-		}
+		require.InDelta(t, want, got, 1e-6*want, "iter %d: area %v, want %v (%d holes)", iter, got, want, len(ex.Holes))
 		for i, tri := range tris {
-			if c := triCentroid(tri); !m.Contains(c) {
-				t.Fatalf("iter %d: triangle %d centroid %v outside region", iter, i, c)
-			}
+			c := triCentroid(tri)
+			require.True(t, m.Contains(c), "iter %d: triangle %d centroid %v outside region", iter, i, c)
 		}
 	}
 }

@@ -1,8 +1,9 @@
 package polyclip
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // exRect builds a CCW axis-aligned rectangle as a single ExPolygon.
@@ -30,27 +31,15 @@ func TestEvenOddUnionOverlappingSquares(t *testing.T) {
 	subj := MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
 	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := eo.Closed.Area(); math.Abs(got-6) > 1e-9 {
-		t.Errorf("even-odd union area = %v, want 6", got)
-	}
-	if h := countHoles(eo.Closed); h != 1 {
-		t.Errorf("even-odd union holes = %d, want 1 (overlap is a hole)", h)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 6, eo.Closed.Area(), 1e-9, "even-odd union area = %v, want 6", eo.Closed.Area())
+	require.Equal(t, 1, countHoles(eo.Closed), "even-odd union holes, want 1 (overlap is a hole)")
 
 	// NonZero self-resolution (Simplify) fills the doubly-covered overlap.
 	nz, err := Simplify(subj)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := nz.Area(); math.Abs(got-7) > 1e-9 {
-		t.Errorf("non-zero (Simplify) area = %v, want 7", got)
-	}
-	if h := countHoles(nz); h != 0 {
-		t.Errorf("non-zero (Simplify) holes = %d, want 0", h)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 7, nz.Area(), 1e-9, "non-zero (Simplify) area = %v, want 7", nz.Area())
+	require.Equal(t, 0, countHoles(nz), "non-zero (Simplify) holes, want 0")
 }
 
 // TestEvenOddNestedSquaresAnnulus: a larger square with a smaller one fully
@@ -61,24 +50,14 @@ func TestEvenOddNestedSquaresAnnulus(t *testing.T) {
 	subj := MultiPolygon{exRect(0, 0, 4, 4), exRect(1, 1, 3, 3)}
 
 	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := eo.Closed.Area(); math.Abs(got-12) > 1e-9 {
-		t.Errorf("even-odd annulus area = %v, want 12", got)
-	}
-	if h := countHoles(eo.Closed); h != 1 {
-		t.Errorf("even-odd annulus holes = %d, want 1", h)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 12, eo.Closed.Area(), 1e-9, "even-odd annulus area = %v, want 12", eo.Closed.Area())
+	require.Equal(t, 1, countHoles(eo.Closed), "even-odd annulus holes, want 1")
 
 	// NonZero self-resolution (Simplify) fills the nested square solid.
 	nz, err := Simplify(subj)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := nz.Area(); math.Abs(got-16) > 1e-9 {
-		t.Errorf("non-zero (Simplify) area = %v, want 16", got)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 16, nz.Area(), 1e-9, "non-zero (Simplify) area = %v, want 16", nz.Area())
 }
 
 // TestEvenOddDifferenceEmptyClipResolves: even-odd Difference with an empty clip
@@ -88,15 +67,9 @@ func TestEvenOddDifferenceEmptyClipResolves(t *testing.T) {
 	subj := MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
 	got, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpDifference)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a := got.Closed.Area(); math.Abs(a-6) > 1e-9 {
-		t.Errorf("even-odd difference area = %v, want 6", a)
-	}
-	if h := countHoles(got.Closed); h != 1 {
-		t.Errorf("even-odd difference holes = %d, want 1", h)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 6, got.Closed.Area(), 1e-9, "even-odd difference area = %v, want 6", got.Closed.Area())
+	require.Equal(t, 1, countHoles(got.Closed), "even-odd difference holes, want 1")
 }
 
 // TestEvenOddWellFormedEqualsNonZero: for simple, non-self-overlapping inputs
@@ -108,16 +81,10 @@ func TestEvenOddWellFormedEqualsNonZero(t *testing.T) {
 
 	for _, op := range []Operation{OpUnion, OpIntersect, OpDifference, OpXor} {
 		eo, err := NewBuilder().AddSubject(a).AddClip(b).Fill(FillEvenOdd).Execute(op)
-		if err != nil {
-			t.Fatalf("op=%d even-odd: %v", op, err)
-		}
+		require.NoError(t, err, "op=%d even-odd", op)
 		nz, err := NewBuilder().AddSubject(a).AddClip(b).Execute(op)
-		if err != nil {
-			t.Fatalf("op=%d non-zero: %v", op, err)
-		}
-		if math.Abs(eo.Closed.Area()-nz.Closed.Area()) > 1e-9 {
-			t.Errorf("op=%d: even-odd area %v != non-zero area %v", op, eo.Closed.Area(), nz.Closed.Area())
-		}
+		require.NoError(t, err, "op=%d non-zero", op)
+		require.InDelta(t, nz.Closed.Area(), eo.Closed.Area(), 1e-9, "op=%d: even-odd area %v != non-zero area %v", op, eo.Closed.Area(), nz.Closed.Area())
 	}
 }
 
@@ -128,23 +95,13 @@ func TestBuilderFillDefaultIsNonZero(t *testing.T) {
 	b := MultiPolygon{exRect(2, 2, 6, 6)}
 
 	def, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	explicit, err := NewBuilder().AddSubject(a).AddClip(b).Fill(FillNonZero).Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	free, err := Union(a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mpolyEqual(def.Closed, free) {
-		t.Error("default-fill Builder != free Union")
-	}
-	if !mpolyEqual(explicit.Closed, free) {
-		t.Error("explicit FillNonZero Builder != free Union")
-	}
+	require.NoError(t, err)
+	require.True(t, mpolyEqual(def.Closed, free), "default-fill Builder != free Union")
+	require.True(t, mpolyEqual(explicit.Closed, free), "explicit FillNonZero Builder != free Union")
 }
 
 // TestResetClearsFill: Reset restores the default fill rule.
@@ -153,22 +110,14 @@ func TestResetClearsFill(t *testing.T) {
 
 	b := NewBuilder().AddSubject(subj).Fill(FillEvenOdd)
 	eo, err := b.Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := eo.Closed.Area(); math.Abs(got-6) > 1e-9 {
-		t.Errorf("even-odd area = %v, want 6", got)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 6, eo.Closed.Area(), 1e-9, "even-odd area = %v, want 6", eo.Closed.Area())
 
 	// After Reset the fill is FillNonZero again, whose Union with an empty clip
 	// short-circuits to the subject verbatim (area 8 = both squares summed),
 	// distinct from even-odd's resolved 6 — proving the fill was cleared.
 	b.Reset().AddSubject(subj)
 	nz, err := b.Execute(OpUnion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := nz.Closed.Area(); math.Abs(got-8) > 1e-9 {
-		t.Errorf("after Reset area = %v, want 8 (FillNonZero restored)", got)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 8, nz.Closed.Area(), 1e-9, "after Reset area = %v, want 8 (FillNonZero restored)", nz.Closed.Area())
 }

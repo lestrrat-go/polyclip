@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/stretchr/testify/require"
 )
 
 // skyline builds a simple CCW rectilinear "histogram" polygon: m unit-width
@@ -100,7 +101,7 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 		select {
 		case r = <-done:
 		case <-time.After(2 * time.Second):
-			t.Fatalf("HANG in %s on A=%s B=%s", opName, mpStr(a), mpStr(b))
+			require.FailNow(t, "HANG", "HANG in %s on A=%s B=%s", opName, mpStr(a), mpStr(b))
 		}
 		pairs++
 		if tr := clip.FallbackTrace(); len(tr) > 0 {
@@ -179,7 +180,7 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 					}
 				}
 			case <-time.After(2 * time.Second):
-				t.Fatalf("HANG in Simplify on %s", mpStr(both))
+				require.FailNow(t, "HANG", "HANG in Simplify on %s", mpStr(both))
 			}
 		}
 	}
@@ -194,9 +195,7 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 	// §7.6 is now FIXED: the algebraic identities are exact on every interacting
 	// axis-aligned pair. Assert it — a regression means a coincident /
 	// cross-source confluence is mis-resolving again (DESIGN §7.6).
-	if idFails != 0 {
-		t.Errorf("§7.6 regression: %d identity violations (want 0); first: %s", idFails, firstIdFail)
-	}
+	require.Zero(t, idFails, "§7.6 regression: %d identity violations (want 0); first: %s", idFails, firstIdFail)
 }
 
 func abs(f float64) float64 {

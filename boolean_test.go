@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 // Operation labels reused across boolean test cases.
@@ -33,51 +34,33 @@ func sq(cx, cy, half float64) ExPolygon {
 
 func TestUnionEmptyBoth(t *testing.T) {
 	got, err := Union(nil, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("len=%d want 0", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "len=%d want 0", len(got))
 }
 
 func TestUnionEmptyA(t *testing.T) {
 	b := MultiPolygon{sq(0, 0, 5)}
 	got, err := Union(nil, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 || got[0].Outer[0] != b[0].Outer[0] {
-		t.Errorf("Union(empty, b) did not return b: %+v", got)
-	}
+	require.NoError(t, err)
+	require.True(t, len(got) == 1 && got[0].Outer[0] == b[0].Outer[0], "Union(empty, b) did not return b: %+v", got)
 }
 
 func TestUnionEmptyB(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	got, err := Union(a, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Errorf("Union(a, empty) len=%d want 1", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "Union(a, empty) len=%d want 1", len(got))
 }
 
 func TestUnionDisjoint(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}  // X in [-5, 5]
 	b := MultiPolygon{sq(20, 0, 5)} // X in [15, 25] — strictly disjoint
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len=%d want 2; got %+v", len(got), got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2, "len=%d want 2; got %+v", len(got), got)
 	// Area sums should equal the sum of inputs (no overlap).
 	wantArea := a.Area() + b.Area()
-	if got.Area() != wantArea {
-		t.Errorf("Area: %v want %v", got.Area(), wantArea)
-	}
+	require.Equal(t, wantArea, got.Area(), "Area: %v want %v", got.Area(), wantArea)
 }
 
 func TestUnionDisjointWithHole(t *testing.T) {
@@ -89,15 +72,9 @@ func TestUnionDisjointWithHole(t *testing.T) {
 	a := MultiPolygon{holed}
 	b := MultiPolygon{sq(100, 100, 5)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("len=%d want 2", len(got))
-	}
-	if len(got[0].Holes) != 1 {
-		t.Errorf("hole on first piece lost; got holes=%d", len(got[0].Holes))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2, "len=%d want 2", len(got))
+	require.Len(t, got[0].Holes, 1, "hole on first piece lost; got holes=%d", len(got[0].Holes))
 }
 
 func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
@@ -108,14 +85,10 @@ func TestUnionTouchingBoundaryAxisAligned(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(10, 0, 5)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 	gotArea := got.Area()
 	wantArea := a.Area() + b.Area()
-	if gotArea < wantArea*0.99 || gotArea > wantArea*1.01 {
-		t.Errorf("Union area %v want ≈%v; got=%+v", gotArea, wantArea, got)
-	}
+	require.True(t, gotArea >= wantArea*0.99 && gotArea <= wantArea*1.01, "Union area %v want ≈%v; got=%+v", gotArea, wantArea, got)
 }
 
 func TestUnionOverlappingAxisAligned(t *testing.T) {
@@ -126,18 +99,12 @@ func TestUnionOverlappingAxisAligned(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 	gotArea := got.Area()
 	// True union area: 100 + 100 - 70 (overlap [-2,5]×[-5,5]) = 130.
 	wantArea := 130.0
-	if gotArea < wantArea*0.99 || gotArea > wantArea*1.01 {
-		t.Errorf("Union area %v want ≈%v; got=%+v", gotArea, wantArea, got)
-	}
-	if len(got) != 1 {
-		t.Errorf("expected 1 merged piece, got %d: %+v", len(got), got)
-	}
+	require.True(t, gotArea >= wantArea*0.99 && gotArea <= wantArea*1.01, "Union area %v want ≈%v; got=%+v", gotArea, wantArea, got)
+	require.Len(t, got, 1, "expected 1 merged piece, got %d: %+v", len(got), got)
 }
 
 func TestInputOrientationNormalized(t *testing.T) {
@@ -173,9 +140,7 @@ func TestInputOrientationNormalized(t *testing.T) {
 		x, _ := Xor(a, b)
 		const tol = 0.01
 		check := func(op string, got, exp float64) {
-			if got < exp-tol || got > exp+tol {
-				t.Errorf("%s %s = %.3f, want %.3f", tc.name, op, got, exp)
-			}
+			require.InDelta(t, exp, got, tol, "%s %s = %.3f, want %.3f", tc.name, op, got, exp)
 		}
 		check("Union", u.Area(), want.u)
 		check("Intersect", i.Area(), want.i)
@@ -192,13 +157,9 @@ func TestUnionVerticallyStackedAxialSquares(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(0, 10, 5)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 	wantArea := a.Area() + b.Area()
-	if got.Area() < wantArea*0.99 || got.Area() > wantArea*1.01 {
-		t.Errorf("Union area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
-	}
+	require.True(t, got.Area() >= wantArea*0.99 && got.Area() <= wantArea*1.01, "Union area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
 }
 
 func TestUnionThreeOverlappingAxialSquares(t *testing.T) {
@@ -212,17 +173,11 @@ func TestUnionThreeOverlappingAxialSquares(t *testing.T) {
 	b := MultiPolygon{sq(3, 0, 5)}
 	c := MultiPolygon{sq(6, 0, 5)}
 	ab, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("Union(a,b): %v", err)
-	}
+	require.NoError(t, err)
 	got, err := Union(ab, c)
-	if err != nil {
-		t.Fatalf("Union(ab,c): %v", err)
-	}
+	require.NoError(t, err)
 	wantArea := 160.0
-	if got.Area() < wantArea*0.99 || got.Area() > wantArea*1.01 {
-		t.Errorf("Union(a,b,c) area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
-	}
+	require.True(t, got.Area() >= wantArea*0.99 && got.Area() <= wantArea*1.01, "Union(a,b,c) area %v want ≈%v; got=%+v", got.Area(), wantArea, got)
 }
 
 func TestUnionNestedAxialSquares(t *testing.T) {
@@ -233,23 +188,13 @@ func TestUnionNestedAxialSquares(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 10)}
 	b := MultiPolygon{sq(0, 0, 3)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 piece, got %d: %+v", len(got), got)
-	}
-	if len(got[0].Outer) != 4 {
-		t.Errorf("outer ring vertex count: %d want 4; outer=%v", len(got[0].Outer), got[0].Outer)
-	}
-	if len(got[0].Holes) != 0 {
-		t.Errorf("unexpected holes: %v", got[0].Holes)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "expected 1 piece, got %d: %+v", len(got), got)
+	require.Len(t, got[0].Outer, 4, "outer ring vertex count: %d want 4; outer=%v", len(got[0].Outer), got[0].Outer)
+	require.Len(t, got[0].Holes, 0, "unexpected holes: %v", got[0].Holes)
 	gotArea := got.Area()
 	wantArea := 20.0 * 20.0
-	if gotArea < wantArea*0.99 || gotArea > wantArea*1.01 {
-		t.Errorf("Union area %v want ≈%v", gotArea, wantArea)
-	}
+	require.True(t, gotArea >= wantArea*0.99 && gotArea <= wantArea*1.01, "Union area %v want ≈%v", gotArea, wantArea)
 }
 
 // diamond returns a CCW unit-ish diamond ExPolygon with no horizontal edges,
@@ -264,24 +209,16 @@ func TestUnionOverlappingDiamonds(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 10)}
 	b := MultiPolygon{diamond(5, 0, 10)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected single merged piece, got %d: %+v", len(got), got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "expected single merged piece, got %d: %+v", len(got), got)
 	aArea, bArea := a.Area(), b.Area()
 	gotArea := got.Area()
 	floor := aArea
 	if bArea > floor {
 		floor = bArea
 	}
-	if gotArea < floor*0.99 {
-		t.Errorf("Union area %v is below floor %v", gotArea, floor)
-	}
-	if gotArea > aArea+bArea+0.01 {
-		t.Errorf("Union area %v exceeds sum %v", gotArea, aArea+bArea)
-	}
+	require.GreaterOrEqual(t, gotArea, floor*0.99, "Union area %v is below floor %v", gotArea, floor)
+	require.LessOrEqual(t, gotArea, aArea+bArea+0.01, "Union area %v exceeds sum %v", gotArea, aArea+bArea)
 }
 
 func TestUnionSharedVertexCrossing(t *testing.T) {
@@ -300,13 +237,9 @@ func TestUnionSharedVertexCrossing(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 	gotArea := got.Area()
-	if gotArea < 290 || gotArea > 305 {
-		t.Errorf("Union area %v outside expected band [290,305] (truth ~298.5)", gotArea)
-	}
+	require.True(t, gotArea >= 290 && gotArea <= 305, "Union area %v outside expected band [290,305] (truth ~298.5)", gotArea)
 }
 
 func TestUnionSharedVertexViaHorizontal(t *testing.T) {
@@ -327,12 +260,9 @@ func TestUnionSharedVertexViaHorizontal(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotArea := got.Area(); gotArea < 7.2 || gotArea > 7.8 {
-		t.Errorf("Union area %v outside expected band [7.2,7.8] (truth ~7.52; pre-fix bug was 9.0)", gotArea)
-	}
+	require.NoError(t, err)
+	gotArea := got.Area()
+	require.True(t, gotArea >= 7.2 && gotArea <= 7.8, "Union area %v outside expected band [7.2,7.8] (truth ~7.52; pre-fix bug was 9.0)", gotArea)
 }
 
 func TestUnionOverlappingSharedVertexMismerge(t *testing.T) {
@@ -354,12 +284,9 @@ func TestUnionOverlappingSharedVertexMismerge(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotArea := got.Area(); gotArea < 43.5 || gotArea > 44.3 {
-		t.Errorf("Union area %v outside expected band [43.5,44.3] (truth ~43.9; pre-fix bug was 14.4)", gotArea)
-	}
+	require.NoError(t, err)
+	gotArea := got.Area()
+	require.True(t, gotArea >= 43.5 && gotArea <= 44.3, "Union area %v outside expected band [43.5,44.3] (truth ~43.9; pre-fix bug was 14.4)", gotArea)
 }
 
 func TestUnionThroughVertexBoundLastSegment(t *testing.T) {
@@ -385,12 +312,9 @@ func TestUnionThroughVertexBoundLastSegment(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotArea := got.Area(); gotArea < 23.0 || gotArea > 23.5 {
-		t.Errorf("Union area %v outside expected band [23.0,23.5] (truth ~23.23; pre-fix bug was 14.75)", gotArea)
-	}
+	require.NoError(t, err)
+	gotArea := got.Area()
+	require.True(t, gotArea >= 23.0 && gotArea <= 23.5, "Union area %v outside expected band [23.0,23.5] (truth ~23.23; pre-fix bug was 14.75)", gotArea)
 }
 
 func TestXorHotThroughSharedApexConfluence(t *testing.T) {
@@ -421,12 +345,9 @@ func TestXorHotThroughSharedApexConfluence(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Xor(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotArea := got.Area(); gotArea < 19.7 || gotArea > 20.3 {
-		t.Errorf("Xor area %v outside expected band [19.7,20.3] (truth ~20.0; pre-fix bug was 0.25)", gotArea)
-	}
+	require.NoError(t, err)
+	gotArea := got.Area()
+	require.True(t, gotArea >= 19.7 && gotArea <= 20.3, "Xor area %v outside expected band [19.7,20.3] (truth ~20.0; pre-fix bug was 0.25)", gotArea)
 }
 
 func TestUnionSharedLocalMaxConfluence(t *testing.T) {
@@ -447,12 +368,9 @@ func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 		b.Reverse()
 	}
 	got, err := Union(MultiPolygon{{Outer: a}}, MultiPolygon{{Outer: b}})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if gotArea := got.Area(); gotArea < 5.5 || gotArea > 5.85 {
-		t.Errorf("Union area %v outside expected band [5.5,5.85] (truth ~5.67; pre-fix bug was 1.333)", gotArea)
-	}
+	require.NoError(t, err)
+	gotArea := got.Area()
+	require.True(t, gotArea >= 5.5 && gotArea <= 5.85, "Union area %v outside expected band [5.5,5.85] (truth ~5.67; pre-fix bug was 1.333)", gotArea)
 }
 
 func TestSharedCollinearHorizontalEdge(t *testing.T) {
@@ -494,12 +412,8 @@ func TestSharedCollinearHorizontalEdge(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if gotArea := got.Area(); math.Abs(gotArea-c.want) > 0.01 {
-			t.Errorf("%s area %v want %v", c.name, gotArea, c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -543,12 +457,8 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.05 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.05, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -587,17 +497,12 @@ func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.01 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 	// Union must be a single merged ring, not two touching rings.
-	if got, _ := Union(a, b); len(got) != 1 {
-		t.Errorf("Union: got %d rings, want 1 merged ring", len(got))
-	}
+	got, _ := Union(a, b)
+	require.Len(t, got, 1, "Union: got %d rings, want 1 merged ring", len(got))
 }
 
 func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
@@ -622,12 +527,8 @@ func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.01 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -654,12 +555,8 @@ func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.01 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -688,12 +585,8 @@ func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.01 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -722,12 +615,8 @@ func TestSharedVertexCollinearHorizontalSimplified(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 1e-9 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 1e-9, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -758,12 +647,8 @@ func TestBooleanSharedVertexNotNested(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.5 {
-			t.Errorf("%s area %v want %v (no false nesting at shared vertex)", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.5, "%s area %v want %v (no false nesting at shared vertex)", c.name, got.Area(), c.want)
 	}
 }
 
@@ -800,12 +685,8 @@ func TestSharedVertexExitViaHorizontal(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.05 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.05, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -843,12 +724,8 @@ func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -902,12 +779,8 @@ func TestXorVertexOnEdgeApexMerge(t *testing.T) {
 		}
 		for _, ck := range checks {
 			got, err := ck.run()
-			if err != nil {
-				t.Fatalf("%s/%s: unexpected error: %v", c.name, ck.op, err)
-			}
-			if math.Abs(got.Area()-ck.want) > 0.02 {
-				t.Errorf("%s/%s area %v want %v", c.name, ck.op, got.Area(), ck.want)
-			}
+			require.NoError(t, err, "%s/%s: unexpected error", c.name, ck.op)
+			require.InDelta(t, ck.want, got.Area(), 0.02, "%s/%s area %v want %v", c.name, ck.op, got.Area(), ck.want)
 		}
 	}
 }
@@ -949,12 +822,8 @@ func TestUnionNotchTipOnHorizontalEdge(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -996,12 +865,8 @@ func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -1065,12 +930,8 @@ func TestSharedVertexConcaveMaxThroughHorizontal(t *testing.T) {
 		}
 		for _, c := range checks {
 			got, err := c.run()
-			if err != nil {
-				t.Fatalf("%s/%s: unexpected error: %v", tc.name, c.name, err)
-			}
-			if math.Abs(got.Area()-c.want) > 0.02 {
-				t.Errorf("%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
-			}
+			require.NoError(t, err, "%s/%s: unexpected error", tc.name, c.name)
+			require.InDelta(t, c.want, got.Area(), 0.02, "%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
 		}
 	}
 }
@@ -1102,12 +963,8 @@ func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.op, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.op, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.op)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.op, got.Area(), c.want)
 	}
 }
 
@@ -1116,12 +973,8 @@ func TestUnionDisjointDiamonds(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	b := MultiPolygon{diamond(100, 100, 5)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 disjoint pieces, got %d", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2, "expected 2 disjoint pieces, got %d", len(got))
 }
 
 func TestUnionPreservesOrder(t *testing.T) {
@@ -1129,157 +982,97 @@ func TestUnionPreservesOrder(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 1), sq(0, 100, 1)}
 	b := MultiPolygon{sq(50, 50, 1)}
 	got, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("len=%d want 3", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 3, "len=%d want 3", len(got))
 	// First two ExPolygons should be a's; third should be b's.
-	if got[0].Outer[0].Y != a[0].Outer[0].Y || got[1].Outer[0].Y != a[1].Outer[0].Y {
-		t.Errorf("order: a's pieces not first; got=%+v", got)
-	}
-	if got[2].Outer[0].X != b[0].Outer[0].X {
-		t.Errorf("order: b's piece not last; got=%+v", got)
-	}
+	require.True(t, got[0].Outer[0].Y == a[0].Outer[0].Y && got[1].Outer[0].Y == a[1].Outer[0].Y, "order: a's pieces not first; got=%+v", got)
+	require.Equal(t, b[0].Outer[0].X, got[2].Outer[0].X, "order: b's piece not last; got=%+v", got)
 }
 
 func TestIntersectEmpty(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	got, err := Intersect(nil, a)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("Intersect(empty, a) = %v want empty", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "Intersect(empty, a) = %v want empty", got)
 	got, err = Intersect(a, nil)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("Intersect(a, empty) = %v want empty", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "Intersect(a, empty) = %v want empty", got)
 }
 
 func TestIntersectDisjoint(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	b := MultiPolygon{diamond(100, 100, 5)}
 	got, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("Intersect(disjoint) = %v want empty", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "Intersect(disjoint) = %v want empty", got)
 }
 
 func TestIntersectOverlappingDiamonds(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 10)}
 	b := MultiPolygon{diamond(5, 0, 10)}
 	got, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) == 0 {
-		t.Fatalf("expected non-empty intersection, got 0 pieces")
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "expected non-empty intersection, got 0 pieces")
 	// Intersection of two diamonds centred (0,0) and (5,0) with r=10 is
 	// a lens-shaped region with area > 0 but less than each diamond's 200.
 	gotArea := got.Area()
-	if gotArea <= 0 || gotArea >= 200 {
-		t.Errorf("Intersect area %v not in (0, 200); got=%+v", gotArea, got)
-	}
+	require.True(t, gotArea > 0 && gotArea < 200, "Intersect area %v not in (0, 200); got=%+v", gotArea, got)
 }
 
 func TestDifferenceEmpty(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	got, err := Difference(nil, a)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("Diff(empty, a) = %v want empty", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "Diff(empty, a) = %v want empty", got)
 	got, err = Difference(a, nil)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 1 {
-		t.Errorf("Diff(a, empty) len=%d want 1", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "Diff(a, empty) len=%d want 1", len(got))
 }
 
 func TestDifferenceDisjoint(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	b := MultiPolygon{diamond(100, 100, 5)}
 	got, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 1 {
-		t.Errorf("Diff(a, disjoint b) len=%d want 1", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "Diff(a, disjoint b) len=%d want 1", len(got))
 }
 
 func TestXorEmpty(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	got, err := Xor(nil, a)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 1 {
-		t.Errorf("Xor(empty, a) len=%d want 1", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "Xor(empty, a) len=%d want 1", len(got))
 }
 
 func TestXorDisjoint(t *testing.T) {
 	a := MultiPolygon{diamond(0, 0, 5)}
 	b := MultiPolygon{diamond(100, 100, 5)}
 	got, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 2 {
-		t.Errorf("Xor(disjoint) len=%d want 2", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 2, "Xor(disjoint) len=%d want 2", len(got))
 }
 
 func TestUnionAllEmpty(t *testing.T) {
 	got, err := UnionAll()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("UnionAll() len=%d want 0", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 0, "UnionAll() len=%d want 0", len(got))
 }
 
 func TestUnionAllSingle(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	got, err := UnionAll(a)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 1 || got.Area() != a.Area() {
-		t.Errorf("UnionAll(a) = %+v, want a", got)
-	}
+	require.NoError(t, err)
+	require.True(t, len(got) == 1 && got.Area() == a.Area(), "UnionAll(a) = %+v, want a", got)
 }
 
 func TestUnionAllPairMatchesUnion(t *testing.T) {
 	a := MultiPolygon{sq(0, 0, 5)}
 	b := MultiPolygon{sq(3, 0, 5)} // overlaps a
 	gotAll, err := UnionAll(a, b)
-	if err != nil {
-		t.Fatalf("UnionAll: %v", err)
-	}
+	require.NoError(t, err, "UnionAll")
 	gotPair, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("Union: %v", err)
-	}
-	if gotAll.Area() != gotPair.Area() {
-		t.Errorf("areas differ: UnionAll=%v Union=%v", gotAll.Area(), gotPair.Area())
-	}
+	require.NoError(t, err, "Union")
+	require.Equal(t, gotPair.Area(), gotAll.Area(), "areas differ: UnionAll=%v Union=%v", gotAll.Area(), gotPair.Area())
 }
 
 func TestUnionAllManyDisjoint(t *testing.T) {
@@ -1291,16 +1084,10 @@ func TestUnionAllManyDisjoint(t *testing.T) {
 		{sq(40, 0, 1)},
 	}
 	got, err := UnionAll(polys...)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 5 {
-		t.Errorf("len=%d want 5", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 5, "len=%d want 5", len(got))
 	// Each square is 2x2 → 4 area; 5 disjoint → 20.
-	if got.Area() != 20 {
-		t.Errorf("Area=%v want 20", got.Area())
-	}
+	require.Equal(t, 20.0, got.Area(), "Area=%v want 20", got.Area())
 }
 
 func TestUnionAllManyOverlapping(t *testing.T) {
@@ -1314,12 +1101,8 @@ func TestUnionAllManyOverlapping(t *testing.T) {
 		{diamond(20, 0, 10)},
 	}
 	got, err := UnionAll(polys...)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("len=%d want 1", len(got))
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "len=%d want 1", len(got))
 	// Cross-check against cumulative Union.
 	var want MultiPolygon
 	for i, p := range polys {
@@ -1328,15 +1111,11 @@ func TestUnionAllManyOverlapping(t *testing.T) {
 			continue
 		}
 		w, err := Union(want, p)
-		if err != nil {
-			t.Fatalf("cumulative Union: %v", err)
-		}
+		require.NoError(t, err, "cumulative Union")
 		want = w
 	}
 	const tol = 1e-9
-	if diff := got.Area() - want.Area(); diff > tol || diff < -tol {
-		t.Errorf("area diverges from cumulative: UnionAll=%v cumulative=%v", got.Area(), want.Area())
-	}
+	require.InDelta(t, want.Area(), got.Area(), tol, "area diverges from cumulative: UnionAll=%v cumulative=%v", got.Area(), want.Area())
 }
 
 func TestSplitOverlapsCollinearSpikeNoHang(t *testing.T) {
@@ -1367,11 +1146,9 @@ func TestSplitOverlapsCollinearSpikeNoHang(t *testing.T) {
 		{opXor, Xor},
 	} {
 		got, err := tc.fn(a, b)
-		if err != nil && err != ErrHorizontalNotSupported {
-			t.Fatalf("%s: unexpected error: %v", tc.name, err)
-		}
-		if err == nil && got.Area() < -1e-6 {
-			t.Errorf("%s: negative area %g", tc.name, got.Area())
+		require.True(t, err == nil || err == ErrHorizontalNotSupported, "%s: unexpected error: %v", tc.name, err)
+		if err == nil {
+			require.GreaterOrEqual(t, got.Area(), -1e-6, "%s: negative area %g", tc.name, got.Area())
 		}
 	}
 }
@@ -1428,12 +1205,8 @@ func TestCollinearMidVertexSimplified(t *testing.T) {
 		}
 		for _, c := range checks {
 			got, err := c.run()
-			if err != nil {
-				t.Fatalf("%s/%s: unexpected error: %v", tc.name, c.name, err)
-			}
-			if math.Abs(got.Area()-c.want) > 0.02 {
-				t.Errorf("%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
-			}
+			require.NoError(t, err, "%s/%s: unexpected error", tc.name, c.name)
+			require.InDelta(t, c.want, got.Area(), 0.02, "%s/%s area %v want %v", tc.name, c.name, got.Area(), c.want)
 		}
 	}
 }
@@ -1468,12 +1241,8 @@ func TestCrossingSnapsOrderIndependently(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -1502,12 +1271,8 @@ func TestTouchingAlongHorizontalEdgeNotNested(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -1518,15 +1283,9 @@ func TestInteriorPointAvoidsHorizontalEdge(t *testing.T) {
 	// (7.5,9), a point ON that edge.
 	p := Polygon{{X: 12, Y: 9}, {X: 6, Y: 9}, {X: 4, Y: 7}, {X: 2, Y: 11}}
 	pt, ok := interiorPoint(p)
-	if !ok {
-		t.Fatal("interiorPoint returned !ok for a valid quad")
-	}
-	if pointOnRingBoundary(p, pt) {
-		t.Errorf("interiorPoint %v lies on the ring boundary", pt)
-	}
-	if !p.Contains(pt) {
-		t.Errorf("interiorPoint %v not inside its own ring", pt)
-	}
+	require.True(t, ok, "interiorPoint returned !ok for a valid quad")
+	require.False(t, pointOnRingBoundary(p, pt), "interiorPoint %v lies on the ring boundary", pt)
+	require.True(t, p.Contains(pt), "interiorPoint %v not inside its own ring", pt)
 }
 
 func TestXorCoincidentPlateauKeepsApex(t *testing.T) {
@@ -1554,12 +1313,8 @@ func TestXorCoincidentPlateauKeepsApex(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -1589,12 +1344,8 @@ func TestXorVertexOnEdgeApexKeepsCorner(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 }
 
@@ -1615,9 +1366,7 @@ func TestSimplifyCollinearRing(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := simplifyCollinearRing(c.in)
-		if len(got) != c.want {
-			t.Errorf("%s: got %d verts %v, want %d", c.name, len(got), got, c.want)
-		}
+		require.Len(t, got, c.want, "%s: got %d verts %v, want %d", c.name, len(got), got, c.want)
 	}
 }
 
@@ -1629,13 +1378,10 @@ func TestUnionAllDoesNotMutateInput(t *testing.T) {
 	}
 	snapshot := make([]MultiPolygon, len(polys))
 	copy(snapshot, polys)
-	if _, err := UnionAll(polys...); err != nil {
-		t.Fatalf("err: %v", err)
-	}
+	_, err := UnionAll(polys...)
+	require.NoError(t, err)
 	for i := range polys {
-		if &polys[i][0] != &snapshot[i][0] {
-			t.Errorf("polys[%d] underlying ExPolygon array changed", i)
-		}
+		require.Same(t, &snapshot[i][0], &polys[i][0], "polys[%d] underlying ExPolygon array changed", i)
 	}
 }
 
@@ -1673,37 +1419,21 @@ func TestBooleanNearScanlineCrossingNoDoubleDispatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			aA, bA := tc.a.Area(), tc.b.Area()
 			u, err := Union(tc.a, tc.b)
-			if err != nil {
-				t.Fatalf("union: %v", err)
-			}
+			require.NoError(t, err, "union")
 			i, _ := Intersect(tc.a, tc.b)
 			d, _ := Difference(tc.a, tc.b)
 			x, _ := Xor(tc.a, tc.b)
 			uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 			// Per-op area invariants (the fuzz bounds the corpus violated).
 			lo := math.Max(aA, bA)
-			if uA < lo-eps || uA > aA+bA+eps {
-				t.Errorf("Union %g not in [max(a,b)=%g, a+b=%g]", uA, lo, aA+bA)
-			}
-			if iA > math.Min(aA, bA)+eps || iA < -eps {
-				t.Errorf("Intersect %g not in [0, min(a,b)=%g]", iA, math.Min(aA, bA))
-			}
-			if dA > aA+eps || dA < -eps {
-				t.Errorf("Difference %g not in [0, a=%g]", dA, aA)
-			}
-			if xA > aA+bA+eps || xA < -eps {
-				t.Errorf("Xor %g not in [0, a+b=%g]", xA, aA+bA)
-			}
+			require.True(t, uA >= lo-eps && uA <= aA+bA+eps, "Union %g not in [max(a,b)=%g, a+b=%g]", uA, lo, aA+bA)
+			require.True(t, iA <= math.Min(aA, bA)+eps && iA >= -eps, "Intersect %g not in [0, min(a,b)=%g]", iA, math.Min(aA, bA))
+			require.True(t, dA <= aA+eps && dA >= -eps, "Difference %g not in [0, a=%g]", dA, aA)
+			require.True(t, xA <= aA+bA+eps && xA >= -eps, "Xor %g not in [0, a+b=%g]", xA, aA+bA)
 			// Noise-free set identities.
-			if math.Abs(uA-(aA+bA-iA)) > 0.02 {
-				t.Errorf("U=A+B-I violated: U=%g A+B-I=%g", uA, aA+bA-iA)
-			}
-			if math.Abs(dA-(aA-iA)) > 0.02 {
-				t.Errorf("D=A-I violated: D=%g A-I=%g", dA, aA-iA)
-			}
-			if math.Abs(xA-(uA-iA)) > 0.02 {
-				t.Errorf("X=U-I violated: X=%g U-I=%g", xA, uA-iA)
-			}
+			require.InDelta(t, aA+bA-iA, uA, 0.02, "U=A+B-I violated: U=%g A+B-I=%g", uA, aA+bA-iA)
+			require.InDelta(t, aA-iA, dA, 0.02, "D=A-I violated: D=%g A-I=%g", dA, aA-iA)
+			require.InDelta(t, uA-iA, xA, 0.02, "X=U-I violated: X=%g U-I=%g", xA, uA-iA)
 		})
 	}
 }
@@ -1736,23 +1466,15 @@ func TestBooleanInputHoleIslandNesting(t *testing.T) {
 	}
 	for _, c := range checks {
 		got, err := c.run()
-		if err != nil {
-			t.Fatalf("%s: unexpected error: %v", c.name, err)
-		}
-		if math.Abs(got.Area()-c.want) > 0.02 {
-			t.Errorf("%s area %v want %v", c.name, got.Area(), c.want)
-		}
+		require.NoError(t, err, "%s: unexpected error", c.name)
+		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
 	}
 
 	// The union must keep the island as a SEPARATE top-level piece, and the
 	// square must keep its 6x6 hole — exactly two pieces, one holed, one not.
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
-	if len(u) != 2 {
-		t.Fatalf("union pieces = %d, want 2 (square+hole, island)", len(u))
-	}
+	require.NoError(t, err, "union")
+	require.Len(t, u, 2, "union pieces = %d, want 2 (square+hole, island)", len(u))
 	holed, island := 0, 0
 	for _, ex := range u {
 		switch len(ex.Holes) {
@@ -1762,9 +1484,7 @@ func TestBooleanInputHoleIslandNesting(t *testing.T) {
 			island++
 		}
 	}
-	if holed != 1 || island != 1 {
-		t.Errorf("union pieces: holed=%d island=%d, want 1 and 1", holed, island)
-	}
+	require.True(t, holed == 1 && island == 1, "union pieces: holed=%d island=%d, want 1 and 1", holed, island)
 }
 
 func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
@@ -1790,28 +1510,18 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 9}, {X: 2, Y: 9}, {X: 4, Y: 8}, {X: 10, Y: 8}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Difference must not have collapsed (the bug dropped ~68 of 125.5).
-	if dA < 120 {
-		t.Errorf("difference area %v collapsed (want ~%v)", dA, aA-iA)
-	}
+	require.GreaterOrEqual(t, dA, 120.0, "difference area %v collapsed (want ~%v)", dA, aA-iA)
 	// Noise-free set identities: U=A+B-I, D=A-I, X=U-I.
 	for _, c := range []struct {
 		name      string
@@ -1821,9 +1531,7 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -1847,28 +1555,18 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 11, Y: 4}, {X: 7, Y: 12}, {X: 0, Y: 1}, {X: 4, Y: 0}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Difference must not have collapsed (the bug dropped ~64 of ~82.3).
-	if dA < 78 {
-		t.Errorf("difference area %v collapsed (want ~%v)", dA, aA-iA)
-	}
+	require.GreaterOrEqual(t, dA, 78.0, "difference area %v collapsed (want ~%v)", dA, aA-iA)
 	// Noise-free set identities: U=A+B-I, D=A-I, X=U-I.
 	for _, c := range []struct {
 		name      string
@@ -1878,9 +1576,7 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -1905,19 +1601,13 @@ func TestBooleanHoledInputDifferenceClipApexSameSideJoin(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 12}, {X: 4, Y: 0}, {X: 9, Y: 10}, {X: 5, Y: 8}}}}
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	want := a.Area() - i.Area() // D = A - I, ~122.07
 	// The catastrophic self-crossing collapse dropped ~28 (got 94.35). Assert the
 	// tangle is gone: D must be within ~2 of the identity (was off by ~28).
-	if math.Abs(d.Area()-want) > 2.0 {
-		t.Errorf("difference area %v collapsed (want ~%v, tolerance documents the small notch residual)", d.Area(), want)
-	}
+	require.InDelta(t, want, d.Area(), 2.0, "difference area %v collapsed (want ~%v, tolerance documents the small notch residual)", d.Area(), want)
 }
 
 func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) {
@@ -1942,28 +1632,18 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 5}, {X: 12, Y: 5}, {X: 5, Y: 10}, {X: 3.5, Y: 3.25}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~21).
-	if iA < 18 {
-		t.Errorf("intersect area %v collapsed (want ~21)", iA)
-	}
+	require.GreaterOrEqual(t, iA, 18.0, "intersect area %v collapsed (want ~21)", iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -1972,9 +1652,7 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -1996,26 +1674,16 @@ func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 8}, {X: 7, Y: 8}, {X: 2, Y: 10}, {X: 2, Y: 2}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	if math.Abs(dA-(aA-iA)) > 0.02 {
-		t.Errorf("D=A-I: got %v want %v", dA, aA-iA)
-	}
+	require.InDelta(t, aA-iA, dA, 0.02, "D=A-I: got %v want %v", dA, aA-iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2023,9 +1691,7 @@ func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
 		{identU, uA, aA + bA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2046,17 +1712,13 @@ func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5.5, Y: 5}, {X: 2, Y: 5}, {X: 8, Y: 1}, {X: 10, Y: 2}}}}
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	u, _ := Union(a, b)
 	d, _ := Difference(a, b)
 	x, _ := Xor(a, b)
 	aA, bA := a.Area(), b.Area()
 	iA := i.Area()
-	if iA > 11.5 {
-		t.Errorf("intersect %v over-counted (want ~10.4) — spurious hole-interior ring", iA)
-	}
+	require.LessOrEqual(t, iA, 11.5, "intersect %v over-counted (want ~10.4) — spurious hole-interior ring", iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2065,9 +1727,7 @@ func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
 		{identD, d.Area(), aA - iA},
 		{identX, x.Area(), u.Area() - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 
 	// Sibling that must NOT trigger the cross-source defer: two quads sharing a top
@@ -2075,13 +1735,9 @@ func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
 	a2 := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 2}, {X: 12, Y: 8}, {X: 8, Y: 8}, {X: 6, Y: 8}}}}
 	b2 := MultiPolygon{ExPolygon{Outer: Polygon{{X: 8, Y: 8}, {X: 5, Y: 11}, {X: 1, Y: 1}, {X: 12, Y: 8}}}}
 	d2, err := Difference(a2, b2)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	i2, _ := Intersect(a2, b2)
-	if math.Abs(d2.Area()-(a2.Area()-i2.Area())) > 0.02 {
-		t.Errorf("shared-top D=A-I: got %v want %v", d2.Area(), a2.Area()-i2.Area())
-	}
+	require.InDelta(t, a2.Area()-i2.Area(), d2.Area(), 0.02, "shared-top D=A-I: got %v want %v", d2.Area(), a2.Area()-i2.Area())
 }
 
 func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
@@ -2102,30 +1758,18 @@ func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 8}, {X: 2, Y: 7}, {X: 0, Y: 1}, {X: 10, Y: 10}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	if iA < 14 {
-		t.Errorf("intersect area %v collapsed (want ~15.3)", iA)
-	}
+	require.GreaterOrEqual(t, iA, 14.0, "intersect area %v collapsed (want ~15.3)", iA)
 	// No phantom interior hole: the intersection is a single simple region.
-	if len(i) != 1 || len(i[0].Holes) != 0 {
-		t.Errorf("intersect should be one hole-free ring, got %d pieces %v", len(i), i)
-	}
+	require.True(t, len(i) == 1 && len(i[0].Holes) == 0, "intersect should be one hole-free ring, got %d pieces %v", len(i), i)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2134,9 +1778,7 @@ func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2165,27 +1807,17 @@ func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
 		a := MultiPolygon{ExPolygon{Outer: outer, Holes: []Polygon{tc.hole}}}
 		b := MultiPolygon{ExPolygon{Outer: tc.b}}
 		u, err := Union(a, b)
-		if err != nil {
-			t.Fatalf("%s union: %v", tc.name, err)
-		}
+		require.NoError(t, err, "%s union", tc.name)
 		i, err := Intersect(a, b)
-		if err != nil {
-			t.Fatalf("%s intersect: %v", tc.name, err)
-		}
+		require.NoError(t, err, "%s intersect", tc.name)
 		d, err := Difference(a, b)
-		if err != nil {
-			t.Fatalf("%s difference: %v", tc.name, err)
-		}
+		require.NoError(t, err, "%s difference", tc.name)
 		x, err := Xor(a, b)
-		if err != nil {
-			t.Fatalf("%s xor: %v", tc.name, err)
-		}
+		require.NoError(t, err, "%s xor", tc.name)
 		aA, bA := a.Area(), b.Area()
 		uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 		// Intersect must not have collapsed to a sliver (the bug returned ~5).
-		if iA < tc.want-0.6 {
-			t.Errorf("%s: intersect area %v collapsed (want ~%v)", tc.name, iA, tc.want)
-		}
+		require.GreaterOrEqual(t, iA, tc.want-0.6, "%s: intersect area %v collapsed (want ~%v)", tc.name, iA, tc.want)
 		for _, c := range []struct {
 			name      string
 			got, want float64
@@ -2194,9 +1826,7 @@ func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
 			{identD, dA, aA - iA},
 			{identX, xA, uA - iA},
 		} {
-			if math.Abs(c.got-c.want) > 0.02 {
-				t.Errorf("%s %s: got %v want %v", tc.name, c.name, c.got, c.want)
-			}
+			require.InDelta(t, c.want, c.got, 0.02, "%s %s: got %v want %v", tc.name, c.name, c.got, c.want)
 		}
 	}
 }
@@ -2222,32 +1852,20 @@ func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 8}, {X: 5, Y: 8}, {X: 12, Y: 6}, {X: 10, Y: 11}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Difference must not have collapsed to a sliver (the bug returned 138.6,
 	// larger than A's area, instead of ~118.1).
-	if dA > aA-10 {
-		t.Errorf("difference area %v did not remove the hole-clip void (want ~118.1, A=%v)", dA, aA)
-	}
-	if math.Abs(dA-(aA-iA)) > 0.02 {
-		t.Errorf("D=A-I: got %v want %v", dA, aA-iA)
-	}
+	require.LessOrEqual(t, dA, aA-10, "difference area %v did not remove the hole-clip void (want ~118.1, A=%v)", dA, aA)
+	require.InDelta(t, aA-iA, dA, 0.02, "D=A-I: got %v want %v", dA, aA-iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2255,9 +1873,7 @@ func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
 		{identU, uA, aA + bA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2279,28 +1895,18 @@ func TestBooleanHoledInputDifferenceHoleTopPlateauVoidMerge(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 10, Y: 0}, {X: 9, Y: 9}, {X: 2, Y: 0}, {X: 5, Y: 2}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// The hole's uncovered apex region must be removed (the bug left D at 116).
-	if dA > 112 {
-		t.Errorf("difference area %v did not remove the hole apex region (want ~110.46)", dA)
-	}
+	require.LessOrEqual(t, dA, 112.0, "difference area %v did not remove the hole apex region (want ~110.46)", dA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2309,9 +1915,7 @@ func TestBooleanHoledInputDifferenceHoleTopPlateauVoidMerge(t *testing.T) {
 		{identU, uA, aA + bA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2343,21 +1947,13 @@ func TestBooleanHoledInputXorHoleClipApexFigure8(t *testing.T) {
 			}}
 			b := MultiPolygon{ExPolygon{Outer: tc.b}}
 			u, err := Union(a, b)
-			if err != nil {
-				t.Fatalf("union: %v", err)
-			}
+			require.NoError(t, err, "union")
 			i, err := Intersect(a, b)
-			if err != nil {
-				t.Fatalf("intersect: %v", err)
-			}
+			require.NoError(t, err, "intersect")
 			d, err := Difference(a, b)
-			if err != nil {
-				t.Fatalf("difference: %v", err)
-			}
+			require.NoError(t, err, "difference")
 			x, err := Xor(a, b)
-			if err != nil {
-				t.Fatalf("xor: %v", err)
-			}
+			require.NoError(t, err, "xor")
 			aA, bA := a.Area(), b.Area()
 			uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 			for _, c := range []struct {
@@ -2368,9 +1964,7 @@ func TestBooleanHoledInputXorHoleClipApexFigure8(t *testing.T) {
 				{identU, uA, aA + bA - iA},
 				{identD, dA, aA - iA},
 			} {
-				if math.Abs(c.got-c.want) > 0.02 {
-					t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-				}
+				require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 			}
 		})
 	}
@@ -2395,28 +1989,18 @@ func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 7}, {X: 5, Y: 7}, {X: 11, Y: 1}, {X: 7, Y: 11}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Intersect must not have collapsed (the bug returned ~1.2 instead of ~20.8).
-	if iA < 19 {
-		t.Errorf("intersect area %v collapsed (want ~20.8)", iA)
-	}
+	require.GreaterOrEqual(t, iA, 19.0, "intersect area %v collapsed (want ~20.8)", iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2425,9 +2009,7 @@ func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2452,28 +2034,18 @@ func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 11}, {X: 2, Y: 3}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~12).
-	if iA < 10 {
-		t.Errorf("intersect area %v collapsed (want ~12)", iA)
-	}
+	require.GreaterOrEqual(t, iA, 10.0, "intersect area %v collapsed (want ~12)", iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2482,9 +2054,7 @@ func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2508,28 +2078,18 @@ func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 8}, {X: 7, Y: 8}, {X: 0, Y: 12}, {X: 0, Y: 6}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~19).
-	if iA < 17 {
-		t.Errorf("intersect area %v collapsed (want ~19)", iA)
-	}
+	require.GreaterOrEqual(t, iA, 17.0, "intersect area %v collapsed (want ~19)", iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2538,9 +2098,7 @@ func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2566,28 +2124,18 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 1}, {X: 10, Y: 9}, {X: 1, Y: 9}, {X: 3, Y: 5}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
 
 	// Difference must not have over-counted (the bug emitted 152 > A.Area).
-	if dA > aA+0.02 {
-		t.Errorf("difference area %v over-counts (want ~%v)", dA, aA-iA)
-	}
+	require.LessOrEqual(t, dA, aA+0.02, "difference area %v over-counts (want ~%v)", dA, aA-iA)
 	for _, c := range []struct {
 		name      string
 		got, want float64
@@ -2596,9 +2144,7 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 		{identD, dA, aA - iA},
 		{identX, xA, uA - iA},
 	} {
-		if math.Abs(c.got-c.want) > 0.02 {
-			t.Errorf("%s: got %v want %v", c.name, c.got, c.want)
-		}
+		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
 	}
 }
 
@@ -2613,19 +2159,11 @@ func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
 	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 11}, {X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}}}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}, {X: 7, Y: 11}}}}
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
-	if d.Area() > 0.02 {
-		t.Errorf("Difference area %v want 0", d.Area())
-	}
+	require.NoError(t, err, "difference")
+	require.LessOrEqual(t, d.Area(), 0.02, "Difference area %v want 0", d.Area())
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
-	if x.Area() > 0.02 {
-		t.Errorf("Xor area %v want 0", x.Area())
-	}
+	require.NoError(t, err, "xor")
+	require.LessOrEqual(t, x.Area(), 0.02, "Xor area %v want 0", x.Area())
 }
 
 func TestBooleanHoledInputDifferenceClipApexAtHoleVertex(t *testing.T) {
@@ -2646,32 +2184,18 @@ func TestBooleanHoledInputDifferenceClipApexAtHoleVertex(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 7}, {X: 1, Y: 7}, {X: 12, Y: 2}, {X: 8, Y: 8}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	if math.Abs(dA-(aA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identD, dA, aA-iA)
-	}
-	if math.Abs(uA-(aA+bA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identU, uA, aA+bA-iA)
-	}
-	if math.Abs(xA-(uA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identX, xA, uA-iA)
-	}
+	require.InDelta(t, aA-iA, dA, 0.02, "%s: got %v want %v", identD, dA, aA-iA)
+	require.InDelta(t, aA+bA-iA, uA, 0.02, "%s: got %v want %v", identU, uA, aA+bA-iA)
+	require.InDelta(t, uA-iA, xA, 0.02, "%s: got %v want %v", identX, xA, uA-iA)
 }
 
 func TestBooleanHoledInputUnionHoleTopCoincidentWithFillingClip(t *testing.T) {
@@ -2693,35 +2217,19 @@ func TestBooleanHoledInputUnionHoleTopCoincidentWithFillingClip(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 3}, {X: 8, Y: 7}, {X: 3, Y: 7}, {X: 3, Y: 1}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	if math.Abs(uA-(aA+bA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identU, uA, aA+bA-iA)
-	}
-	if math.Abs(dA-(aA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identD, dA, aA-iA)
-	}
-	if math.Abs(xA-(uA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identX, xA, uA-iA)
-	}
-	if math.Abs(uA-141.346) > 0.02 {
-		t.Errorf("union area: got %v want ~141.346", uA)
-	}
+	require.InDelta(t, aA+bA-iA, uA, 0.02, "%s: got %v want %v", identU, uA, aA+bA-iA)
+	require.InDelta(t, aA-iA, dA, 0.02, "%s: got %v want %v", identD, dA, aA-iA)
+	require.InDelta(t, uA-iA, xA, 0.02, "%s: got %v want %v", identX, xA, uA-iA)
+	require.InDelta(t, 141.346, uA, 0.02, "union area: got %v want ~141.346", uA)
 }
 
 func TestBooleanHoledInputUnionHoleTopCoincidentMaxPlateau(t *testing.T) {
@@ -2743,35 +2251,19 @@ func TestBooleanHoledInputUnionHoleTopCoincidentMaxPlateau(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 6, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 2}, {X: 8, Y: 9}}}}
 
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	if math.Abs(uA-(aA+bA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identU, uA, aA+bA-iA)
-	}
-	if math.Abs(dA-(aA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identD, dA, aA-iA)
-	}
-	if math.Abs(xA-(uA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identX, xA, uA-iA)
-	}
-	if math.Abs(uA-130.902) > 0.02 {
-		t.Errorf("union area: got %v want ~130.902", uA)
-	}
+	require.InDelta(t, aA+bA-iA, uA, 0.02, "%s: got %v want %v", identU, uA, aA+bA-iA)
+	require.InDelta(t, aA-iA, dA, 0.02, "%s: got %v want %v", identD, dA, aA-iA)
+	require.InDelta(t, uA-iA, xA, 0.02, "%s: got %v want %v", identX, xA, uA-iA)
+	require.InDelta(t, 130.902, uA, 0.02, "union area: got %v want ~130.902", uA)
 }
 
 func TestBooleanHoledInputIntersectHoleBiteThroughApex(t *testing.T) {
@@ -2791,29 +2283,17 @@ func TestBooleanHoledInputIntersectHoleBiteThroughApex(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 2}, {X: 7, Y: 8}, {X: 10, Y: 2}, {X: 6, Y: 11}}}}
 
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	aA := a.Area()
 	bA := b.Area()
 	iA := i.Area()
-	if math.Abs(iA-11.5) > 0.02 {
-		t.Errorf("intersect area: got %v want ~11.5", iA)
-	}
-	if math.Abs(u.Area()-(aA+bA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identU, u.Area(), aA+bA-iA)
-	}
-	if math.Abs(d.Area()-(aA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identD, d.Area(), aA-iA)
-	}
+	require.InDelta(t, 11.5, iA, 0.02, "intersect area: got %v want ~11.5", iA)
+	require.InDelta(t, aA+bA-iA, u.Area(), 0.02, "%s: got %v want %v", identU, u.Area(), aA+bA-iA)
+	require.InDelta(t, aA-iA, d.Area(), 0.02, "%s: got %v want %v", identD, d.Area(), aA-iA)
 }
 
 func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
@@ -2835,35 +2315,19 @@ func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 6}, {X: 6, Y: 4}, {X: 8, Y: 11}, {X: 6, Y: 6}}}}
 
 	i, err := Intersect(a, b)
-	if err != nil {
-		t.Fatalf("intersect: %v", err)
-	}
+	require.NoError(t, err, "intersect")
 	u, err := Union(a, b)
-	if err != nil {
-		t.Fatalf("union: %v", err)
-	}
+	require.NoError(t, err, "union")
 	d, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("difference: %v", err)
-	}
+	require.NoError(t, err, "difference")
 	x, err := Xor(a, b)
-	if err != nil {
-		t.Fatalf("xor: %v", err)
-	}
+	require.NoError(t, err, "xor")
 	aA, bA := a.Area(), b.Area()
 	iA := i.Area()
-	if math.Abs(iA-1.733) > 0.02 {
-		t.Errorf("intersect area: got %v want ~1.733", iA)
-	}
-	if math.Abs(u.Area()-(aA+bA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identU, u.Area(), aA+bA-iA)
-	}
-	if math.Abs(d.Area()-(aA-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identD, d.Area(), aA-iA)
-	}
-	if math.Abs(x.Area()-(u.Area()-iA)) > 0.02 {
-		t.Errorf("%s: got %v want %v", identX, x.Area(), u.Area()-iA)
-	}
+	require.InDelta(t, 1.733, iA, 0.02, "intersect area: got %v want ~1.733", iA)
+	require.InDelta(t, aA+bA-iA, u.Area(), 0.02, "%s: got %v want %v", identU, u.Area(), aA+bA-iA)
+	require.InDelta(t, aA-iA, d.Area(), 0.02, "%s: got %v want %v", identD, d.Area(), aA-iA)
+	require.InDelta(t, u.Area()-iA, x.Area(), 0.02, "%s: got %v want %v", identX, x.Area(), u.Area()-iA)
 }
 
 // TestDifferenceMultipieceSubject covers DESIGN.md §7.7: a multipiece subject
@@ -2882,16 +2346,10 @@ func TestDifferenceMultipieceSubject(t *testing.T) {
 		}
 		b := MultiPolygon{{Outer: Polygon{{X: 1, Y: -1}, {X: 2, Y: -1}, {X: 2, Y: 2}, {X: 1, Y: 2}}}}
 		got, err := Difference(a, b)
-		if err != nil {
-			t.Fatalf("difference: %v", err)
-		}
+		require.NoError(t, err, "difference")
 		// lower carved to [0,1]x[0,2] (area 2) + upper unchanged (area 6) = 8.
-		if math.Abs(got.Area()-8) > 1e-9 {
-			t.Errorf("area=%v want 8 (result=%v)", got.Area(), got)
-		}
-		if len(got) != 2 {
-			t.Errorf("pieces=%d want 2 (result=%v)", len(got), got)
-		}
+		require.InDelta(t, 8.0, got.Area(), 1e-9, "area=%v want 8 (result=%v)", got.Area(), got)
+		require.Len(t, got, 2, "pieces=%d want 2 (result=%v)", len(got), got)
 	})
 	t.Run("upper piece wider than B span", func(t *testing.T) {
 		// From the differential: B carves the lower piece and the upper piece
@@ -2902,12 +2360,8 @@ func TestDifferenceMultipieceSubject(t *testing.T) {
 		}
 		b := MultiPolygon{{Outer: Polygon{{X: 1, Y: -2}, {X: 2, Y: -2}, {X: 2, Y: 1}, {X: 1, Y: 1}}}}
 		got, err := Difference(a, b)
-		if err != nil {
-			t.Fatalf("difference: %v", err)
-		}
+		require.NoError(t, err, "difference")
 		// lower ∩ B = [1,2]x[0,1] (area 1); lower∖B = 1; upper untouched = 15.
-		if math.Abs(got.Area()-16) > 1e-9 {
-			t.Errorf("area=%v want 16 (result=%v)", got.Area(), got)
-		}
+		require.InDelta(t, 16.0, got.Area(), 1e-9, "area=%v want 16 (result=%v)", got.Area(), got)
 	})
 }

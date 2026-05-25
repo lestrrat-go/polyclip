@@ -1,6 +1,10 @@
 package polyclip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 // TestHorizJoinHangRepro is the minimal repro for the processHorzJoins
 // infinite loop found by the §7.5 reachability harness: Difference of two
@@ -15,15 +19,9 @@ func TestHorizJoinHangRepro(t *testing.T) {
 		{X: 1, Y: 1}, {X: 4, Y: 1}, {X: 4, Y: 2}, {X: 3, Y: 2},
 		{X: 3, Y: 4}, {X: 2, Y: 4}, {X: 1, Y: 4},
 	}}}
-	if errs := a.Validate(); len(errs) != 0 {
-		t.Fatalf("A invalid: %v", errs)
-	}
-	if errs := b.Validate(); len(errs) != 0 {
-		t.Fatalf("B invalid: %v", errs)
-	}
+	require.Empty(t, a.Validate(), "A invalid: %v", a.Validate())
+	require.Empty(t, b.Validate(), "B invalid: %v", b.Validate())
 	got, err := Difference(a, b)
-	if err != nil {
-		t.Fatalf("Difference err: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Difference area=%v result=%v", got.Area(), got)
 }

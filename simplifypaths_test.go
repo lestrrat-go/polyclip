@@ -1,8 +1,9 @@
 package polyclip
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestSimplifyPathsRemovesCollinear drops vertices that lie exactly on the line
@@ -15,15 +16,9 @@ func TestSimplifyPathsRemovesCollinear(t *testing.T) {
 		{X: 10, Y: 5}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got := SimplifyPaths(in, 0.001)
-	if len(got) != 1 {
-		t.Fatalf("got %d pieces, want 1", len(got))
-	}
-	if n := len(got[0].Outer); n != 4 {
-		t.Errorf("outer has %d vertices, want 4: %+v", n, got[0].Outer)
-	}
-	if a := got.Area(); math.Abs(a-100) > 1e-9 {
-		t.Errorf("area %.9f, want 100", a)
-	}
+	require.Len(t, got, 1, "got %d pieces, want 1", len(got))
+	require.Len(t, got[0].Outer, 4, "outer has %d vertices, want 4: %+v", len(got[0].Outer), got[0].Outer)
+	require.InDelta(t, 100, got.Area(), 1e-9, "area %.9f, want 100", got.Area())
 }
 
 // TestSimplifyPathsEpsilonThreshold keeps a vertex whose deviation exceeds
@@ -38,13 +33,9 @@ func TestSimplifyPathsEpsilonThreshold(t *testing.T) {
 		}}}
 	}
 	removed := SimplifyPaths(mk(), 0.5)
-	if n := len(removed[0].Outer); n != 4 {
-		t.Errorf("eps=0.5: %d vertices, want 4 (bump removed)", n)
-	}
+	require.Len(t, removed[0].Outer, 4, "eps=0.5: %d vertices, want 4 (bump removed)", len(removed[0].Outer))
 	kept := SimplifyPaths(mk(), 0.3)
-	if n := len(kept[0].Outer); n != 5 {
-		t.Errorf("eps=0.3: %d vertices, want 5 (bump kept)", n)
-	}
+	require.Len(t, kept[0].Outer, 5, "eps=0.3: %d vertices, want 5 (bump kept)", len(kept[0].Outer))
 }
 
 // TestSimplifyPathsSimplifiesHoles applies reduction to hole rings too.
@@ -57,12 +48,8 @@ func TestSimplifyPathsSimplifiesHoles(t *testing.T) {
 		}},
 	}}
 	got := SimplifyPaths(in, 0.001)
-	if len(got) != 1 || len(got[0].Holes) != 1 {
-		t.Fatalf("got %d pieces / %d holes, want 1/1", len(got), len(got[0].Holes))
-	}
-	if n := len(got[0].Holes[0]); n != 4 {
-		t.Errorf("hole has %d vertices, want 4", n)
-	}
+	require.True(t, len(got) == 1 && len(got[0].Holes) == 1, "got %d pieces / %d holes, want 1/1", len(got), len(got[0].Holes))
+	require.Len(t, got[0].Holes[0], 4, "hole has %d vertices, want 4", len(got[0].Holes[0]))
 }
 
 // TestSimplifyPathsKeepsSmallRings leaves rings of fewer than four vertices
@@ -72,9 +59,7 @@ func TestSimplifyPathsKeepsSmallRings(t *testing.T) {
 		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 2, Y: 3},
 	}}}
 	got := SimplifyPaths(tri, 100) // huge epsilon
-	if len(got) != 1 || len(got[0].Outer) != 3 {
-		t.Errorf("triangle changed: %+v", got)
-	}
+	require.True(t, len(got) == 1 && len(got[0].Outer) == 3, "triangle changed: %+v", got)
 }
 
 // TestSimplifyPathsDropsDegenerateRing drops an ExPolygon whose outer ring
@@ -86,9 +71,7 @@ func TestSimplifyPathsDropsDegenerateRing(t *testing.T) {
 		{X: 0, Y: 0}, {X: 3, Y: 0.01}, {X: 6, Y: 0}, {X: 3, Y: -0.01},
 	}}}
 	got := SimplifyPaths(in, 1.0)
-	if len(got) != 0 {
-		t.Errorf("got %d pieces, want 0 (sliver dropped)", len(got))
-	}
+	require.Empty(t, got, "got %d pieces, want 0 (sliver dropped)", len(got))
 }
 
 // TestSimplifyPathsNegativeEpsilon treats a negative epsilon as zero: only
@@ -98,7 +81,5 @@ func TestSimplifyPathsNegativeEpsilon(t *testing.T) {
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got := SimplifyPaths(in, -5)
-	if n := len(got[0].Outer); n != 4 {
-		t.Errorf("got %d vertices, want 4 (exact collinear removed)", n)
-	}
+	require.Len(t, got[0].Outer, 4, "got %d vertices, want 4 (exact collinear removed)", len(got[0].Outer))
 }

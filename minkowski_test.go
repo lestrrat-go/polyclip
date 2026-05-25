@@ -1,8 +1,9 @@
 package polyclip
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // square2 is a 2x2 axis-aligned pattern anchored at the origin corner.
@@ -13,35 +14,21 @@ var square2 = Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2}, {X: 0, Y: 2}}
 // rectangle [0,12]x[0,2].
 func TestMinkowskiSumOpenSegment(t *testing.T) {
 	got, err := MinkowskiSum(square2, []Point{{X: 0, Y: 0}, {X: 10, Y: 0}}, false)
-	if err != nil {
-		t.Fatalf("MinkowskiSum: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("got %d pieces, want 1", len(got))
-	}
-	if a := got.Area(); math.Abs(a-24) > 1e-9 {
-		t.Errorf("area = %v, want 24", a)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "got %d pieces, want 1", len(got))
+	require.InDelta(t, 24, got.Area(), 1e-9, "area = %v, want 24", got.Area())
 	b := bboxOf([]Polygon{got[0].Outer})
-	if b.Min != (Point{X: 0, Y: 0}) || b.Max != (Point{X: 12, Y: 2}) {
-		t.Errorf("bbox = %+v, want [0,0]-[12,2]", b)
-	}
+	require.True(t, b.Min == (Point{X: 0, Y: 0}) && b.Max == (Point{X: 12, Y: 2}), "bbox = %+v, want [0,0]-[12,2]", b)
 }
 
 // TestMinkowskiDiffOpenSegment reflects the pattern through the origin, so the
 // same segment sweep fills [-2,10]x[-2,0] (area 24).
 func TestMinkowskiDiffOpenSegment(t *testing.T) {
 	got, err := MinkowskiDiff(square2, []Point{{X: 0, Y: 0}, {X: 10, Y: 0}}, false)
-	if err != nil {
-		t.Fatalf("MinkowskiDiff: %v", err)
-	}
-	if a := got.Area(); math.Abs(a-24) > 1e-9 {
-		t.Errorf("area = %v, want 24", a)
-	}
+	require.NoError(t, err)
+	require.InDelta(t, 24, got.Area(), 1e-9, "area = %v, want 24", got.Area())
 	b := bboxOf([]Polygon{got[0].Outer})
-	if b.Min != (Point{X: -2, Y: -2}) || b.Max != (Point{X: 10, Y: 0}) {
-		t.Errorf("bbox = %+v, want [-2,-2]-[10,0]", b)
-	}
+	require.True(t, b.Min == (Point{X: -2, Y: -2}) && b.Max == (Point{X: 10, Y: 0}), "bbox = %+v, want [-2,-2]-[10,0]", b)
 }
 
 // TestMinkowskiSumClosedSquareFrame sweeps the pattern around a closed 10x10
@@ -51,33 +38,19 @@ func TestMinkowskiDiffOpenSegment(t *testing.T) {
 func TestMinkowskiSumClosedSquareFrame(t *testing.T) {
 	path := []Point{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
 	got, err := MinkowskiSum(square2, path, true)
-	if err != nil {
-		t.Fatalf("MinkowskiSum: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("got %d pieces, want 1", len(got))
-	}
-	if n := len(got[0].Holes); n != 1 {
-		t.Fatalf("got %d holes, want 1", n)
-	}
-	if a := got.Area(); math.Abs(a-80) > 1e-9 {
-		t.Errorf("area = %v, want 80", a)
-	}
-	if a := got[0].Outer.Area(); math.Abs(a-144) > 1e-9 {
-		t.Errorf("outer area = %v, want 144", a)
-	}
-	if a := got[0].Holes[0].Area(); math.Abs(a-64) > 1e-9 {
-		t.Errorf("hole area = %v, want 64", a)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1, "got %d pieces, want 1", len(got))
+	require.Len(t, got[0].Holes, 1, "got %d holes, want 1", len(got[0].Holes))
+	require.InDelta(t, 80, got.Area(), 1e-9, "area = %v, want 80", got.Area())
+	require.InDelta(t, 144, got[0].Outer.Area(), 1e-9, "outer area = %v, want 144", got[0].Outer.Area())
+	require.InDelta(t, 64, got[0].Holes[0].Area(), 1e-9, "hole area = %v, want 64", got[0].Holes[0].Area())
 }
 
 // TestMinkowskiEmptyInputs returns an empty result for an empty pattern or path.
 func TestMinkowskiEmptyInputs(t *testing.T) {
 	seg := []Point{{X: 0, Y: 0}, {X: 1, Y: 0}}
-	if got, err := MinkowskiSum(Polygon{}, seg, false); err != nil || len(got) != 0 {
-		t.Errorf("empty pattern: got %v, %v; want empty, nil", got, err)
-	}
-	if got, err := MinkowskiSum(square2, nil, false); err != nil || len(got) != 0 {
-		t.Errorf("empty path: got %v, %v; want empty, nil", got, err)
-	}
+	got, err := MinkowskiSum(Polygon{}, seg, false)
+	require.True(t, err == nil && len(got) == 0, "empty pattern: got %v, %v; want empty, nil", got, err)
+	got, err = MinkowskiSum(square2, nil, false)
+	require.True(t, err == nil && len(got) == 0, "empty path: got %v, %v; want empty, nil", got, err)
 }

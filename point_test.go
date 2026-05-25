@@ -3,18 +3,16 @@ package polyclip
 import (
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBBoxEmpty(t *testing.T) {
 	e := EmptyBBox()
-	if !e.Empty() {
-		t.Fatalf("EmptyBBox() should be empty, got Min=%v Max=%v", e.Min, e.Max)
-	}
+	require.True(t, e.Empty(), "EmptyBBox() should be empty, got Min=%v Max=%v", e.Min, e.Max)
 	// Zero BBox represents the single point at the origin, not empty.
 	var z BBox
-	if z.Empty() {
-		t.Fatalf("zero BBox should not be Empty()")
-	}
+	require.False(t, z.Empty(), "zero BBox should not be Empty()")
 }
 
 func TestBBoxAdd(t *testing.T) {
@@ -23,9 +21,7 @@ func TestBBoxAdd(t *testing.T) {
 	b = b.Add(Point{X: -1, Y: 5})
 	b = b.Add(Point{X: 4, Y: 3})
 	want := BBox{Min: Point{X: -1, Y: 2}, Max: Point{X: 4, Y: 5}}
-	if b != want {
-		t.Fatalf("Add: got %+v want %+v", b, want)
-	}
+	require.Equal(t, want, b, "Add: got %+v want %+v", b, want)
 }
 
 func TestBBoxUnion(t *testing.T) {
@@ -33,15 +29,9 @@ func TestBBoxUnion(t *testing.T) {
 	b := BBox{Min: Point{X: 5, Y: -5}, Max: Point{X: 20, Y: 5}}
 	got := a.Union(b)
 	want := BBox{Min: Point{X: 0, Y: -5}, Max: Point{X: 20, Y: 10}}
-	if got != want {
-		t.Fatalf("Union: got %+v want %+v", got, want)
-	}
-	if got := a.Union(EmptyBBox()); got != a {
-		t.Fatalf("Union with empty changed value: %+v", got)
-	}
-	if got := EmptyBBox().Union(a); got != a {
-		t.Fatalf("empty.Union(a) != a: %+v", got)
-	}
+	require.Equal(t, want, got, "Union: got %+v want %+v", got, want)
+	require.Equal(t, a, a.Union(EmptyBBox()), "Union with empty changed value: %+v", a.Union(EmptyBBox()))
+	require.Equal(t, a, EmptyBBox().Union(a), "empty.Union(a) != a: %+v", EmptyBBox().Union(a))
 }
 
 func TestBBoxContains(t *testing.T) {
@@ -58,33 +48,21 @@ func TestBBoxContains(t *testing.T) {
 		{Point{X: 5, Y: 10.001}, false},
 	}
 	for _, c := range cases {
-		if got := b.Contains(c.p); got != c.in {
-			t.Errorf("Contains(%v): got %v want %v", c.p, got, c.in)
-		}
+		require.Equal(t, c.in, b.Contains(c.p), "Contains(%v): got %v want %v", c.p, b.Contains(c.p), c.in)
 	}
-	if EmptyBBox().Contains(Point{X: 0, Y: 0}) {
-		t.Errorf("empty bbox should contain no points")
-	}
+	require.False(t, EmptyBBox().Contains(Point{X: 0, Y: 0}), "empty bbox should contain no points")
 }
 
 func TestBBoxWidthHeight(t *testing.T) {
 	b := BBox{Min: Point{X: 1, Y: 2}, Max: Point{X: 4, Y: 7}}
-	if b.Width() != 3 {
-		t.Errorf("Width: %v want 3", b.Width())
-	}
-	if b.Height() != 5 {
-		t.Errorf("Height: %v want 5", b.Height())
-	}
+	require.Equal(t, 3.0, b.Width(), "Width: %v want 3", b.Width())
+	require.Equal(t, 5.0, b.Height(), "Height: %v want 5", b.Height())
 	e := EmptyBBox()
-	if e.Width() != 0 || e.Height() != 0 {
-		t.Errorf("empty box w/h should be 0/0, got %v/%v", e.Width(), e.Height())
-	}
+	require.True(t, e.Width() == 0 && e.Height() == 0, "empty box w/h should be 0/0, got %v/%v", e.Width(), e.Height())
 }
 
 // Sanity: math.Inf used in EmptyBBox should behave as expected with Empty().
 func TestBBoxEmptyInfinity(t *testing.T) {
 	e := EmptyBBox()
-	if !math.IsInf(e.Min.X, +1) || !math.IsInf(e.Max.X, -1) {
-		t.Fatalf("EmptyBBox infinities wrong: %+v", e)
-	}
+	require.True(t, math.IsInf(e.Min.X, +1) && math.IsInf(e.Max.X, -1), "EmptyBBox infinities wrong: %+v", e)
 }

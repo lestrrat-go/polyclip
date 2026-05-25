@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func segSrc(x1, y1, x2, y2 int64, src Source) Segment {
@@ -21,9 +22,7 @@ func TestSplitOverlapsNoOverlap(t *testing.T) {
 		segSrc(20, 0, 30, 0, Subject), // collinear but disjoint
 	}
 	out := SplitOverlaps(segs)
-	if len(out) != len(segs) {
-		t.Fatalf("len: got %d want %d", len(out), len(segs))
-	}
+	require.Len(t, out, len(segs), "len: got %d want %d", len(out), len(segs))
 }
 
 func TestSplitOverlapsDropsDegenerate(t *testing.T) {
@@ -33,9 +32,7 @@ func TestSplitOverlapsDropsDegenerate(t *testing.T) {
 		segSrc(0, 0, 10, 0, Subject),
 	}
 	out := SplitOverlaps(segs)
-	if len(out) != 1 {
-		t.Fatalf("len: %d want 1", len(out))
-	}
+	require.Len(t, out, 1, "len: %d want 1", len(out))
 }
 
 func TestSplitOverlapsPartialOverlap(t *testing.T) {
@@ -46,9 +43,7 @@ func TestSplitOverlapsPartialOverlap(t *testing.T) {
 
 	// Expect four output pieces (in any order):
 	//   [0,5] subject, [5,10] subject, [5,10] clip, [10,15] clip
-	if len(out) != 4 {
-		t.Fatalf("len: %d want 4 — out=%+v", len(out), out)
-	}
+	require.Len(t, out, 4, "len: %d want 4 — out=%+v", len(out), out)
 
 	have := map[Segment]int{}
 	for _, s := range out {
@@ -62,9 +57,7 @@ func TestSplitOverlapsPartialOverlap(t *testing.T) {
 		{Bot: fixed.Point{X: 10, Y: 0}, Top: fixed.Point{X: 15, Y: 0}, Src: Clip},
 	}
 	for _, w := range want {
-		if have[w] != 1 {
-			t.Errorf("missing or duplicated segment: %+v (have count %d)", w, have[w])
-		}
+		require.Equal(t, 1, have[w], "missing or duplicated segment: %+v (have count %d)", w, have[w])
 	}
 }
 
@@ -75,9 +68,7 @@ func TestSplitOverlapsContainment(t *testing.T) {
 	out := SplitOverlaps([]Segment{a, b})
 
 	// Expect five pieces: a splits into [0,5], [5,15], [15,20]; b stays as [5,15].
-	if len(out) != 4 {
-		t.Fatalf("len: %d want 4 — out=%+v", len(out), out)
-	}
+	require.Len(t, out, 4, "len: %d want 4 — out=%+v", len(out), out)
 	have := map[Segment]int{}
 	for _, s := range out {
 		have[s]++
@@ -89,9 +80,7 @@ func TestSplitOverlapsContainment(t *testing.T) {
 		{Bot: fixed.Point{X: 5, Y: 0}, Top: fixed.Point{X: 15, Y: 0}, Src: Clip},
 	}
 	for _, w := range want {
-		if have[w] != 1 {
-			t.Errorf("missing or duplicated: %+v", w)
-		}
+		require.Equal(t, 1, have[w], "missing or duplicated: %+v", w)
 	}
 }
 
@@ -100,9 +89,7 @@ func TestSplitOverlapsFullCoincidenceUnchanged(t *testing.T) {
 	a := segSrc(0, 0, 10, 0, Subject)
 	b := segSrc(0, 0, 10, 0, Clip)
 	out := SplitOverlaps([]Segment{a, b})
-	if len(out) != 2 {
-		t.Fatalf("len: %d want 2", len(out))
-	}
+	require.Len(t, out, 2, "len: %d want 2", len(out))
 }
 
 func TestSplitOverlapsThreeWay(t *testing.T) {
@@ -116,21 +103,16 @@ func TestSplitOverlapsThreeWay(t *testing.T) {
 	// All output endpoints should be drawn from {0, 4, 6, 8, 10, 12}.
 	valid := map[int64]bool{0: true, 4: true, 6: true, 8: true, 10: true, 12: true}
 	for _, s := range out {
-		if !valid[int64(s.Bot.X)] || !valid[int64(s.Top.X)] {
-			t.Errorf("segment with unexpected endpoint: %+v", s)
-		}
-		if s.Degenerate() {
-			t.Errorf("degenerate segment in output: %+v", s)
-		}
+		require.True(t, valid[int64(s.Bot.X)] && valid[int64(s.Top.X)], "segment with unexpected endpoint: %+v", s)
+		require.False(t, s.Degenerate(), "degenerate segment in output: %+v", s)
 	}
 	// No two output segments may overlap (only fully coincide is OK).
 	for i := range out {
 		for j := i + 1; j < len(out); j++ {
 			r := Intersect(out[i], out[j])
-			if r.Kind == CollinearOverlap &&
-				(out[i].Bot != out[j].Bot || out[i].Top != out[j].Top) {
-				t.Errorf("residual overlap between %+v and %+v", out[i], out[j])
-			}
+			require.False(t, r.Kind == CollinearOverlap &&
+				(out[i].Bot != out[j].Bot || out[i].Top != out[j].Top),
+				"residual overlap between %+v and %+v", out[i], out[j])
 		}
 	}
 }
@@ -142,19 +124,13 @@ func TestSplitAtPreservesDirection(t *testing.T) {
 		fixed.Point{X: 0, Y: 0},  // b — produces Reversed=true
 		Subject,
 	)
-	if !s.Reversed {
-		t.Fatalf("setup: segment should be Reversed=true")
-	}
+	require.True(t, s.Reversed, "setup: segment should be Reversed=true")
 	mid1 := fixed.Point{X: 3, Y: 0}
 	mid2 := fixed.Point{X: 7, Y: 0}
 	pieces := splitAt(s, mid1, mid2)
 	for _, p := range pieces {
-		if !p.Reversed {
-			t.Errorf("piece lost Reversed flag: %+v", p)
-		}
-		if p.Src != Subject {
-			t.Errorf("piece lost Src: %+v", p)
-		}
+		require.True(t, p.Reversed, "piece lost Reversed flag: %+v", p)
+		require.Equal(t, Subject, p.Src, "piece lost Src: %+v", p)
 	}
 }
 
@@ -164,9 +140,7 @@ func TestDedupCoincidentEdgesSameSrcSameDir(t *testing.T) {
 	a := segSrc(0, 0, 10, 10, Subject)
 	segs := []Segment{a, a, segSrc(5, 5, 15, 15, Clip)}
 	out := DedupCoincidentEdges(segs)
-	if len(out) != 2 {
-		t.Errorf("len: got %d want 2 (1 dedup + 1 untouched); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 2, "len: got %d want 2 (1 dedup + 1 untouched); out=%+v", len(out), out)
 }
 
 func TestDedupCoincidentEdgesSameSrcOppositeDir(t *testing.T) {
@@ -174,14 +148,10 @@ func TestDedupCoincidentEdgesSameSrcOppositeDir(t *testing.T) {
 	// one not) — same canonical Bot/Top. Cancel — drop both.
 	fwd := NewSegment(fixed.Point{X: 0, Y: 0}, fixed.Point{X: 10, Y: 10}, Subject)
 	rev := NewSegment(fixed.Point{X: 10, Y: 10}, fixed.Point{X: 0, Y: 0}, Subject)
-	if fwd.Reversed == rev.Reversed {
-		t.Fatalf("test setup: expected opposite Reversed flags; fwd=%+v rev=%+v", fwd, rev)
-	}
+	require.NotEqual(t, rev.Reversed, fwd.Reversed, "test setup: expected opposite Reversed flags; fwd=%+v rev=%+v", fwd, rev)
 	segs := []Segment{fwd, rev, segSrc(5, 5, 15, 15, Clip)}
 	out := DedupCoincidentEdges(segs)
-	if len(out) != 1 {
-		t.Errorf("len: got %d want 1 (both cancelled, 1 untouched); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 1, "len: got %d want 1 (both cancelled, 1 untouched); out=%+v", len(out), out)
 }
 
 func TestDedupCoincidentEdgesDifferentSrcUnchanged(t *testing.T) {
@@ -191,9 +161,7 @@ func TestDedupCoincidentEdgesDifferentSrcUnchanged(t *testing.T) {
 	clip := NewSegment(fixed.Point{X: 0, Y: 0}, fixed.Point{X: 10, Y: 10}, Clip)
 	segs := []Segment{subj, clip}
 	out := DedupCoincidentEdges(segs)
-	if len(out) != 2 {
-		t.Errorf("len: got %d want 2 (diff-src preserved); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 2, "len: got %d want 2 (diff-src preserved); out=%+v", len(out), out)
 }
 
 func TestSplitTJunctionsSplitsInteriorVertex(t *testing.T) {
@@ -202,9 +170,7 @@ func TestSplitTJunctionsSplitsInteriorVertex(t *testing.T) {
 	subj := segSrc(0, 0, 10, 10, Subject)
 	clp := segSrc(5, 5, 15, 5, Clip)
 	out := SplitTJunctions([]Segment{subj, clp})
-	if len(out) != 3 {
-		t.Fatalf("len: got %d want 3 (subj split in two + clip); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 3, "len: got %d want 3 (subj split in two + clip); out=%+v", len(out), out)
 	mid := fixed.Point{X: 5, Y: 5}
 	var touchingMid int
 	for _, s := range out {
@@ -214,24 +180,18 @@ func TestSplitTJunctionsSplitsInteriorVertex(t *testing.T) {
 	}
 	// The split point is now a shared endpoint of both subject halves and
 	// the clip segment.
-	if touchingMid != 3 {
-		t.Errorf("segments touching split point (5,5): got %d want 3; out=%+v", touchingMid, out)
-	}
+	require.Equal(t, 3, touchingMid, "segments touching split point (5,5): got %d want 3; out=%+v", touchingMid, out)
 }
 
 func TestSplitTJunctionsPreservesSourceAndDirection(t *testing.T) {
 	// A reversed subject edge split at an interior vertex keeps Src and the
 	// Reversed flag on both halves.
 	subj := NewSegment(fixed.Point{X: 10, Y: 10}, fixed.Point{X: 0, Y: 0}, Subject) // reversed
-	if !subj.Reversed {
-		t.Fatal("test setup: expected reversed subject edge")
-	}
+	require.True(t, subj.Reversed, "test setup: expected reversed subject edge")
 	clp := segSrc(5, 5, 15, 5, Clip)
 	out := SplitTJunctions([]Segment{subj, clp})
 	for _, s := range out {
-		if s.Src == Subject && !s.Reversed {
-			t.Errorf("subject half lost Reversed flag: %+v", s)
-		}
+		require.False(t, s.Src == Subject && !s.Reversed, "subject half lost Reversed flag: %+v", s)
 	}
 }
 
@@ -241,16 +201,12 @@ func TestSplitTJunctionsSharedCornerUnchanged(t *testing.T) {
 	a := segSrc(0, 0, 10, 10, Subject)
 	b := segSrc(10, 10, 20, 0, Clip)
 	out := SplitTJunctions([]Segment{a, b})
-	if len(out) != 2 {
-		t.Errorf("len: got %d want 2 (shared corner, no split); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 2, "len: got %d want 2 (shared corner, no split); out=%+v", len(out), out)
 }
 
 func TestSplitTJunctionsNoTouchUnchanged(t *testing.T) {
 	a := segSrc(0, 0, 10, 10, Subject)
 	b := segSrc(0, 10, 10, 20, Clip) // parallel, disjoint
 	out := SplitTJunctions([]Segment{a, b})
-	if len(out) != 2 {
-		t.Errorf("len: got %d want 2 (disjoint, no split); out=%+v", len(out), out)
-	}
+	require.Len(t, out, 2, "len: got %d want 2 (disjoint, no split); out=%+v", len(out), out)
 }

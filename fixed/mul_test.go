@@ -3,6 +3,8 @@ package fixed
 import (
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMulI64Small(t *testing.T) {
@@ -21,10 +23,10 @@ func TestMulI64Small(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := MulI64(c.a, c.b)
-		if got.Hi != c.hi || got.Lo != c.lo {
-			t.Errorf("MulI64(%d, %d) = {Hi:%d Lo:%d} want {Hi:%d Lo:%d}",
-				c.a, c.b, got.Hi, got.Lo, c.hi, c.lo)
-		}
+		require.Equal(t, c.hi, got.Hi, "MulI64(%d, %d) = {Hi:%d Lo:%d} want {Hi:%d Lo:%d}",
+			c.a, c.b, got.Hi, got.Lo, c.hi, c.lo)
+		require.Equal(t, c.lo, got.Lo, "MulI64(%d, %d) = {Hi:%d Lo:%d} want {Hi:%d Lo:%d}",
+			c.a, c.b, got.Hi, got.Lo, c.hi, c.lo)
 	}
 }
 
@@ -32,51 +34,38 @@ func TestMulI64Large(t *testing.T) {
 	// 2^60 * 2^60 = 2^120. In I128 that's Hi = 2^56, Lo = 0.
 	a := int64(1) << 60
 	got := MulI64(a, a)
-	if got.Hi != (int64(1)<<56) || got.Lo != 0 {
-		t.Errorf("MulI64(2^60, 2^60) = {Hi:%d Lo:%d} want {Hi:%d Lo:0}",
-			got.Hi, got.Lo, int64(1)<<56)
-	}
+	require.Equal(t, int64(1)<<56, got.Hi, "MulI64(2^60, 2^60) = {Hi:%d Lo:%d} want {Hi:%d Lo:0}",
+		got.Hi, got.Lo, int64(1)<<56)
+	require.Equal(t, uint64(0), got.Lo, "MulI64(2^60, 2^60) = {Hi:%d Lo:%d} want {Hi:%d Lo:0}",
+		got.Hi, got.Lo, int64(1)<<56)
 	// And negative variant: (-2^60) * 2^60 = -2^120
 	got = MulI64(-a, a)
-	if got.Sign() != -1 {
-		t.Errorf("MulI64(-2^60, 2^60).Sign() = %d want -1", got.Sign())
-	}
+	require.Equal(t, -1, got.Sign(), "MulI64(-2^60, 2^60).Sign() = %d want -1", got.Sign())
 }
 
 func TestMulI64MinInt(t *testing.T) {
 	// math.MinInt64 * 1 should equal math.MinInt64 (Hi=-1, Lo=2^63).
 	got := MulI64(math.MinInt64, 1)
-	if got.Hi != -1 || got.Lo != 1<<63 {
-		t.Errorf("MulI64(MinInt64, 1) = {Hi:%d Lo:%d}", got.Hi, got.Lo)
-	}
-	if got.Sign() != -1 {
-		t.Errorf("MulI64(MinInt64, 1).Sign() = %d want -1", got.Sign())
-	}
+	require.Equal(t, int64(-1), got.Hi, "MulI64(MinInt64, 1) = {Hi:%d Lo:%d}", got.Hi, got.Lo)
+	require.Equal(t, uint64(1<<63), got.Lo, "MulI64(MinInt64, 1) = {Hi:%d Lo:%d}", got.Hi, got.Lo)
+	require.Equal(t, -1, got.Sign(), "MulI64(MinInt64, 1).Sign() = %d want -1", got.Sign())
 }
 
 func TestI128SubAdd(t *testing.T) {
 	// (a*b) - (a*b) == 0
 	a, b := int64(123456789), int64(987654321)
 	z := MulI64(a, b).Sub(MulI64(a, b))
-	if !z.IsZero() {
-		t.Errorf("self-subtract not zero: %+v", z)
-	}
+	require.True(t, z.IsZero(), "self-subtract not zero: %+v", z)
 	// AddSubInverse: x.Add(y).Sub(y) == x
 	x := MulI64(5, 7)
 	y := MulI64(11, 13)
 	got := x.Add(y).Sub(y)
-	if got != x {
-		t.Errorf("Add+Sub inverse: got %+v want %+v", got, x)
-	}
+	require.Equal(t, x, got, "Add+Sub inverse: got %+v want %+v", got, x)
 	// Cross-zero subtraction.
 	one := MulI64(1, 1)
 	negOne := MulI64(1, 1).Sub(MulI64(2, 1)) // 1 - 2 = -1
-	if negOne.Sign() != -1 {
-		t.Errorf("1-2 sign: %d", negOne.Sign())
-	}
-	if negOne.Add(one).Sign() != 0 {
-		t.Errorf("-1+1 should be zero, got %+v", negOne.Add(one))
-	}
+	require.Equal(t, -1, negOne.Sign(), "1-2 sign: %d", negOne.Sign())
+	require.Equal(t, 0, negOne.Add(one).Sign(), "-1+1 should be zero, got %+v", negOne.Add(one))
 }
 
 func TestOrient2D(t *testing.T) {
@@ -94,9 +83,8 @@ func TestOrient2D(t *testing.T) {
 		{Point{-5, -5}, Point{5, 5}, Point{5, -5}, -1, "large CW"},
 	}
 	for _, c := range cases {
-		if got := Orient2D(c.p, c.q, c.r); got != c.want {
-			t.Errorf("%s: Orient2D(%v,%v,%v) = %d want %d", c.name, c.p, c.q, c.r, got, c.want)
-		}
+		got := Orient2D(c.p, c.q, c.r)
+		require.Equal(t, c.want, got, "%s: Orient2D(%v,%v,%v) = %d want %d", c.name, c.p, c.q, c.r, got, c.want)
 	}
 }
 
@@ -109,15 +97,9 @@ func TestOrient2DLargeCoords(t *testing.T) {
 	rUp := Point{X: -m, Y: -m + 1}   // 1 unit above line q-p extended
 	rDown := Point{X: -m, Y: -m - 1} // 1 unit below
 	rOnLine := Point{X: m - 1, Y: m - 1}
-	if got := Orient2D(p, q, rUp); got != +1 {
-		t.Errorf("rUp (off by +1y at max coord) got %d want +1", got)
-	}
-	if got := Orient2D(p, q, rDown); got != -1 {
-		t.Errorf("rDown got %d want -1", got)
-	}
-	if got := Orient2D(p, q, rOnLine); got != 0 {
-		t.Errorf("rOnLine got %d want 0", got)
-	}
+	require.Equal(t, +1, Orient2D(p, q, rUp), "rUp (off by +1y at max coord) want +1")
+	require.Equal(t, -1, Orient2D(p, q, rDown), "rDown want -1")
+	require.Equal(t, 0, Orient2D(p, q, rOnLine), "rOnLine want 0")
 }
 
 // Make sure Orient2D agrees with the float64 cross product on small inputs
@@ -136,9 +118,8 @@ func TestOrient2DAgreesWithFloat(t *testing.T) {
 					float64(q.X-p.X)*float64(r.Y-p.Y) -
 						float64(q.Y-p.Y)*float64(r.X-p.X),
 				)
-				if got := Orient2D(p, q, r); got != want {
-					t.Errorf("Orient2D(%v,%v,%v)=%d, float says %d", p, q, r, got, want)
-				}
+				got := Orient2D(p, q, r)
+				require.Equal(t, want, got, "Orient2D(%v,%v,%v)=%d, float says %d", p, q, r, got, want)
 			}
 		}
 	}
@@ -174,9 +155,8 @@ func TestCmpRationals(t *testing.T) {
 		{"equal whole", 5, 1, 5, 1, 0},
 	}
 	for _, c := range cases {
-		if got := CmpRationals(i(c.na), c.da, i(c.nb), c.db); got != c.want {
-			t.Errorf("%s: CmpRationals(%d/%d, %d/%d) = %d want %d", c.name, c.na, c.da, c.nb, c.db, got, c.want)
-		}
+		got := CmpRationals(i(c.na), c.da, i(c.nb), c.db)
+		require.Equal(t, c.want, got, "%s: CmpRationals(%d/%d, %d/%d) = %d want %d", c.name, c.na, c.da, c.nb, c.db, got, c.want)
 	}
 }
 
@@ -187,21 +167,13 @@ func TestCmpRationalsLargeExact(t *testing.T) {
 	big := MulI64(int64(1)<<59, int64(1)<<59) // 2^118, fits I128
 	bigPlus1 := big.Add(I128{Lo: 1})          // 2^118 + 1
 	// big/3 vs big/2: same positive numerator, larger denom is smaller.
-	if got := CmpRationals(big, 3, big, 2); got != -1 {
-		t.Errorf("big/3 vs big/2 = %d want -1", got)
-	}
+	require.Equal(t, -1, CmpRationals(big, 3, big, 2), "big/3 vs big/2 want -1")
 	// (2^118+1)/7 vs 2^118/7: numerator larger by 1 -> greater.
-	if got := CmpRationals(bigPlus1, 7, big, 7); got != +1 {
-		t.Errorf("(big+1)/7 vs big/7 = %d want +1", got)
-	}
+	require.Equal(t, +1, CmpRationals(bigPlus1, 7, big, 7), "(big+1)/7 vs big/7 want +1")
 	// Cross-denominator near-tie that float64 (52-bit mantissa) cannot resolve:
 	// (m·q)/q vs m/1 are exactly equal for m, q near the grid max.
 	m := int64(1) << 60
 	q := int64(123456789)
-	if got := CmpRationals(MulI64(m, q), q, MulI64(m, 1), 1); got != 0 {
-		t.Errorf("(m·q)/q vs m/1 = %d want 0", got)
-	}
-	if got := CmpRationals(MulI64(m, q).Add(I128{Lo: 1}), q, MulI64(m, 1), 1); got != +1 {
-		t.Errorf("(m·q+1)/q vs m/1 = %d want +1", got)
-	}
+	require.Equal(t, 0, CmpRationals(MulI64(m, q), q, MulI64(m, 1), 1), "(m·q)/q vs m/1 want 0")
+	require.Equal(t, +1, CmpRationals(MulI64(m, q).Add(I128{Lo: 1}), q, MulI64(m, 1), 1), "(m·q+1)/q vs m/1 want +1")
 }

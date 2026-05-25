@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func ae(x int64, seg *Segment) *ActiveEdge {
@@ -18,13 +19,10 @@ func TestAELInsertOrder(t *testing.T) {
 	a.Insert(ae(0, &s1))
 	a.Insert(ae(5, &s2))
 
-	if a.Len() != 3 {
-		t.Fatalf("Len: %d want 3", a.Len())
-	}
+	require.Equal(t, 3, a.Len(), "Len: %d want 3", a.Len())
 	for i, want := range []fixed.Coord{0, 5, 10} {
-		if got := a.At(i).CurrX; got != want {
-			t.Errorf("[%d].CurrX = %d want %d", i, got, want)
-		}
+		got := a.At(i).CurrX
+		require.Equal(t, want, got, "[%d].CurrX = %d want %d", i, got, want)
 	}
 }
 
@@ -37,15 +35,11 @@ func TestAELRemove(t *testing.T) {
 	a.Insert(e3)
 
 	a.Remove(e2)
-	if a.Len() != 2 || a.At(0).CurrX != 0 || a.At(1).CurrX != 10 {
-		t.Fatalf("post-remove: %d edges, [0]=%d [1]=%d", a.Len(), a.At(0).CurrX, a.At(1).CurrX)
-	}
+	require.True(t, a.Len() == 2 && a.At(0).CurrX == 0 && a.At(1).CurrX == 10, "post-remove: %d edges, [0]=%d [1]=%d", a.Len(), a.At(0).CurrX, a.At(1).CurrX)
 
 	// Remove non-present is a no-op.
 	a.Remove(e2)
-	if a.Len() != 2 {
-		t.Errorf("removing absent edge changed Len: %d", a.Len())
-	}
+	require.Equal(t, 2, a.Len(), "removing absent edge changed Len: %d", a.Len())
 }
 
 func TestAELSwapAt(t *testing.T) {
@@ -55,9 +49,7 @@ func TestAELSwapAt(t *testing.T) {
 	a.Insert(e1)
 	a.Insert(e2)
 	a.SwapAt(0)
-	if a.At(0) != e2 || a.At(1) != e1 {
-		t.Errorf("after SwapAt: [0]=%p [1]=%p want %p %p", a.At(0), a.At(1), e2, e1)
-	}
+	require.True(t, a.At(0) == e2 && a.At(1) == e1, "after SwapAt: [0]=%p [1]=%p want %p %p", a.At(0), a.At(1), e2, e1)
 }
 
 func TestAELNeighbors(t *testing.T) {
@@ -68,18 +60,10 @@ func TestAELNeighbors(t *testing.T) {
 	a.Insert(e2)
 	a.Insert(e3)
 
-	if l := a.LeftOf(0); l != nil {
-		t.Errorf("LeftOf(0): %v want nil", l)
-	}
-	if r := a.RightOf(2); r != nil {
-		t.Errorf("RightOf(2): %v want nil", r)
-	}
-	if l := a.LeftOf(1); l != e1 {
-		t.Errorf("LeftOf(1): %p want %p", l, e1)
-	}
-	if r := a.RightOf(1); r != e3 {
-		t.Errorf("RightOf(1): %p want %p", r, e3)
-	}
+	require.Nil(t, a.LeftOf(0), "LeftOf(0): %v want nil", a.LeftOf(0))
+	require.Nil(t, a.RightOf(2), "RightOf(2): %v want nil", a.RightOf(2))
+	require.Same(t, e1, a.LeftOf(1), "LeftOf(1): %p want %p", a.LeftOf(1), e1)
+	require.Same(t, e3, a.RightOf(1), "RightOf(1): %p want %p", a.RightOf(1), e3)
 }
 
 func TestAELTieBreakBySlope(t *testing.T) {
@@ -98,9 +82,7 @@ func TestAELTieBreakBySlope(t *testing.T) {
 	a.Insert(eShallow)
 	a.Insert(eSteep)
 	// Steep slope (0.1) < shallow slope (1.0), so steep comes first.
-	if a.At(0) != eSteep {
-		t.Errorf("tie-break order wrong: At(0)=%p want %p (steep)", a.At(0), eSteep)
-	}
+	require.Same(t, eSteep, a.At(0), "tie-break order wrong: At(0)=%p want %p (steep)", a.At(0), eSteep)
 }
 
 func TestAELUpdateForScanline(t *testing.T) {
@@ -110,20 +92,15 @@ func TestAELUpdateForScanline(t *testing.T) {
 	e := ae(0, &s)
 	a.Insert(e)
 	a.UpdateForScanline(5)
-	if e.CurrX != 5 {
-		t.Errorf("CurrX after scanline=5: %d want 5", e.CurrX)
-	}
+	require.Equal(t, fixed.Coord(5), e.CurrX, "CurrX after scanline=5: %d want 5", e.CurrX)
 	a.UpdateForScanline(8)
-	if e.CurrX != 8 {
-		t.Errorf("CurrX after scanline=8: %d want 8", e.CurrX)
-	}
+	require.Equal(t, fixed.Coord(8), e.CurrX, "CurrX after scanline=8: %d want 8", e.CurrX)
 }
 
 func TestXAtYHorizontal(t *testing.T) {
 	s := seg(2, 5, 8, 5)
-	if got := XAtY(&s, 5); got != 2 {
-		t.Errorf("horizontal XAtY: %d want 2", got)
-	}
+	got := XAtY(&s, 5)
+	require.Equal(t, fixed.Coord(2), got, "horizontal XAtY: %d want 2", got)
 }
 
 func TestXAtYDiagonal(t *testing.T) {
@@ -135,9 +112,8 @@ func TestXAtYDiagonal(t *testing.T) {
 		{10, 5},
 		{20, 10},
 	} {
-		if got := XAtY(&s, fixed.Coord(c.y)); int64(got) != c.want {
-			t.Errorf("XAtY(y=%d) = %d want %d", c.y, got, c.want)
-		}
+		got := XAtY(&s, fixed.Coord(c.y))
+		require.Equal(t, c.want, int64(got), "XAtY(y=%d) = %d want %d", c.y, got, c.want)
 	}
 }
 
@@ -145,13 +121,7 @@ func TestCmpXAtY(t *testing.T) {
 	// a: (0,0)->(10,10), b: (10,0)->(0,10). They cross at (5,5).
 	a := seg(0, 0, 10, 10)
 	b := seg(10, 0, 0, 10)
-	if got := cmpXAtY(&a, &b, 2); got >= 0 {
-		t.Errorf("at y=2 a should be left of b, got %d", got)
-	}
-	if got := cmpXAtY(&a, &b, 5); got != 0 {
-		t.Errorf("at y=5 (crossing) a and b should be equal, got %d", got)
-	}
-	if got := cmpXAtY(&a, &b, 8); got <= 0 {
-		t.Errorf("at y=8 a should be right of b, got %d", got)
-	}
+	require.True(t, cmpXAtY(&a, &b, 2) < 0, "at y=2 a should be left of b, got %d", cmpXAtY(&a, &b, 2))
+	require.Equal(t, 0, cmpXAtY(&a, &b, 5), "at y=5 (crossing) a and b should be equal, got %d", cmpXAtY(&a, &b, 5))
+	require.True(t, cmpXAtY(&a, &b, 8) > 0, "at y=8 a should be right of b, got %d", cmpXAtY(&a, &b, 8))
 }

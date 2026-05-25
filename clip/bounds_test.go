@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildLocalMinimaAxialRectangle(t *testing.T) {
@@ -12,44 +13,29 @@ func TestBuildLocalMinimaAxialRectangle(t *testing.T) {
 	// one vertical.
 	segs := axialRect(0, 0, 10, 5, Subject)
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("BuildLocalMinima err: %v", err)
-	}
-	if len(minima) != 1 {
-		t.Fatalf("expected 1 local min, got %d", len(minima))
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 1, "expected 1 local min, got %d", len(minima))
 	m := minima[0]
-	if m.Vertex != (fixed.Point{X: 0, Y: 0}) {
-		t.Errorf("vertex: %v want (0,0)", m.Vertex)
-	}
-	if m.Left == nil || m.Right == nil {
-		t.Fatalf("bounds nil: left=%v right=%v", m.Left, m.Right)
-	}
-	if len(m.Left.Segs) != 2 {
-		t.Errorf("left segs: %d want 2; segs=%v", len(m.Left.Segs), m.Left.Segs)
-	}
-	if len(m.Right.Segs) != 2 {
-		t.Errorf("right segs: %d want 2; segs=%v", len(m.Right.Segs), m.Right.Segs)
-	}
+	require.Equal(t, fixed.Point{X: 0, Y: 0}, m.Vertex, "vertex: %v want (0,0)", m.Vertex)
+	require.NotNil(t, m.Left, "bounds nil: left=%v right=%v", m.Left, m.Right)
+	require.NotNil(t, m.Right, "bounds nil: left=%v right=%v", m.Left, m.Right)
+	require.Len(t, m.Left.Segs, 2, "left segs: %d want 2; segs=%v", len(m.Left.Segs), m.Left.Segs)
+	require.Len(t, m.Right.Segs, 2, "right segs: %d want 2; segs=%v", len(m.Right.Segs), m.Right.Segs)
 
 	// Left bound's first non-horizontal should be at X=0 (left vertical).
 	// Right bound's first non-horizontal should be at X=10 (right vertical).
-	if x := boundInitialX(m.Left, m.Vertex); x != 0 {
-		t.Errorf("left bound initial X: %d want 0", int64(x))
-	}
-	if x := boundInitialX(m.Right, m.Vertex); x != 10 {
-		t.Errorf("right bound initial X: %d want 10", int64(x))
-	}
+	require.Equal(t, fixed.Coord(0), boundInitialX(m.Left, m.Vertex), "left bound initial X want 0")
+	require.Equal(t, fixed.Coord(10), boundInitialX(m.Right, m.Vertex), "right bound initial X want 10")
 
 	// Both bounds must end at the local max (1 of the two top vertices,
 	// whichever the down→up transition selected). For axialRect it's the
 	// end vertex of the up edge (1,0)→(1,5), which is (10,5).
 	leftLast := m.Left.Last()
 	rightLast := m.Right.Last()
-	if topY := fixed.Coord(5); leftLast.Top.Y != topY || rightLast.Top.Y != topY {
-		t.Errorf("bounds last edge top Y: left=%v right=%v want both at Y=%d",
-			leftLast.Top, rightLast.Top, int64(topY))
-	}
+	topY := fixed.Coord(5)
+	require.True(t, leftLast.Top.Y == topY && rightLast.Top.Y == topY,
+		"bounds last edge top Y: left=%v right=%v want both at Y=%d",
+		leftLast.Top, rightLast.Top, int64(topY))
 }
 
 func TestBuildLocalMinimaDiamond(t *testing.T) {
@@ -57,31 +43,17 @@ func TestBuildLocalMinimaDiamond(t *testing.T) {
 	// the top. Each bound has two non-horizontal segments.
 	segs := diamond(0, 0, 10, Subject)
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("BuildLocalMinima err: %v", err)
-	}
-	if len(minima) != 1 {
-		t.Fatalf("expected 1 local min, got %d", len(minima))
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 1, "expected 1 local min, got %d", len(minima))
 	m := minima[0]
-	if m.Vertex != (fixed.Point{X: 0, Y: -10}) {
-		t.Errorf("vertex: %v want (0,-10)", m.Vertex)
-	}
-	if len(m.Left.Segs) != 2 {
-		t.Errorf("left segs: %d want 2", len(m.Left.Segs))
-	}
-	if len(m.Right.Segs) != 2 {
-		t.Errorf("right segs: %d want 2", len(m.Right.Segs))
-	}
+	require.Equal(t, fixed.Point{X: 0, Y: -10}, m.Vertex, "vertex: %v want (0,-10)", m.Vertex)
+	require.Len(t, m.Left.Segs, 2, "left segs: %d want 2", len(m.Left.Segs))
+	require.Len(t, m.Right.Segs, 2, "right segs: %d want 2", len(m.Right.Segs))
 	// Left bound's first segment goes UP-LEFT from local min: (0,-10) →
 	// (-10,0). Slope -1.
 	// Right bound's first goes UP-RIGHT: (0,-10) → (10,0). Slope +1.
-	if s := boundInitialSlope(m.Left); s >= 0 {
-		t.Errorf("left bound initial slope: %v want negative", s)
-	}
-	if s := boundInitialSlope(m.Right); s <= 0 {
-		t.Errorf("right bound initial slope: %v want positive", s)
-	}
+	require.Negative(t, boundInitialSlope(m.Left), "left bound initial slope want negative")
+	require.Positive(t, boundInitialSlope(m.Right), "right bound initial slope want positive")
 }
 
 func TestBuildLocalMinimaTwoDisjointRectangles(t *testing.T) {
@@ -91,19 +63,11 @@ func TestBuildLocalMinimaTwoDisjointRectangles(t *testing.T) {
 	segs = append(segs, axialRect(0, 0, 5, 3, Subject)...)
 	segs = append(segs, axialRect(20, 10, 25, 13, Clip)...)
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(minima) != 2 {
-		t.Fatalf("expected 2 local minima, got %d", len(minima))
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 2, "expected 2 local minima, got %d", len(minima))
 	// Sorted: (0,0) first (Y=0), then (20,10).
-	if minima[0].Vertex != (fixed.Point{X: 0, Y: 0}) {
-		t.Errorf("first min vertex: %v want (0,0)", minima[0].Vertex)
-	}
-	if minima[1].Vertex != (fixed.Point{X: 20, Y: 10}) {
-		t.Errorf("second min vertex: %v want (20,10)", minima[1].Vertex)
-	}
+	require.Equal(t, fixed.Point{X: 0, Y: 0}, minima[0].Vertex, "first min vertex: %v want (0,0)", minima[0].Vertex)
+	require.Equal(t, fixed.Point{X: 20, Y: 10}, minima[1].Vertex, "second min vertex: %v want (20,10)", minima[1].Vertex)
 }
 
 func TestBuildLocalMinimaNestedRectangles(t *testing.T) {
@@ -115,18 +79,10 @@ func TestBuildLocalMinimaNestedRectangles(t *testing.T) {
 	segs = append(segs, axialRect(0, 0, 20, 20, Subject)...)
 	segs = append(segs, axialRect(5, 5, 15, 15, Subject)...)
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(minima) != 2 {
-		t.Fatalf("expected 2 local minima, got %d", len(minima))
-	}
-	if minima[0].Vertex != (fixed.Point{X: 0, Y: 0}) {
-		t.Errorf("first min: %v", minima[0].Vertex)
-	}
-	if minima[1].Vertex != (fixed.Point{X: 5, Y: 5}) {
-		t.Errorf("second min: %v", minima[1].Vertex)
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 2, "expected 2 local minima, got %d", len(minima))
+	require.Equal(t, fixed.Point{X: 0, Y: 0}, minima[0].Vertex, "first min: %v", minima[0].Vertex)
+	require.Equal(t, fixed.Point{X: 5, Y: 5}, minima[1].Vertex, "second min: %v", minima[1].Vertex)
 }
 
 func TestBuildLocalMinimaSharedVertex(t *testing.T) {
@@ -138,28 +94,16 @@ func TestBuildLocalMinimaSharedVertex(t *testing.T) {
 	segs = append(segs, axialRect(0, 0, 5, 5, Subject)...)
 	segs = append(segs, axialRect(5, 5, 10, 10, Clip)...)
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(minima) != 2 {
-		t.Fatalf("expected 2 local minima, got %d", len(minima))
-	}
-	if minima[0].Vertex != (fixed.Point{X: 0, Y: 0}) {
-		t.Errorf("first min: %v want (0,0)", minima[0].Vertex)
-	}
-	if minima[1].Vertex != (fixed.Point{X: 5, Y: 5}) {
-		t.Errorf("second min: %v want (5,5)", minima[1].Vertex)
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 2, "expected 2 local minima, got %d", len(minima))
+	require.Equal(t, fixed.Point{X: 0, Y: 0}, minima[0].Vertex, "first min: %v want (0,0)", minima[0].Vertex)
+	require.Equal(t, fixed.Point{X: 5, Y: 5}, minima[1].Vertex, "second min: %v want (5,5)", minima[1].Vertex)
 }
 
 func TestBuildLocalMinimaEmpty(t *testing.T) {
 	minima, err := BuildLocalMinima(nil)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(minima) != 0 {
-		t.Errorf("expected 0 minima, got %d", len(minima))
-	}
+	require.NoError(t, err)
+	require.Empty(t, minima, "expected 0 minima, got %d", len(minima))
 }
 
 func TestBuildLocalMinimaWShape(t *testing.T) {
@@ -201,17 +145,9 @@ func TestBuildLocalMinimaWShape(t *testing.T) {
 		}
 	}
 	minima, err := BuildLocalMinima(segs)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if len(minima) != 2 {
-		t.Fatalf("expected 2 local minima, got %d; minima=%v", len(minima), minima)
-	}
+	require.NoError(t, err)
+	require.Len(t, minima, 2, "expected 2 local minima, got %d; minima=%v", len(minima), minima)
 	// Sorted by (Y, X): both at Y=0, X=2 then X=8.
-	if minima[0].Vertex != (fixed.Point{X: 2, Y: 0}) {
-		t.Errorf("first min: %v want (2,0)", minima[0].Vertex)
-	}
-	if minima[1].Vertex != (fixed.Point{X: 8, Y: 0}) {
-		t.Errorf("second min: %v want (8,0)", minima[1].Vertex)
-	}
+	require.Equal(t, fixed.Point{X: 2, Y: 0}, minima[0].Vertex, "first min: %v want (2,0)", minima[0].Vertex)
+	require.Equal(t, fixed.Point{X: 8, Y: 0}, minima[1].Vertex, "second min: %v want (8,0)", minima[1].Vertex)
 }

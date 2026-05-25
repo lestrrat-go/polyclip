@@ -1,6 +1,10 @@
 package polyclip
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 // constZ assigns a fixed Z to every crossing vertex.
 type constZ float64
@@ -59,9 +63,7 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 	}}}
 
 	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(coordZ{}).Execute(OpIntersect)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
+	require.NoError(t, err)
 	want := map[[2]float64]float64{
 		{5, 5}:   2,
 		{10, 10}: 1,
@@ -70,13 +72,8 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 	}
 	for xy, wz := range want {
 		z, ok := zAt(res.Closed, xy[0], xy[1])
-		if !ok {
-			t.Errorf("vertex (%g,%g) missing from result", xy[0], xy[1])
-			continue
-		}
-		if z != wz {
-			t.Errorf("Z at (%g,%g) = %g, want %g", xy[0], xy[1], z, wz)
-		}
+		require.True(t, ok, "vertex (%g,%g) missing from result", xy[0], xy[1])
+		require.Equal(t, wz, z, "Z at (%g,%g) = %g, want %g", xy[0], xy[1], z, wz)
 	}
 }
 
@@ -90,14 +87,10 @@ func TestBuilderZDisabledIsZero(t *testing.T) {
 		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
 	}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpIntersect)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
+	require.NoError(t, err)
 	for _, ex := range res.Closed {
 		for _, p := range ex.Outer {
-			if p.Z != 0 {
-				t.Errorf("Z = %g at (%g,%g), want 0 (tracking disabled)", p.Z, p.X, p.Y)
-			}
+			require.Equal(t, float64(0), p.Z, "Z = %g at (%g,%g), want 0 (tracking disabled)", p.Z, p.X, p.Y)
 		}
 	}
 }
@@ -109,14 +102,10 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(7)).Execute(OpIntersect)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
+	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
 		z, ok := zAt(res.Closed, xy[0], xy[1])
-		if !ok || z != 7 {
-			t.Errorf("crossing (%g,%g): Z=%g ok=%v, want 7", xy[0], xy[1], z, ok)
-		}
+		require.True(t, ok && z == 7, "crossing (%g,%g): Z=%g ok=%v, want 7", xy[0], xy[1], z, ok)
 	}
 }
 
@@ -126,21 +115,16 @@ func TestBuilderZAssignerEndpoints(t *testing.T) {
 	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	rec := &recordZ{}
-	if _, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if len(rec.calls) != 2 {
-		t.Fatalf("AssignZ called %d times, want 2", len(rec.calls))
-	}
+	_, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect)
+	require.NoError(t, err)
+	require.Len(t, rec.calls, 2, "AssignZ called %d times, want 2", len(rec.calls))
 	seen := map[[2]float64]bool{}
 	for _, c := range rec.calls {
 		cr := c[4]
 		seen[[2]float64{cr.X, cr.Y}] = true
 	}
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
-		if !seen[xy] {
-			t.Errorf("no AssignZ call for crossing (%g,%g)", xy[0], xy[1])
-		}
+		require.True(t, seen[xy], "no AssignZ call for crossing (%g,%g)", xy[0], xy[1])
 	}
 }
 
@@ -150,13 +134,9 @@ func TestBuilderZXorComposition(t *testing.T) {
 	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(9)).Execute(OpXor)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
+	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
 		z, ok := zAt(res.Closed, xy[0], xy[1])
-		if !ok || z != 9 {
-			t.Errorf("Xor crossing (%g,%g): Z=%g ok=%v, want 9", xy[0], xy[1], z, ok)
-		}
+		require.True(t, ok && z == 9, "Xor crossing (%g,%g): Z=%g ok=%v, want 9", xy[0], xy[1], z, ok)
 	}
 }

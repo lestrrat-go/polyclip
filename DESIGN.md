@@ -481,6 +481,36 @@ region area catches both overlap and gaps). Input must be well-formed (the form
 `Simplify` produces); degenerate or self-touching geometry should be passed through
 `Simplify` first.
 
+### 7.9 Open items to revisit
+
+Capability parity with Clipper2 is reached (§7.8) and the differential oracle holds
+at zero identity violation (§6.2). What remains is **quality, not coverage** — each
+item below is correct as shipped but is a deliberate shortcut over the ideal
+single-pass engine, or an unverified goal. Recorded here as one list so the
+remaining work is findable; the rationale lives in the cross-referenced section.
+
+1. **Native single-pass Xor (§7.6).** `Xor` is computed by composition
+   `Difference(Union(a,b), Intersect(a,b))` — three sweeps, not one — because the
+   direct `OpXor` sweep mis-resolves a residual confluence class. Resolving Xor
+   in-sweep (per-segment winding at confluences, retiring both the composition and
+   the result-level subset filter) is the eventual design.
+2. **Single-pass multipiece Difference (§7.7).** A multipiece subject is differenced
+   per piece (`(∪ᵢ Pᵢ)∖B = ∪ᵢ(Pᵢ∖B)`) to dodge the same coincident over-trace —
+   exact, but N sweeps. Removing the decomposition is the same rework as item 1.
+3. **Non-NonZero-fill Difference over a multipiece subject (§7.8(b)).** Routes
+   through `execOpFilled`, which drops the per-piece decomposition of item 2, so it
+   runs one sweep and can hit the coincident-confluence over-trace. Closing items
+   1–2 closes this.
+4. **Performance vs Clipper2 unmeasured (§7.3).** The "within 5–10× of Clipper2"
+   goal (§1) was never benchmarked against Clipper2 — the correctness oracle is
+   Monte-Carlo, not Clipper2. Triangulation is additionally O(n²) (z-order hashing
+   omitted by choice, §7.8(i)). Needs a direct benchmark harness to confirm.
+5. **Representational rough edges.** `RectClip` returns a single ring joined by a
+   zero-width seam where a rectangle bisects a concave ring, rather than separate
+   `ExPolygon` values (same area; `Simplify` separates them — §7.8(f)).
+   `Triangulate` requires well-formed input and should be preceded by `Simplify`
+   (§7.8(i)).
+
 ---
 
 ## 8. Conventions and constraints

@@ -56,12 +56,12 @@ func randSkyline(rng *rand.Rand, x0, y0, m, maxH int) Polygon {
 // falls back to the legacy ClassifyHorizontals dispatch and how often that
 // path surfaces ErrHorizontalNotSupported on a VALIDATED input.
 //
-// It asserts ONLY that no input hangs the engine (the per-op watchdog
-// t.Fatalf's on a hang — see the processHorzJoins fix and
-// TestHorizJoinHangRepro). The reported fellBack / horizErr counts are the
-// §7.5 finding (the fallback IS heavily reachable); idFails counts the known
-// pre-existing axis-aligned Union over-count documented in DESIGN §7.6, and is
-// logged, not asserted, so this diagnostic stays green until §7.6 is fixed.
+// It asserts no input hangs the engine (the per-op watchdog t.Fatalf's on a
+// hang — see the processHorzJoins fix and TestHorizJoinHangRepro) AND that the
+// algebraic identities hold on every interacting pair (idFails == 0). The
+// reported fellBack / horizErr counts are the §7.5 finding (the fallback IS
+// heavily reachable); idFails was the §7.6 coincident/cross-source mis-resolution
+// (now fixed — asserted as a regression guard).
 func TestHorizontalFallbackReachability(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping reachability sweep in -short")
@@ -191,11 +191,11 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 	if firstHoriz != "" {
 		t.Logf("first ErrHorizontalNotSupported: %s", firstHoriz)
 	}
-	if firstIdFail != "" {
-		// Logged, not failed: this is the known pre-existing axis-aligned Union
-		// over-count (DESIGN §7.6), distinct from the hang this file's fix and
-		// regression test address.
-		t.Logf("KNOWN §7.6 identity violation (not asserted): %s", firstIdFail)
+	// §7.6 is now FIXED: the algebraic identities are exact on every interacting
+	// axis-aligned pair. Assert it — a regression means a coincident /
+	// cross-source confluence is mis-resolving again (DESIGN §7.6).
+	if idFails != 0 {
+		t.Errorf("§7.6 regression: %d identity violations (want 0); first: %s", idFails, firstIdFail)
 	}
 }
 

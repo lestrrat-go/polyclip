@@ -363,14 +363,16 @@ unified cycle (matching `JoinOutrecPaths`), so no OutPt is left on the dead
 ring and the `or1==or2` split/merge test always reads live pointers. Differential
 byte-identical (idU=idD=idX=0, gross 93/236). Regression: `TestHorizJoinHangRepro`.
 
-### 7.6 Axis-aligned identity violations (collinear shared edge) — PARTIAL
+### 7.6 Axis-aligned identity violations (collinear shared edge) — DONE
 
 Pre-existing, distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds,
 on inputs the bound model DOES handle). A class of algebraic-identity violations
-on axis-aligned pairs sharing collinear boundary segments, dominated (67 of the
-original 73) by a **coincident cross-source vertical wall** (one polygon's wall
-lies exactly on the other's, overlapping in Y). Two fixes have landed, cutting
-`TestHorizontalFallbackReachability`'s logged violations from ~106 → 73 → **44**:
+on axis-aligned pairs sharing collinear boundary segments, dominated by a
+**coincident cross-source vertical wall** (one polygon's wall lies exactly on the
+other's, overlapping in Y). `TestHorizontalFallbackReachability` logged ~106 such
+violations over ~78k ops; that count is now **0** and asserted there. Five fixes
+landed, in two layers — sweep-level resolution of the coincident confluences, and
+a result-level subset invariant for the residue:
 
 1. **Intersect spurious-lobe** (below) — the outer-max coincident-horizontal apex.
 2. **Coincident AEL edge ordering by divergence** (`aelLess` / `coincidentDivergeLess`,
@@ -384,21 +386,32 @@ lies exactly on the other's, overlapping in Y). Two fixes have landed, cutting
    that tops out at the divergence contributes a synthetic turn vertex from its
    `WindDx` (interior side). Differential byte-identical (idU=idD=idX=0).
 
-**Residual (43, was 44):** a third fix LANDED — `closeBound`'s cross-source
-self-closure now decides "ring continues above the coincident apex" by
-op-membership computed from the winding STRICTLY ABOVE the scanline (generalized
-from Intersect-only to all ops via `opMember`), closing the ring at the seam via
-`AddLocalMaxPoly` (lifecycle-respecting) when no output resumes above. Fixes the
-D13 Difference spurious-triangle; differential byte-identical.
+3. **`closeBound` cross-source self-closure by above-membership** — decides
+   "ring continues above the coincident apex" from the winding STRICTLY ABOVE the
+   scanline (all ops, via `opMember`), closing at the seam via `AddLocalMaxPoly`
+   when no output resumes above (the Intersect/Difference apex cases).
+4. **Emit apex when a hot maxima edge has a cold same-source partner** — a concave
+   notch's wall topping out where the source's flat top resumes; emit the apex so
+   the vertex is kept (and, for Difference, also when the clip-cut coupled edge has
+   already closed). Drops the diagonal-cut-notch-apex class.
+5. **Subset-invariant filter (result level, `runBooleanOp`)** — the sweep can still
+   over-trace a cross-source bound past where it EXITS the op-region (a maxing bound
+   does not update an exiting neighbour's winding without a crossing event), emitting
+   an entirely-spurious *hole-free* piece OUTSIDE the result's superset. Difference
+   ⊆ A and Intersect ⊆ A∩B, so a hole-free piece whose interior point violates that
+   is dropped (point-in-polygon; never drops a valid piece). Catches the remaining
+   Difference/Union spurious fragments.
 
-The remaining spurious lobes are half-integer (diagonal) artifacts where
-a Difference/Union ring mis-traces *up* a coincident wall reached via through-vertex
-advancement (which does not reclassify), then pinches into a diagonal spur. The
-remaining fix is a coincident-wall **ring redirect** at the confluence (turn the
-boundary onto the horizontal seam instead of climbing the doubled wall). NOTE: a
-blunt reconcile that dispatches the coincident pair through `IntersectEdges`
-CRASHES (nil deref — the crossing dispatch assumes a transversal cross, not a
-doubled non-crossing boundary); the redirect needs custom topology handling.
+**Xor** is computed by composition — `Difference(Union(a,b), Intersect(a,b))` —
+rather than the direct `OpXor` sweep, which mis-resolves a residual class of these
+confluences that U/I/D (now correct) handle. The symmetric difference is exact.
+
+All five fixes are differential byte-identical (idU=idD=idX=0, gross 93/236);
+`TestHorizontalFallbackReachability` idFails == 0 is asserted as the regression
+guard, and `TestHorizIdentityRepro` covers the minimal case. The direct `OpXor`
+sweep and the sweep-level over-trace at clip-exits-subject crossings remain (now
+masked by composition + the subset filter); a future per-segment winding model at
+confluences would let `OpXor` and the filtered Difference cases resolve in-sweep.
 
 **Intersect spurious lobe — FIXED.** The symptom was an algebraic-identity
 violation on axis-aligned pairs sharing a collinear boundary segment — e.g.

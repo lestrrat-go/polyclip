@@ -454,6 +454,12 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 		poly Polygon
 		bbox BBox
 		area float64 // absolute (unsigned) area
+		// interior is a point of poly's OPEN interior, precomputed once per ring
+		// (it depends only on poly). hasInterior is false for a degenerate ring
+		// with no interior. Hoisted out of ringInside so the O(n^2) containment
+		// scan does not recompute it on every candidate container.
+		interior    Point
+		hasInterior bool
 	}
 	var rings2 []classified
 
@@ -474,11 +480,10 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 	// negative. An interior point of inner avoids both: if inner is nested it is
 	// strictly inside outer; if the rings only touch it is strictly outside.
 	ringInside := func(inner, outer classified) bool {
-		pt, ok := interiorPoint(inner.poly)
-		if !ok {
+		if !inner.hasInterior {
 			return false
 		}
-		return outer.bbox.Contains(pt) && outer.poly.Contains(pt)
+		return outer.bbox.Contains(inner.interior) && outer.poly.Contains(inner.interior)
 	}
 
 	for _, r := range rings {
@@ -504,9 +509,12 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale) MultiPolygon {
 			for i, fp := range fixedPts {
 				poly[i].X, poly[i].Y = scale.Unsnap(fp)
 			}
+			interior, hasInterior := interiorPoint(poly)
 			rings2 = append(rings2, classified{
 				poly: poly, bbox: poly.BoundingBox(),
-				area: math.Abs(poly.SignedArea()),
+				area:        math.Abs(poly.SignedArea()),
+				interior:    interior,
+				hasInterior: hasInterior,
 			})
 		}
 	}

@@ -144,7 +144,7 @@ func TestDedupCoincidentEdges(t *testing.T) {
 			name: "SameSrcSameDir",
 			// Two identical Subject segments — same Bot/Top/Src/Reversed.
 			// DedupCoincidentEdges should keep one, drop the duplicate.
-			segs: func(t *testing.T) []Segment {
+			segs: func(_ *testing.T) []Segment {
 				a := segSrc(0, 0, 10, 10, Subject)
 				return []Segment{a, a, segSrc(5, 5, 15, 15, Clip)}
 			},
@@ -168,7 +168,7 @@ func TestDedupCoincidentEdges(t *testing.T) {
 			name: "DifferentSrcUnchanged",
 			// Different-source coincident pair — NOT dropped by Dedup (needs the
 			// full §11.7 topological merge which isn't implemented yet).
-			segs: func(t *testing.T) []Segment {
+			segs: func(_ *testing.T) []Segment {
 				subj := segSrc(0, 0, 10, 10, Subject)
 				clip := NewSegment(fixed.Point{X: 0, Y: 0}, fixed.Point{X: 10, Y: 10}, Clip)
 				return []Segment{subj, clip}
@@ -197,7 +197,7 @@ func TestSplitTJunctions(t *testing.T) {
 			name: "SplitsInteriorVertex",
 			// Clip segment's lower endpoint (5,5) lies in the interior of the
 			// Subject segment (0,0)->(10,10). Subject must be split there.
-			segs: func(t *testing.T) []Segment {
+			segs: func(_ *testing.T) []Segment {
 				return []Segment{segSrc(0, 0, 10, 10, Subject), segSrc(5, 5, 15, 5, Clip)}
 			},
 			wantLen: 3,
@@ -234,7 +234,7 @@ func TestSplitTJunctions(t *testing.T) {
 			name: "SharedCornerUnchanged",
 			// Two segments meeting at a shared endpoint (a corner, not a
 			// T-junction) need no split.
-			segs: func(t *testing.T) []Segment {
+			segs: func(_ *testing.T) []Segment {
 				return []Segment{segSrc(0, 0, 10, 10, Subject), segSrc(10, 10, 20, 0, Clip)}
 			},
 			wantLen: 2,
@@ -242,7 +242,7 @@ func TestSplitTJunctions(t *testing.T) {
 		},
 		{
 			name: "NoTouchUnchanged",
-			segs: func(t *testing.T) []Segment {
+			segs: func(_ *testing.T) []Segment {
 				return []Segment{segSrc(0, 0, 10, 10, Subject), segSrc(0, 10, 10, 20, Clip)} // parallel, disjoint
 			},
 			wantLen: 2,

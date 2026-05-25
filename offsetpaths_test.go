@@ -36,7 +36,7 @@ func TestOffsetPathsStraight(t *testing.T) {
 			want:   40,
 			tol:    1e-9,
 			what:   "butt area",
-			pieces: intPtr(1),
+			pieces: new(1),
 		},
 		{
 			// Square caps extend 2 beyond each end: 14×4 = 56.
@@ -67,8 +67,6 @@ func TestOffsetPathsStraight(t *testing.T) {
 		})
 	}
 }
-
-func intPtr(i int) *int { return &i }
 
 func TestOffsetPathsVerticalButt(t *testing.T) {
 	// Orientation must be CCW (positive area) regardless of path direction.

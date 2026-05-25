@@ -369,6 +369,29 @@ crossings remain latent (masked by composition + the subset filter); a future
 per-segment winding model at confluences would let `OpXor` and the filtered
 Difference cases resolve in-sweep.
 
+**In-sweep rework (retiring the masks).** The public ops are correct, but the
+masks hide a residual in-sweep over-trace. `rawconfluence_test.go` measures it
+directly — `rawOp` runs the pipeline with NO masking, and
+`TestRawInSweepIdFailRatchet` ratchets the unmasked identity-violation count so
+the rework can only shrink it. Two confluence handlers in `dispatchIntersect`
+drive it down without touching the masked public path:
+
+- The opposite-side coincident-horizontal SKIP (defer to `processHorzJoins`)
+  fires only when at least one edge is `Contributing` — when both are
+  non-contributing the shared edge bounds no output region, so the pair closes
+  at the seam instead (the §7.6 both-OUT seam).
+- `confluenceForcesClose` further blocks the skip when a bound that TERMINATES
+  at the overlap (`IsBoundLast`) is itself a `Contributing` output boundary AND
+  the region is not interior on both sides (`coincidentMembership`, a hole-aware
+  signed-winding probe). Such an edge is a genuine output-boundary maximum that
+  must close its ring — the Intersect/Difference outer-corner case where a
+  source's contributing top maxes while the other's wall continues up, which
+  otherwise over-traces into a spurious lobe. The membership carve-out keeps a
+  subject hole-top coincident with a continuing clip edge deferring (its
+  terminating edge is non-contributing), so holed inputs stay byte-identical.
+
+Residual: 7 direct-`OpXor` cases (`TestRawInSweepIdFailRatchet`).
+
 ### 7.7 Multipiece-subject Difference over-trace (DONE)
 
 The §7.6 work drove identity violations to zero on inputs where each source is a

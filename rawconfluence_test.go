@@ -79,14 +79,37 @@ func countRawIdFails() (int, int, int, int) {
 // The raw (unmasked) sweep still over-traces a residual class of coincident
 // cross-source confluences (§7.6/§7.7); the public ops mask it (subset filter,
 // Xor composition). This ratchets the residual so the rework can only shrink it.
-// Current residual: 13 — an Intersect-over-count cluster (a spurious lobe in
-// A∩B that surfaces as U/D/X identity breaks because want = f(I)) plus
-// direct-OpXor cases. Lower the bound as the rework progresses; never raise it.
+// Current residual: 7 direct-OpXor cases. The Intersect-over-count cluster (a
+// spurious lobe in A∩B surfacing as U/D identity breaks because want = f(I))
+// was closed by the confluence force-close rule (terminating contributing edge
+// + hole-aware membership). Lower the bound as the rework progresses; never
+// raise it.
 func TestRawInSweepIdFailRatchet(t *testing.T) {
-	const ratchet = 13
+	const ratchet = 7
 	tot, nU, nD, nX := countRawIdFails()
 	t.Logf("raw in-sweep idfails: total=%d U=%d D=%d X=%d (ratchet=%d)", tot, nU, nD, nX, ratchet)
 	if tot > ratchet {
 		t.Errorf("raw in-sweep idfails regressed: got %d, ratchet %d", tot, ratchet)
+	}
+}
+
+// TestRawIntersectOuterCornerCloses guards the §7.6 confluence force-close rule.
+// At (5,2) subject A's top-right corner maxes where clip B's wall continues up;
+// the coincident A-top/B-edge horizontal must close the Intersect ring (B's
+// terminating-or-continuing wall must not over-trace into a spurious lobe
+// outside A). Raw (unmasked) Intersect must equal the true area, not 6.
+func TestRawIntersectOuterCornerCloses(t *testing.T) {
+	a := MultiPolygon{ExPolygon{Outer: []Point{
+		{0, 0}, {5, 0}, {5, 2}, {4, 2}, {3, 2}, {2, 2}, {2, 1}, {1, 1}, {1, 4}, {0, 4},
+	}}}
+	b := MultiPolygon{ExPolygon{Outer: []Point{
+		{2, -1}, {7, -1}, {7, 5}, {6, 5}, {6, 3}, {5, 3}, {5, 2}, {4, 2}, {4, 1}, {3, 1}, {3, 5}, {2, 5},
+	}}}
+	got, err := rawOp(a, b, clip.OpIntersect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 5.0; abs(got.Area()-want) > 1e-6 {
+		t.Errorf("raw Intersect area = %v, want %v (spurious lobe not closed)", got.Area(), want)
 	}
 }

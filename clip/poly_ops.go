@@ -155,6 +155,7 @@ func dispatchIntersect(
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
 		(e1.Contributing || e2.Contributing) &&
+		!confluenceForcesClose(ael, op, e1, e2) &&
 		(e1.Seg.Reversed != e2.Seg.Reversed || sameSideHotContinuesColdEnds(e1, e2) || sameSideBothHotOneEnds(e1, e2)) &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
 		(e1.IsBoundLast() || e2.IsBoundLast()) &&
@@ -335,6 +336,30 @@ func respawnHandoffAtOverlap(e1, e2 *ActiveEdge) bool {
 		return e1.IsHotEdge() && !e2.IsHotEdge()
 	}
 	return e2.IsHotEdge() && !e1.IsHotEdge()
+}
+
+// confluenceForcesClose reports whether a coincident cross-source horizontal
+// pair (e1,e2) must CLOSE at the seam rather than defer to
+// [sweep.processHorzJoins] — i.e. the opposite-side skip in [dispatchIntersect]
+// must NOT fire. That holds when a bound TERMINATES at the overlap (IsBoundLast,
+// its plateau tops out here) AND is a Contributing output boundary AND the
+// output region is NOT interior on both sides of the shared edge. Such an edge
+// is a genuine output-boundary maximum that must close its ring (the
+// Intersect/Difference outer-corner case sz22: A's contributing top maxes where
+// B's wall continues up; deferring lets B over-trace into a spurious lobe
+// outside A). The both-interior carve-out keeps the skip for an interior
+// doubling whose terminating edge is incidentally contributing, and the
+// hole-aware [coincidentMembership] keeps a subject hole-top coincident with a
+// clip bottom edge deferring correctly: there the terminating hole-top is
+// non-contributing, so this never fires (DESIGN.md §7.6).
+func confluenceForcesClose(ael *AEL, op Operation, e1, e2 *ActiveEdge) bool {
+	terminatingContributes := (e1.IsBoundLast() && e1.Contributing) ||
+		(e2.IsBoundLast() && e2.Contributing)
+	if !terminatingContributes {
+		return false
+	}
+	below, above := coincidentMembership(ael, op, e1, e2)
+	return !below || !above
 }
 
 func branchBothHot(

@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset) and a fast rectangle clip. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`.
+Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset). Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`; fast axis-aligned rectangle clip via `RectClip`/`RectClipLines`.
 
 ---
 
@@ -309,7 +309,7 @@ state vs. Clipper2's planar API:
 | Open-path offset (end caps)  | gap      | (c) / §7.4 |
 | Nested `PolyTree` output     | done     | (d)  |
 | Minkowski sum / difference   | done     | (e)  |
-| RectClip / RectClipLines     | gap      | (f)  |
+| RectClip / RectClipLines     | done     | (f)  |
 | Path reduction (Douglas–Peucker) | done | (g)  |
 | Z-coords / vertex callback   | gap      | (h)  |
 | Triangulation                | gap      | (i)  |
@@ -398,11 +398,23 @@ engine change, so the differential is structurally unaffected. Tests:
 `minkowski_test.go` (open-segment sweep → exact rectangle, closed square loop →
 frame with hole, empty inputs).
 
-**(f) RectClip / RectClipLines.** A specialized `O(n)` per-path Sutherland–Hodgman
-clip against an axis-aligned rectangle (closed paths) and an open-path variant,
-independent of the sweep — validated for parity against `Intersect` with the rect
-as a polygon. The point is speed on the common "clip a layer to the build plate"
-case. Medium effort, low risk.
+**(f) RectClip / RectClipLines (done).** `RectClip(m, rect)` clips closed rings
+against an axis-aligned `BBox` by Sutherland–Hodgman (four half-plane passes),
+`O(n)` per ring and independent of the sweep — the fast path for the common
+"clip a layer to the build plate" case. Each `ExPolygon` is clipped
+independently (outer and every hole), so the hole structure is preserved without
+rebuilding the containment forest: a hole stays nested because both rings are
+clipped by the same rectangle. The enclosed region equals `Intersect(m,
+rectAsPolygon)` — validated for area parity against `Intersect` over randomized
+integer triangles (exact on the integer grid). One representational difference:
+where the rectangle splits a concave ring into disjoint pieces,
+Sutherland–Hodgman returns one ring joined by a zero-width seam along the
+rectangle edge rather than separate `ExPolygon` values (same area; run `Simplify`
+for clean separation). `RectClipLines(lines, rect)` clips open polylines by
+Liang–Barsky per segment, stitching contiguous inside runs back into one polyline
+and splitting at each re-entry; no seam is introduced since open paths carry no
+interior. Both are errorless (the clip cannot fail) and treat an empty rect as
+producing no output. Tests: `rectclip_test.go`.
 
 **(g) Path reduction (done).** `SimplifyPaths(m, epsilon)` reduces each ring's
 vertex count via a faithful port of Clipper2's `SimplifyPath` (a

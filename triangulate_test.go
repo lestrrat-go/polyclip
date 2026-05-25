@@ -1,0 +1,366 @@
+package polyclip
+
+import (
+	"math"
+	"math/rand"
+	"testing"
+)
+
+// triArea returns the absolute area of a triangle.
+func triArea(t Triangle) float64 {
+	return math.Abs(orient(t[0], t[1], t[2])) / 2
+}
+
+// triSumArea returns the total area of a triangle list.
+func triSumArea(ts []Triangle) float64 {
+	var a float64
+	for _, t := range ts {
+		a += triArea(t)
+	}
+	return a
+}
+
+// triCentroid returns the centroid of a triangle.
+func triCentroid(t Triangle) Point {
+	return Point{
+		X: (t[0].X + t[1].X + t[2].X) / 3,
+		Y: (t[0].Y + t[1].Y + t[2].Y) / 3,
+	}
+}
+
+func TestTriangulateSquare(t *testing.T) {
+	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}}}
+	tris := Triangulate(m)
+	if len(tris) != 2 {
+		t.Fatalf("got %d triangles, want 2", len(tris))
+	}
+	if got, want := triSumArea(tris), 16.0; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if orient(tri[0], tri[1], tri[2]) <= 0 {
+			t.Errorf("triangle %d not CCW: %v", i, tri)
+		}
+	}
+}
+
+func TestTriangulateTriangle(t *testing.T) {
+	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 0, Y: 6}}}}
+	tris := Triangulate(m)
+	if len(tris) != 1 {
+		t.Fatalf("got %d triangles, want 1", len(tris))
+	}
+	if got := triSumArea(tris); math.Abs(got-18) > 1e-9 {
+		t.Fatalf("area %v, want 18", got)
+	}
+}
+
+func TestTriangulateCWInputNormalized(t *testing.T) {
+	// Clockwise outer ring must be normalized to CCW output.
+	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 0}}}}
+	tris := Triangulate(m)
+	if got := triSumArea(tris); math.Abs(got-16) > 1e-9 {
+		t.Fatalf("area %v, want 16", got)
+	}
+	for i, tri := range tris {
+		if orient(tri[0], tri[1], tri[2]) <= 0 {
+			t.Errorf("triangle %d not CCW: %v", i, tri)
+		}
+	}
+}
+
+func TestTriangulateConcave(t *testing.T) {
+	// An L / arrow shape with a reflex vertex.
+	m := MultiPolygon{{Outer: Polygon{
+		{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 6, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 6}, {X: 0, Y: 6},
+	}}}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if c := triCentroid(tri); !m.Contains(c) {
+			t.Errorf("triangle %d centroid %v outside region", i, c)
+		}
+	}
+}
+
+func TestTriangulateWithHole(t *testing.T) {
+	m := MultiPolygon{{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
+	}}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), 100.0-16.0; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if orient(tri[0], tri[1], tri[2]) <= 0 {
+			t.Errorf("triangle %d not CCW: %v", i, tri)
+		}
+		if c := triCentroid(tri); !m.Contains(c) {
+			t.Errorf("triangle %d centroid %v outside region", i, c)
+		}
+	}
+}
+
+func TestTriangulateTouchingHole(t *testing.T) {
+	// A hole pinched against the outer boundary at two shared vertices — a
+	// real (non-normalized) boolean-engine output. The robust fallbacks must
+	// still cover the region exactly without overlap.
+	m := MultiPolygon{{
+		Outer: Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
+		Holes: []Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
+	}}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if c := triCentroid(tri); !m.Contains(c) {
+			t.Errorf("triangle %d centroid %v outside region", i, c)
+		}
+	}
+}
+
+func TestTriangulateTwoHoles(t *testing.T) {
+	m := MultiPolygon{{
+		Outer: Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
+		Holes: []Polygon{
+			{{X: 2, Y: 2}, {X: 2, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 2}},     // CW
+			{{X: 12, Y: 3}, {X: 12, Y: 7}, {X: 16, Y: 7}, {X: 16, Y: 3}}, // CW
+		},
+	}}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if c := triCentroid(tri); !m.Contains(c) {
+			t.Errorf("triangle %d centroid %v outside region", i, c)
+		}
+	}
+}
+
+func TestTriangulateMultiPiece(t *testing.T) {
+	m := MultiPolygon{
+		{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
+		{Outer: Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
+	}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), m.Area(); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+}
+
+func TestTriangulateDegenerate(t *testing.T) {
+	// Fewer than three vertices, or collinear sliver: no triangles.
+	for _, m := range []MultiPolygon{
+		{{Outer: Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}},
+		{{Outer: Polygon{{X: 0, Y: 0}}}},
+		nil,
+		{{Outer: Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}}}}, // collinear → zero area
+	} {
+		if tris := Triangulate(m); len(tris) != 0 {
+			t.Errorf("Triangulate(%v) = %d triangles, want 0", m, len(tris))
+		}
+	}
+}
+
+func TestTriangulateCollinearVertices(t *testing.T) {
+	// Extra collinear vertices on the edges must not break the result; the
+	// covered area stays exact and no zero-area triangles leak out.
+	m := MultiPolygon{{Outer: Polygon{
+		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4}, {X: 0, Y: 4}, {X: 0, Y: 2},
+	}}}
+	tris := Triangulate(m)
+	if got, want := triSumArea(tris), 16.0; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("area %v, want %v", got, want)
+	}
+	for i, tri := range tris {
+		if triArea(tri) < 1e-12 {
+			t.Errorf("triangle %d is degenerate: %v", i, tri)
+		}
+	}
+}
+
+// TestTriangulateAreaOracle is the strong invariant: across many random
+// concave polygons (no holes) the summed triangle area must equal the polygon
+// area exactly. Overlaps would inflate the sum and gaps would deflate it.
+func TestTriangulateAreaOracle(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260525))
+	for iter := range 20000 {
+		ring := randomSimplePolygon(rng)
+		if ring == nil || !isSimplePolygon(ring) {
+			continue
+		}
+		m := MultiPolygon{{Outer: ring}}
+		want := m.Area()
+		if want < 1 {
+			continue
+		}
+		tris := Triangulate(m)
+		got := triSumArea(tris)
+		if math.Abs(got-want) > 1e-6*want {
+			t.Fatalf("iter %d: area %v, want %v\nring=%v", iter, got, want, ring)
+		}
+		for i, tri := range tris {
+			if orient(tri[0], tri[1], tri[2]) <= 0 {
+				t.Fatalf("iter %d: triangle %d not CCW: %v\nring=%v", iter, i, tri, ring)
+			}
+		}
+	}
+}
+
+// TestTriangulateBooleanOutput feeds real boolean-engine output through
+// Triangulate and checks area conservation, exercising the hole-bridge path on
+// engine-produced geometry. The output is normalized through Simplify first —
+// the documented pipeline — so holes are strictly interior and rings are not
+// self-touching (axis-aligned coincident edges can otherwise leave a hole
+// pinched against the outer boundary, which Simplify resolves).
+func TestTriangulateBooleanOutput(t *testing.T) {
+	rng := rand.New(rand.NewSource(424242))
+	for iter := range 2000 {
+		a := randomRectMultiPolygon(rng)
+		b := randomRectMultiPolygon(rng)
+		diff, err := Difference(a, b)
+		if err != nil || len(diff) == 0 {
+			continue
+		}
+		res, err := Simplify(diff)
+		if err != nil || len(res) == 0 {
+			continue
+		}
+		want := res.Area()
+		if want < 1 {
+			continue
+		}
+		tris := Triangulate(res)
+		got := triSumArea(tris)
+		if math.Abs(got-want) > 1e-6*math.Max(want, 1) {
+			t.Fatalf("iter %d: area %v, want %v\nres=%v", iter, got, want, res)
+		}
+		for i, tri := range tris {
+			if c := triCentroid(tri); !res.Contains(c) {
+				t.Fatalf("iter %d: triangle %d centroid %v outside region", iter, i, c)
+			}
+		}
+	}
+}
+
+// TestTriangulateHolesOracle stresses the hole-bridge path: a large outer
+// square with up to nine grid-placed rectangular holes, each strictly interior,
+// non-touching and non-overlapping (so the input meets Triangulate's
+// precondition). The summed triangle area must equal the region area.
+func TestTriangulateHolesOracle(t *testing.T) {
+	rng := rand.New(rand.NewSource(7777))
+	for iter := range 5000 {
+		ex := ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 90, Y: 0}, {X: 90, Y: 90}, {X: 0, Y: 90}}}
+		for gx := range 3 {
+			for gy := range 3 {
+				if rng.Intn(2) == 0 {
+					continue
+				}
+				ox := float64(gx*30) + 3 + rng.Float64()*4
+				oy := float64(gy*30) + 3 + rng.Float64()*4
+				w := 3 + rng.Float64()*12
+				h := 3 + rng.Float64()*12
+				// Clockwise hole (library convention).
+				ex.Holes = append(ex.Holes, Polygon{
+					{X: ox, Y: oy}, {X: ox, Y: oy + h}, {X: ox + w, Y: oy + h}, {X: ox + w, Y: oy},
+				})
+			}
+		}
+		m := MultiPolygon{ex}
+		want := m.Area()
+		tris := Triangulate(m)
+		got := triSumArea(tris)
+		if math.Abs(got-want) > 1e-6*want {
+			t.Fatalf("iter %d: area %v, want %v (%d holes)", iter, got, want, len(ex.Holes))
+		}
+		for i, tri := range tris {
+			if c := triCentroid(tri); !m.Contains(c) {
+				t.Fatalf("iter %d: triangle %d centroid %v outside region", iter, i, c)
+			}
+		}
+	}
+}
+
+// randomSimplePolygon builds a star-shaped (hence simple) polygon by sampling
+// random radii at sorted angles around a centre — a cheap way to get varied
+// concave but non-self-intersecting rings.
+func randomSimplePolygon(rng *rand.Rand) Polygon {
+	n := 3 + rng.Intn(10)
+	angles := make([]float64, n)
+	for i := range angles {
+		angles[i] = rng.Float64() * 2 * math.Pi
+	}
+	sortFloat(angles)
+	ring := make(Polygon, 0, n)
+	for i, ang := range angles {
+		if i > 0 && ang-angles[i-1] < 1e-3 {
+			continue
+		}
+		// Vertices sorted by angle around the centre (20,20) form a
+		// star-shaped, hence simple, polygon. Do not round: rounding can
+		// nudge a vertex across an edge and break simplicity.
+		r := 1 + rng.Float64()*9
+		ring = append(ring, Point{X: 20 + r*math.Cos(ang), Y: 20 + r*math.Sin(ang)})
+	}
+	if len(ring) < 3 {
+		return nil
+	}
+	return ring
+}
+
+func randomRectMultiPolygon(rng *rand.Rand) MultiPolygon {
+	x0 := float64(rng.Intn(8))
+	y0 := float64(rng.Intn(8))
+	w := float64(1 + rng.Intn(8))
+	h := float64(1 + rng.Intn(8))
+	return MultiPolygon{{Outer: Polygon{
+		{X: x0, Y: y0}, {X: x0 + w, Y: y0}, {X: x0 + w, Y: y0 + h}, {X: x0, Y: y0 + h},
+	}}}
+}
+
+// isSimplePolygon reports whether ring has no pair of non-adjacent edges that
+// properly cross — i.e. it is a simple polygon, the precondition Triangulate
+// assumes. The random star-shaped generator can violate this when the centre
+// falls outside the sampled hull.
+func isSimplePolygon(ring Polygon) bool {
+	n := len(ring)
+	if n < 3 {
+		return false
+	}
+	for i := range n {
+		a, b := ring[i], ring[(i+1)%n]
+		for j := i + 1; j < n; j++ {
+			if j == i || (j+1)%n == i || j == (i+1)%n {
+				continue // skip shared-vertex adjacent edges
+			}
+			if properlyCross(a, b, ring[j], ring[(j+1)%n]) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// properlyCross reports a transversal crossing of segments ab and cd at a point
+// interior to both (no shared endpoints, no collinear overlap).
+func properlyCross(a, b, c, d Point) bool {
+	d1 := orient(c, d, a)
+	d2 := orient(c, d, b)
+	d3 := orient(a, b, c)
+	d4 := orient(a, b, d)
+	return (d1 > 0) != (d2 > 0) && (d3 > 0) != (d4 > 0) &&
+		d1 != 0 && d2 != 0 && d3 != 0 && d4 != 0
+}
+
+func sortFloat(s []float64) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
+}

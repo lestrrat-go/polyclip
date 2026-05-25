@@ -314,7 +314,7 @@ state vs. Clipper2's planar API:
 | RectClip / RectClipLines     | done     | (f)  |
 | Path reduction (Douglas–Peucker) | done | (g)  |
 | Z-coords / vertex callback   | done     | (h)  |
-| Triangulation                | gap      | (i)  |
+| Triangulation                | done     | (i)  |
 
 Most are **additive API** over the existing sweep, the containment forest (§11.9),
 or `Union`. Z-coords is the only one that touches the engine, and only minimally
@@ -485,9 +485,23 @@ Z. Side note: adding the field is a (pre-1.0) breaking change to positional
 `zcoord_test.go`; no engine X/Y change → differential byte-identical (random 0,
 degenerate 93, holes 236, multipiece 0, idU=idD=idX=0).
 
-**(i) Triangulation.** Clipper2 ships a triangulation utility (known unreliable —
-not a usable reference). If wanted, implement standalone (monotone decomposition +
-ear-clipping). Lowest priority; arguably separate from clipping.
+**(i) Triangulation (done).** Clipper2 ships a triangulation utility, but it is
+known unreliable and was not used as a reference. `Triangulate(MultiPolygon)
+[]Triangle` is a standalone, from-scratch transcription of the ear-clipping
+algorithm with hole elimination popularized by mapbox/earcut (ISC-licensed):
+a doubly-linked-list ear clip, hole bridging via `findHoleBridge`/`splitPolygon`,
+and the full robustness ladder (`filterPoints` → `cureLocalIntersections` →
+`splitEarcut`) so weakly-simple bridged polygons triangulate correctly. The
+z-order hashing (a pure performance optimization) is omitted, leaving an O(n²)
+ear test — fine for the correctness-first priority. Output is CCW, uses only the
+input's own vertices (no Steiner points), and drops zero-area triangles. No
+engine or `clip/` change (pure additive standalone, like (a)/(e)/(f)/(g)) → the
+differential is structurally unaffected. Validated by an area-conservation
+oracle (summed triangle area == region area catches both overlap and gaps)
+across random concave polygons, random multi-hole polygons, and `Simplify`-d
+boolean output, plus a touching-hole keyhole regression. Input should be
+well-formed (the form `Simplify` produces); degenerate or self-touching geometry
+should be passed through `Simplify` first.
 
 ---
 

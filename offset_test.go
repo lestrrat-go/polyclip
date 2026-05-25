@@ -79,6 +79,27 @@ func TestOffsetSquareOutwardSquare(t *testing.T) {
 	}
 }
 
+func TestOffsetSquareOutwardBevel(t *testing.T) {
+	// 10x10 square offset outward by 2 with bevel joins: each 90° corner is
+	// cut by a straight chord between the two offset endpoints, removing a
+	// 2x2 right-triangle (area 2) from each corner of the 14x14 miter square.
+	// Area = 196 - 4*2 = 188.
+	in := MultiPolygon{ExPolygon{Outer: Polygon{
+		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
+	}}}
+	got, err := Offset(in, 2, OffsetOptions{Join: JoinBevel})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 piece, got %d: %+v", len(got), got)
+	}
+	wantArea := 188.0
+	if math.Abs(got.Area()-wantArea) > 0.5 {
+		t.Errorf("Offset(square, 2, bevel) area %v want %v", got.Area(), wantArea)
+	}
+}
+
 func TestOffsetSquareInward(t *testing.T) {
 	// 10x10 square offset INWARD by 2: 6x6 square (area 36).
 	in := MultiPolygon{ExPolygon{Outer: Polygon{

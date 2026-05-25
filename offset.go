@@ -22,6 +22,10 @@ const (
 	// JoinSquare replaces the corner with a square (45° chamfer) regardless
 	// of the corner's actual angle.
 	JoinSquare
+	// JoinBevel replaces the corner with a straight chord directly between the
+	// two adjacent offset-edge endpoints — a flat chamfer with no apex
+	// extension (unlike JoinSquare) and no miter-limit fallback.
+	JoinBevel
 )
 
 // EndType is reserved for future open-path offset support; closed
@@ -293,6 +297,9 @@ func emitVertex(out *Polygon, v, prevN, nextN Point, d float64, opts OffsetOptio
 		appendRoundJoin(out, v, a, c, d, opts.ArcTol)
 	case JoinSquare:
 		appendSquareJoin(out, v, a, c, prevN, nextN, d)
+	case JoinBevel:
+		// Straight chord between the two offset endpoints.
+		*out = append(*out, a, c)
 	default: // JoinMiter
 		appendMiter(out, v, a, c, prevN, nextN, d, opts.MiterLimit)
 	}

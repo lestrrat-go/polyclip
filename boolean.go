@@ -430,21 +430,64 @@ func canContainRing(outer, inner classifiedRing) bool {
 // (an island inside a hole is CCW yet must become a filled top-level piece;
 // an Intersect cycle can emit a sole region CW). Depth parity over this forest
 // is the only reliable signal — see DESIGN.md §11.9 / §12.10.
+//
+// This is a stabbing query: a true container's bbox must contain the query
+// ring's interior point (ringContains's first conjunct), so its X-interval
+// [Min.X, Max.X] covers the query's interior.X. Candidates are therefore the
+// rings whose Min.X <= query.X (a prefix of an order sorted by Min.X, found by
+// binary search) AND whose Max.X >= query.X. This prune is exact — it never
+// drops a real container — so it shrinks the candidate set without altering the
+// smallest-container selection (DESIGN.md §7.10). Worst case (every X-interval
+// overlaps) is still O(n²); the common disjoint slicer output collapses to
+// near-linear.
 func buildContainmentForest(rings []classifiedRing) []int {
-	parent := make([]int, len(rings))
+	n := len(rings)
+	parent := make([]int, n)
+
+	// order: ring indices sorted ascending by bbox.Min.X; minXs is the parallel
+	// Min.X array so the binary search avoids an indirection per probe.
+	// Degenerate rings stay in order — they are filtered in the scan, not here,
+	// so the prefix logic stays simple.
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool {
+		return rings[order[a]].bbox.Min.X < rings[order[b]].bbox.Min.X
+	})
+	minXs := make([]float64, n)
+	for k, idx := range order {
+		minXs[k] = rings[idx].bbox.Min.X
+	}
+
 	for i := range rings {
 		parent[i] = -1
-		if len(rings[i].poly) == 0 {
+		ri := rings[i]
+		// No interior point to stab with: ringContains would reject it as inner
+		// anyway, so it can have no container.
+		if len(ri.poly) == 0 || !ri.hasInterior {
 			continue
 		}
-		for j := range rings {
-			if i == j || len(rings[j].poly) == 0 {
+		qx := ri.interior.X
+
+		// Candidate prefix order[0:hi) holds every ring with Min.X <= qx; one
+		// with Min.X > qx cannot contain ri.interior on X. sort.Search returns
+		// the first index whose minXs > qx, i.e. the exclusive prefix end.
+		hi := sort.Search(n, func(k int) bool { return minXs[k] > qx })
+
+		for k := range hi {
+			j := order[k]
+			if j == i || len(rings[j].poly) == 0 {
 				continue
 			}
-			if !canContainRing(rings[j], rings[i]) {
+			// Complete the X-interval stab (Min.X <= qx holds by the prefix).
+			if rings[j].bbox.Max.X < qx {
 				continue
 			}
-			if !ringContains(rings[i], rings[j]) {
+			if !canContainRing(rings[j], ri) {
+				continue
+			}
+			if !ringContains(ri, rings[j]) {
 				continue
 			}
 			// Prefer the smallest container; among equal-area coincident

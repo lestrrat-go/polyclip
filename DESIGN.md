@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`).
+Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), Minkowski sum/difference, and a fast rectangle clip. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`.
 
 ---
 
@@ -303,14 +303,14 @@ state vs. Clipper2's planar API:
 | Boolean ops (∪ ∩ − ⊕)        | done     | —    |
 | Polygon offset, closed       | done     | —    |
 | Join Miter / Round / Square  | done     | —    |
-| Join Bevel                   | gap      | (a)  |
+| Join Bevel                   | done     | (a)  |
 | Fill rules incl. EvenOdd     | done     | (b)  |
 | Open-path clipping           | gap      | (c)  |
 | Open-path offset (end caps)  | gap      | (c) / §7.4 |
 | Nested `PolyTree` output     | done     | (d)  |
 | Minkowski sum / difference   | gap      | (e)  |
 | RectClip / RectClipLines     | gap      | (f)  |
-| Path reduction (Douglas–Peucker) | gap  | (g)  |
+| Path reduction (Douglas–Peucker) | done | (g)  |
 | Z-coords / vertex callback   | gap      | (h)  |
 | Triangulation                | gap      | (i)  |
 
@@ -329,9 +329,11 @@ behavior-preserving: differential byte-identical (random 0, degenerate 93,
 holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection (b) and `ExecuteTree`
 (d) have since landed; `AddOpenSubject` is reserved for step (c).
 
-**(a) Bevel join.** Add `JoinBevel` to `JoinType`; at a convex corner emit the
-straight chord between the two offset-edge endpoints (no apex) — `emitVertex`'s
-overlap fallback already produces those two points. Trivial.
+**(a) Bevel join (done).** `JoinBevel` added to `JoinType`; at a convex corner
+`emitVertex` emits the straight chord between the two offset-edge endpoints
+`a, c` (no apex, no miter-limit fallback) — a flat chamfer that cuts the corner,
+distinct from `JoinSquare`, which extends each endpoint outward by `|d|`. Tests:
+`TestOffsetSquareOutwardBevel`.
 
 **(b) Caller-selectable fill rules (done).** `clip.FillEvenOdd` added: in
 `Classify`/`isContributing` the source-boundary winding-magnitude test is skipped
@@ -396,10 +398,19 @@ independent of the sweep — validated for parity against `Intersect` with the r
 as a polygon. The point is speed on the common "clip a layer to the build plate"
 case. Medium effort, low risk.
 
-**(g) Path reduction (Douglas–Peucker).** Add `SimplifyPaths(m, epsilon)`
-(Ramer–Douglas–Peucker per ring). Distinct from `Simplify` (self-intersection
-resolution) and `Clean` (collinear/tiny removal); named to avoid the clash.
-Standalone, no engine. Trivial.
+**(g) Path reduction (done).** `SimplifyPaths(m, epsilon)` reduces each ring's
+vertex count via a faithful port of Clipper2's `SimplifyPath` (a
+Douglas–Peucker-family algorithm): every vertex's perpendicular distance to the
+line through its retained neighbours is tracked, and vertices within `epsilon`
+are removed smaller-deviation-first so collinear/near-collinear runs collapse
+cleanly; each ring is treated as closed. Matching Clipper2's iterative
+remove-by-perpendicular-distance (rather than classic recursive RDP) keeps a
+caller porting from Clipper2 byte-for-byte compatible. Distinct from `Simplify`
+(self-intersection resolution) and `Clean` (collinear/tiny removal); named to
+avoid the clash. A negative `epsilon` is treated as zero; rings with `<4`
+vertices pass through; a ring reduced below 3 vertices is dropped (and an
+`ExPolygon` whose outer ring is dropped is omitted). Standalone, no engine.
+Tests: `simplifypaths_test.go`.
 
 **(h) Z-coordinates / vertex callback.** Clipper2's compile-time `USINGZ`. Most
 invasive: rather than widen `Point` (a perf-sensitive value type), thread an

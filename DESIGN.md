@@ -519,24 +519,24 @@ not a bug — current behaviour is correct. Ordered by impact. Profiled on
 
 **Performance**
 
-1. **`buildContainmentForest` is `O(n²)` and the dominant non-sweep cost
-   (`boolean.go`).** The CPU profile puts it at ~12% of total runtime and
-   effectively *all* of `assembleResult` on the many-pieces workload. Every
-   output ring is matched against every other (`canContainRing` + `ringContains`)
-   even when the output is fully disjoint (the common slicer case: many islands,
-   no nesting), so all `n²` pairs are tested though none nest. It is a stabbing
-   query — *for each ring's interior point, which other ring bboxes contain it,
-   and of those the smallest-area `poly.Contains`*. A broad-phase fixes it
-   without touching the nesting semantics (the smallest-container selection is
-   unchanged; only the candidate set is pruned by sound bounds):
-   - low-risk: sort ring indices by `Min.X`, binary-search the X-window per
-     query, test only that window — near-linear for disjoint inputs;
-   - trivial partial win: a container must have strictly greater area
-     (`canContainRing`), so sorting by area and comparing each ring only against
-     larger ones halves the work.
-   This is the clear next step after the existing `interiorPoint` hoist into
-   `classifiedRing`. Complements §7.3 (which optimised preprocessing and crossing
-   enumeration but not the containment forest) and §7.9 item 4.
+1. **`buildContainmentForest` X-interval broad phase — DONE.** Was `O(n²)` and
+   the dominant non-sweep cost (~12% of total runtime, effectively *all* of
+   `assembleResult` on the many-pieces workload): every output ring matched
+   against every other (`canContainRing` + `ringContains`) even when the output
+   is fully disjoint (the common slicer case: many islands, no nesting). It is a
+   stabbing query — *for each ring's interior point, which other ring bboxes
+   contain it, and of those the smallest-area `poly.Contains`*. Now resolved by
+   the low-risk broad phase without touching nesting semantics: ring indices are
+   sorted by `Min.X`, each query binary-searches the `Min.X ≤ query.X` prefix and
+   filters `Max.X ≥ query.X`, then runs the unchanged `canContainRing` /
+   `ringContains` / smallest-area selection over only that window. The candidate
+   set is a sound superset (any real container's X-interval covers the query
+   point), so output is byte-identical; the differential oracle and fuzz corpus
+   confirm. `BenchmarkUnionManyPieces` −14.5% (13.7→11.7 ms); `BrickWallLarge`
+   unchanged (sweep-dominated). Worst case (every X-interval overlaps) is still
+   `O(n²)`; an interval tree would make it `O(n log n + k)` but was judged
+   unjustified at n~hundreds. Complemented the existing `interiorPoint` hoist
+   into `classifiedRing`; see §7.3 and §7.9 item 4.
 2. **Preprocessing reallocates and re-maps three times (`sweepSegments`,
    `boolean.go`).** `SplitOverlaps → SplitTJunctions → DedupCoincidentEdges` each
    allocate a fresh `[]Segment` plus maps; `ManyPieces` shows ~61k allocs/op. The

@@ -1409,14 +1409,24 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 		// region above maxPt: ae's source can have its OTHER bound still in the AEL
 		// at this scanline (it tops out here too, at a different X/event), so
 		// coupled's WindOther still counts that source as present and contribAbove
-		// is a false positive. For Intersect the ring only continues above maxPt if
-		// the other source actually FILLS there — test its winding counting only
-		// edges that span STRICTLY above the scanline. If absent, the coincident
-		// edge is the top of the intersection region and the ring must close
-		// (DESIGN.md §7.6).
-		if contribAbove && s.op == OpIntersect && coupled.Seg.Horizontal() &&
-			s.otherSourceWindingAbove(coupled, maxPt) == 0 {
-			contribAbove = false
+		// is a false positive. Recompute it from the winding STRICTLY above the
+		// scanline: coupled's own source continues (it is the live bound), and the
+		// other source is present above iff [otherSourceWindingAbove] is nonzero.
+		// coupled bounds output above iff the op-membership differs across it
+		// (its source toggling, the other source fixed) — if not, the coincident
+		// edge is the top of the op region and the ring must close (DESIGN.md §7.6).
+		if contribAbove && coupled.Seg.Horizontal() {
+			o := 0
+			if s.otherSourceWindingAbove(coupled, maxPt) != 0 {
+				o = 1
+			}
+			var mIn, mOut bool
+			if coupled.Seg.Src == Subject {
+				mIn, mOut = opMember(1, o, s.op), opMember(0, o, s.op)
+			} else {
+				mIn, mOut = opMember(o, 1, s.op), opMember(o, 0, s.op)
+			}
+			contribAbove = mIn != mOut
 		}
 		coupled.WindSelf, coupled.WindOther, coupled.Contributing = savedWS, savedWO, savedC
 		if !contribAbove {
@@ -1976,6 +1986,23 @@ func (s *sweep) resolveBetweenMaxima(ae, partner *ActiveEdge, maxPt fixed.Point)
 		}
 		IntersectEdges(s.ael, s.op, ae, between, maxPt)
 	}
+}
+
+// opMember reports whether a region with the given subject/clip winding counts
+// is inside op's output under the non-zero fill rule (present == winding ≠ 0).
+func opMember(subj, clip int, op Operation) bool {
+	sp, cp := subj != 0, clip != 0
+	switch op {
+	case OpUnion:
+		return sp || cp
+	case OpIntersect:
+		return sp && cp
+	case OpDifference:
+		return sp && !cp
+	case OpXor:
+		return sp != cp
+	}
+	return false
 }
 
 // otherSourceWindingAbove returns the winding of the source OTHER than e's, at

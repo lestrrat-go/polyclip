@@ -287,10 +287,11 @@ func (s *sweep) run() {
 		}
 		// End of this scanline's horizontal processing: pair overlapping
 		// opposite-direction horizontal runs into deferred joins, then clear
-		// the trial list (Clipper2 ExecuteInternal, engine.cpp:2132). Xor does
-		// not use the horz-join pass (its coincident horizontals are resolved by
-		// the standard maximum handling).
-		if s.op != OpXor && len(s.horzSegList) > 0 {
+		// the trial list (Clipper2 ExecuteInternal, engine.cpp:2132). Xor uses
+		// this pass too: a coincident cross-source horizontal overlap must
+		// reconnect its two runs the same way U/I/D do (the standard maximum
+		// handling alone over-traces it — DESIGN.md §7.6 raw-Xor residual).
+		if len(s.horzSegList) > 0 {
 			s.convertHorzSegsToJoins()
 		}
 		prevY = y
@@ -298,9 +299,7 @@ func (s *sweep) run() {
 	}
 	// Splice every deferred horizontal join now that the global ring topology
 	// is settled (Clipper2 ExecuteInternal's final ProcessHorzJoins, eng:2143).
-	if s.op != OpXor {
-		s.processHorzJoins()
-	}
+	s.processHorzJoins()
 }
 
 // doIntersections resolves every edge crossing strictly inside the scanbeam
@@ -2316,7 +2315,7 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 		//
 		// Register the near endpoint as a trial horizontal-join anchor
 		// (Clipper2 DoHorizontal's leading AddTrialHorzJoin, engine.cpp:2567).
-		if s.op != OpXor && horz.IsHotEdge() {
+		if horz.IsHotEdge() {
 			s.addTrialHorzJoin(getLastOp(horz))
 		}
 
@@ -2354,7 +2353,7 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 			// The op IntersectEdges just emitted for the horizontal is a trial
 			// join anchor (Clipper2 AddTrialHorzJoin(GetLastOp(horz)),
 			// engine.cpp:2657). horz may have gone cold (its ring closed), so guard.
-			if s.op != OpXor && horz.IsHotEdge() {
+			if horz.IsHotEdge() {
 				s.addTrialHorzJoin(getLastOp(horz))
 			}
 		}
@@ -2371,9 +2370,7 @@ func (s *sweep) doHorizontal(horz *ActiveEdge, y fixed.Coord) {
 			op := AddOutPt(horz, fixed.Point{X: farX, Y: y})
 			// Far endpoint of an intermediate horizontal is a trial join anchor
 			// (Clipper2 DoHorizontal's intermediate AddTrialHorzJoin, eng:2691).
-			if s.op != OpXor {
-				s.addTrialHorzJoin(op)
-			}
+			s.addTrialHorzJoin(op)
 		}
 		delete(s.bySeg, horz.Seg)
 		horz.EdgeIdx++

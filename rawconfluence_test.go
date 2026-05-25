@@ -79,13 +79,13 @@ func countRawIdFails() (int, int, int, int) {
 // The raw (unmasked) sweep still over-traces a residual class of coincident
 // cross-source confluences (§7.6/§7.7); the public ops mask it (subset filter,
 // Xor composition). This ratchets the residual so the rework can only shrink it.
-// Current residual: 7 direct-OpXor cases. The Intersect-over-count cluster (a
-// spurious lobe in A∩B surfacing as U/D identity breaks because want = f(I))
-// was closed by the confluence force-close rule (terminating contributing edge
-// + hole-aware membership). Lower the bound as the rework progresses; never
-// raise it.
+// Current residual: 6 direct-OpXor cases. The Intersect-over-count cluster was
+// closed by the confluence force-close rule (terminating contributing edge +
+// hole-aware membership); one further Xor case closed by enabling the
+// horizontal-join reconnection pass for Xor. Lower the bound as the rework
+// progresses; never raise it.
 func TestRawInSweepIdFailRatchet(t *testing.T) {
-	const ratchet = 7
+	const ratchet = 6
 	tot, nU, nD, nX := countRawIdFails()
 	t.Logf("raw in-sweep idfails: total=%d U=%d D=%d X=%d (ratchet=%d)", tot, nU, nD, nX, ratchet)
 	if tot > ratchet {
@@ -111,5 +111,26 @@ func TestRawIntersectOuterCornerCloses(t *testing.T) {
 	}
 	if want := 5.0; abs(got.Area()-want) > 1e-6 {
 		t.Errorf("raw Intersect area = %v, want %v (spurious lobe not closed)", got.Area(), want)
+	}
+}
+
+// TestRawXorCoincidentReconnect guards the §7.6 raw-Xor horizontal-join fix.
+// A and B share several collinear boundary edges; the direct OpXor sweep used
+// to over-trace the coincident horizontal overlaps (standard maximum handling
+// alone), inflating the symmetric difference. Enabling the horz-join
+// reconnection pass for Xor (as U/I/D use) closes them. True Xor = U−I = 5.
+func TestRawXorCoincidentReconnect(t *testing.T) {
+	a := MultiPolygon{ExPolygon{Outer: []Point{
+		{0, 0}, {5, 0}, {5, 3}, {4, 3}, {4, 1}, {3, 1}, {3, 5}, {2, 5}, {2, 1}, {1, 1}, {1, 5}, {0, 5},
+	}}}
+	b := MultiPolygon{ExPolygon{Outer: []Point{
+		{0, 0}, {5, 0}, {5, 5}, {4, 5}, {4, 2}, {3, 2}, {3, 5}, {2, 5}, {2, 3}, {1, 3}, {1, 5}, {0, 5},
+	}}}
+	got, err := rawOp(a, b, clip.OpXor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := 5.0; abs(got.Area()-want) > 1e-6 {
+		t.Errorf("raw Xor area = %v, want %v (coincident horizontals over-traced)", got.Area(), want)
 	}
 }

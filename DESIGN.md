@@ -22,7 +22,7 @@ The downstream consumer is [`lestrrat-go/makislicer`](../makislicer), a 3D-print
 
 **Goals:** correctness on adversarial input (concentric circles, self-touching polygons, collinear/coincident edges, near-degenerate slivers); pure Go (no cgo); closed (`MultiPolygon` in, `MultiPolygon` out); idiomatic small API; acceptable performance (within 5–10× of Clipper2 on slicer workloads).
 
-**Non-goals:** 3D, general CSG/NURBS/arcs, triangulation, open-polyline offset, geometric predicates as a public API, cgo bindings to Clipper2.
+**Non-goals:** 3D, curved geometry (NURBS / true arcs — arcs are polyline-approximated), cgo bindings to Clipper2. Everything Clipper2 does on planar polygons is in scope; the remaining parity gaps and their plans are tracked in §7.8.
 
 ---
 
@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Deliberately out of scope: open polylines, path-to-polygon clipping, standalone geometric predicates, a streaming API.
+Not yet implemented — planned for Clipper2 parity (§7.8): caller-selectable fill rules, open polylines (clipping and offset), a nested `PolyTree` output, Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction.
 
 ---
 
@@ -176,270 +176,204 @@ roughly in priority order.
 
 ### 7.1 Offset: inward-offset topology changes
 
-`Offset` re-resolves topology changes via a per-piece positive-fill self-union
-(§4.3). A dumbbell offset inward past its neck yields the two island pads; a
-U-shape / notch that closes resolves to the correct connected shape; an
-over-shrunk convex ring collapses to empty. Covered by `TestOffsetDumbbellSplits`
-(eight orientations), `TestOffsetUNotchCloses`, and `TestOffsetInwardErosionOracle`
-(a Monte-Carlo erosion oracle over random concave polygons).
-
-Robustness leans on a multi-frame (rotated) majority vote because the boolean
-sweep mis-resolves *snapped* same-source collinear coincident edges (common in
-axis-aligned and thin-neck inward offsets) — the in-sweep gap detailed in §7.2.
-The vote costs ≈8 sweeps per topology-changing piece; non-topology-change
-offsets keep the exact `O(n)` fast path.
+`Offset` re-resolves inward topology changes — a neck pinched into two islands, a
+notch that closes, an over-shrunk ring that collapses to empty — via the per-piece
+positive-fill self-union of §4.3, made robust by a rotated majority vote. The vote
+is needed because the sweep mis-resolves *snapped* same-source coincident edges
+(§7.2); it costs ≈8 sweeps per topology-changing piece, while non-topology-change
+offsets keep the exact `O(n)` fast path. Covered by `TestOffsetDumbbellSplits`,
+`TestOffsetUNotchCloses`, and `TestOffsetInwardErosionOracle` (a Monte-Carlo
+erosion oracle).
 
 ### 7.2 Public `Simplify` and the in-sweep coincident-edge limit
 
-`Simplify(m MultiPolygon)` (`boolean.go`) runs the Vatti engine over `m` as a
-single source (`clip.Sweep`, non-zero fill), bypassing the `mpolyEqual`
-idempotency short-circuit. A figure-eight splits into its two oppositely-wound
+`Simplify(m)` (`boolean.go`) runs the engine over `m` as a single source
+(NonZero) to make rings simple: a figure-eight splits into its two oppositely-wound
 loops, a doubly-traced ring collapses to one, a doubled-back spur cancels.
-Transversal (general-position) self-intersections resolve exactly; the snapped
-collinear degeneracy below is the residual limit. The doc comments in
-`polygon.go` (`ExPolygon`, `Clean`) and `validate.go` (`IssueSelfIntersecting`)
-point at `Simplify`. Tests: `simplify_test.go`.
+General-position self-intersections resolve exactly. Tests: `simplify_test.go`.
 
-**In-sweep same-source coincident edges (the residual limit).** The boolean
-sweep mis-resolves a *single* self-overlapping ring with same-source collinear
-coincident edges (axis-aligned and thin-neck inward offsets produce them; it is
-why §7.1's offset self-union needs the rotated majority vote). The minimal case
-is the dumbbell offset by `-2`: its raw offset ring traces the left-pad right
-wall twice over `y∈[4,6]`, so `SplitOverlaps` makes a doubled coincident edge
-there. The problem resolves into three coupled layers:
-
-- **L1 — winding core.** Under `FillPositive`/`FillNegative`, `Classify` computes
-  `WindSelf` as a pure signed prefix sum of same-source `WindDx` (the NonZero
-  "reversing direction" heuristic wrongly holds `WindSelf` at magnitude 1 across
-  a doubled wall instead of stepping `+1 → 0 → −1`); the contributing test is the
-  boundary form `(WindSelf>0) != (WindSelf−WindDx>0)`; and the `poly_ops.go`
-  incremental update is a pure `+=`/`−=` (no NonZero reflection). All gated on the
-  fill rule so the boolean (NonZero) path is untouched.
-- **L2 — bound reconstruction.** `BuildLocalMinima`'s segment-soup walker
-  (`traceRing` via input-direction adjacency) cannot disambiguate the *collinear
-  degree-4 vertices* the doubled wall creates after `SplitOverlaps` (two identical
-  out-edges at one vertex, indistinguishable by angle), so it traces spurious
-  sub-cycles. `SweepRingsFill` / `splitOrderedRings` (`clip/sweep_ordered.go`)
-  instead build local minima from the ring in *traversal order* (Clipper2-style),
-  so the two wall passes occupy distinct sequence positions.
-- **L3 — exact-coincidence ambiguity (fundamental).** Two parts. (a) A local-min
-  bound that *leads with a horizontal* is ordered in the AEL at the horizontal's
-  near X, so the prefix sum runs before the bound's real wall is placed; resolved
-  by ordering the prefix sum by each bound's position just **above** the scanline
-  (the far end of a leading horizontal). (b) The residual is fundamental: two
-  **exactly coincident** ascending walls over a Y-range (the dumbbell's `x=22`
-  over `y∈[4,6]`) are geometrically indistinguishable at the local-min scanline.
-  Being parallel they *never cross*, so no event ever orders them, and the winding
-  prefix cannot tell which carries the `0` sliver vs the `+1` boundary; a topology
-  look-ahead to where they diverge is itself degenerate because they diverge
-  through horizontals at the same `Y`.
-
-The standard computational-geometry resolution for such exact degeneracies is
-**perturbation** — and the multi-frame rotation vote (§7.1) *is* perturbation
-that breaks the coincidence so a clean transversal sweep resolves it. The vote is
-therefore the **correct design** for the exact-coincidence residual, not a
-stopgap, until/unless the engine gains principled symbolic perturbation
-(Simulation-of-Simplicity style) letting a single sweep break ties
-deterministically. `Offset` runs its self-union on the ordered-minima engine
-(`SweepRingsFill`) plus the rotation vote; under `AEL.Ordered` the edge
-eligibility guards in `IntersectEdges` (`branchNeitherHot` and the dispatch
-guard) key on the `Contributing` (winding-`>0` boundary) flag rather than
-`absInt(WindSelf) == 1`, so a positive-fill boundary whose `WindSelf` is `0`
-(the doubled-wall sliver) is not dropped and general-position self-intersections
-resolve in a single sweep. All gated on `AEL.Ordered`, so the boolean
-(`FillNonZero`) path is untouched. See `docs/offset-coincidence-perturbation.md`.
+**Known limit — exactly coincident same-source walls.** A single ring with
+same-source collinear *coincident* walls (axis-aligned and thin-neck inward
+offsets produce them — the dumbbell offset by `-2` traces one wall twice) is
+ambiguous to a single sweep: two parallel coincident walls never cross, so no
+event orders them and the winding prefix cannot tell the zero-width sliver from
+the boundary. The robust resolution for such exact degeneracies is *perturbation*,
+and the offset self-union's rotated majority vote (§7.1) is exactly that — so the
+vote is the intended design here, not a stopgap, barring a future symbolic-
+perturbation (Simulation-of-Simplicity) scheme that breaks ties in one sweep. The
+offset path runs its self-union on the ordered-minima engine
+(`clip/sweep_ordered.go SweepRingsFill`, which builds minima in traversal order so
+the two wall passes occupy distinct positions); under `AEL.Ordered` the dispatch
+keys on the `Contributing` boundary flag so a positive-fill `WindSelf==0` sliver
+is not dropped. All gated on fill rule / `AEL.Ordered`, so the boolean NonZero path
+is untouched. See `docs/offset-coincidence-perturbation.md`.
 
 ### 7.3 Performance
 
-Benchmarked on representative slicer geometry (`perfbench_test.go`: disjoint
-contours, big circles, staggered brick walls, meshing gears). The bottleneck
-depends on the input shape:
+Benchmarked on slicer-representative geometry (`perfbench_test.go`: disjoint
+contours, big circles, brick walls, meshing gears). Two hotspots were removed,
+both differential-neutral:
 
-- **Sparse / disjoint / axis-aligned inputs** (the common slicer-layer case)
-  were dominated — ~95% of CPU — by the `O(n²)` preprocessing pair scans, NOT
-  by the scanbeam. `SplitOverlaps` and `SplitTJunctions` now resolve in a
-  single batch pass each: `SplitOverlaps` buckets segments by their exact
-  (128-bit) supporting line and splits within a line bucket; `SplitTJunctions`
-  cuts each segment at the interior vertices found through an X-sorted vertex
-  index. This dropped those benchmarks 24–89× (e.g. a 24×24 brick wall union
-  178 ms → 2 ms) with no change to the differential oracle.
-- **Dense mutually-intersecting inputs** (meshing gears) were then dominated
-  (~87% of CPU) by `buildIntersectList`, the per-scanbeam crossing enumeration
-  (§4.4). It is now a merge-sort inversion counter (à la Clipper2
-  `BuildIntersectList`): a proper crossing in the beam swaps the two edges'
-  X-order between the beam bottom and top, so the crossing pairs are the
-  inversions between the bottom and top orderings, enumerated in
-  `O(n log n + k)` instead of testing all `O(n²)` pairs. This cut the gears
-  benchmarks ~3.8× (union 75 ms → 20 ms) with no change to the differential.
+- Preprocessing (`SplitOverlaps`/`SplitTJunctions`) runs in a single batch pass
+  each — bucket by exact supporting line, and cut each segment at interior
+  vertices via an X-sorted vertex index — instead of `O(n²)` pair scans. This
+  dominated sparse/disjoint/axis-aligned inputs (the common slicer-layer case).
+- Per-scanbeam crossing enumeration (`buildIntersectList`) is a merge-sort
+  inversion counter (`O(n log n + k)`): a beam crossing inverts the pair's
+  X-order between beam bottom and top, so crossings are the inversions between
+  the two orderings. Edge ordering uses exact 128-bit rational X-intercept
+  comparison (`fixed.CmpRationals`), **not** float `XAtY` — at the grid extremes
+  a float intercept carries enough rounding error to mis-order and drop a
+  crossing. This dominated dense mutually-intersecting inputs (meshing gears).
 
-  Edge ordering uses exact 128-bit rational X-intercept comparison
-  (`fixed.CmpRationals`, via `clip.cmpXAtY`), **not** the float `XAtY`: at the
-  ±`MaxCoordMagnitude` grid a float intercept carries hundreds of units of
-  rounding error, enough to mis-order a crossing on a scanline and drop it.
-  Two boundary cases are added back as candidates so the node set matches the
-  exact full scan: edges concurrent at the beam bottom (no defined order there)
-  and AEL-adjacent pairs (nearly-parallel edges whose true crossing lies just
-  outside the beam but whose float crossing point — still used for the beam
-  test, matching the old behaviour — rounds inside). Validated by a full-scan
-  cross-check assertion run over the entire differential corpus.
-
-The "within 5–10× of Clipper2" goal (§1) is still not measured against
-Clipper2 directly (the differential oracle is Monte-Carlo, not Clipper2).
+The "within 5–10× of Clipper2" goal (§1) is not yet measured against Clipper2
+directly (the oracle is Monte-Carlo, not Clipper2).
 
 ### 7.4 Open-path offset (`EndType`)
 
 `EndType` is a reserved stub; only `EndPolygon` is implemented. Slicers want
-open-polyline offset for thin-wall / gap-fill / single-extrusion features.
-Currently a §1 non-goal — listed here so the scope decision is explicit and
-revisitable.
+open-polyline offset (thin-wall / gap-fill / single-extrusion features) with end
+caps. Formerly a non-goal; now planned for Clipper2 parity — design in §7.8(c).
 
 ### 7.5 Reachable `ErrHorizontalNotSupported`
 
-The legacy per-edge fallback can still return `ErrHorizontalNotSupported` on
-shared-vertex inputs where `BuildLocalMinima` fails (§12.10.7, `boolean.go`).
-Axis-aligned features are common in printed parts, so callers must handle the
-error path.
-
-**Reachability — MEASURED, the fallback IS heavily reachable (do NOT retire it
-as-is).** `TestHorizontalFallbackReachability` runs ~78k boolean ops over
-random axis-aligned *skyline* polygons (dense in mid-bound horizontals) whose
-overlap creates shared vertices: ~9.1k fall back (`BuildLocalMinima` returns
-`ErrOpenRing` — "chain revisits … before closing the ring") and ~8.9k of those
-then surface `ErrHorizontalNotSupported`. So the bound model does **not** yet
-cover shared-vertex axis-aligned inputs: after preprocessing creates a degree-4
-collinear vertex, `BuildLocalMinima`'s segment-soup `traceRing` can't
-disambiguate the ring, and the legacy `ClassifyHorizontals` then rejects the
-staircase (mid-bound) horizontals those polygons contain. Retiring the fallback
-requires making minima reconstruction robust to shared vertices — the same L2
-ordered-ring reconstruction (`clip/sweep_ordered.go SweepRingsFill`,
-`splitOrderedRings`) built for §7.2, wired into the boolean path. That is the
-real §7.5 fix and is left for a future increment; until then the error path
-stands and is documented.
+The legacy per-edge fallback can return `ErrHorizontalNotSupported` when
+`BuildLocalMinima` fails on a shared-vertex axis-aligned input: preprocessing
+creates a degree-4 collinear vertex its segment-soup `traceRing` can't
+disambiguate, after which the legacy `ClassifyHorizontals` rejects the staircase
+(mid-bound) horizontals. `TestHorizontalFallbackReachability` shows this is
+readily reachable on overlapping skyline polygons, so callers must handle the
+error. The fix is to wire the ordered-ring reconstruction (`SweepRingsFill` /
+`splitOrderedRings`, built for §7.2) into the boolean path so minima
+reconstruction is robust to shared vertices; deferred. Until then the error path
+stands.
 
 ### 7.6 Axis-aligned identity violations (collinear shared edge)
 
-Distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds, on inputs the
-bound model handles). A class of algebraic-identity violations on axis-aligned
-pairs sharing collinear boundary segments, dominated by a **coincident
-cross-source vertical wall** (one polygon's wall lies exactly on the other's,
-overlapping in Y). `TestHorizontalFallbackReachability` asserts zero such
-violations over ~78k ops, and `TestHorizIdentityRepro` covers the minimal case.
-Five fixes resolve them, in two layers — sweep-level resolution of the coincident
-confluences, and a result-level subset invariant for the residue:
+Distinct from §7.5 (this surfaces *after* the fallback succeeds, on inputs the
+bound model handles). Axis-aligned pairs sharing a collinear boundary — dominated
+by a **coincident cross-source vertical wall** (one polygon's wall lies exactly on
+the other's, overlapping in Y) — once produced algebraic-identity violations: a
+spurious half-area lobe, or a whole-region miscount. They are resolved;
+`TestHorizontalFallbackReachability` asserts zero violations and
+`TestHorizIdentityRepro` covers the minimal case. The resolution is two-layered:
 
-1. **Intersect spurious-lobe at an outer-max coincident-horizontal apex**
-   (`clip/sweep.go`). The shared segment is one source's outer local maximum (its
-   two bounds meet there and it is absent above), so the intersection ring should
-   close along that edge. When the coupled edge reaches the apex along a coincident
-   horizontal, `closeBound` decides "continues above" with `otherSourceWindingAbove`
-   — a winding probe at the apex column counting only edges that span **strictly
-   above** the scanline, so a same-Y local maximum of the other source does not
-   register as present and the ring closes. Scoped to `OpIntersect`.
-2. **Coincident AEL edge ordering by divergence** (`aelLess` / `coincidentDivergeLess`,
-   `clip/ael.go`). Two exactly-coincident edges tie on both CurrX and slope, so a
-   static order is arbitrary and decides each wall's `WindOther` (hence which
-   contributes) — wrongly, because the correct order is context-dependent. The
-   geometrically correct order is where the two bounds first *diverge* just above
-   the scanline (Clipper2's collinear-edge handling): look ahead along both
-   bounds' upward vertex paths to the first differing vertex and order by which
-   ray runs left (128-bit cross product — the 2^60 grid overflows int64). A bound
-   that tops out at the divergence contributes a synthetic turn vertex from its
-   `WindDx` (interior side).
-3. **`closeBound` cross-source self-closure by above-membership** — decides
-   "ring continues above the coincident apex" from the winding STRICTLY ABOVE the
-   scanline (all ops, via `opMember`), closing at the seam via `AddLocalMaxPoly`
-   when no output resumes above (the Intersect/Difference apex cases).
-4. **Emit apex when a hot maxima edge has a cold same-source partner** — a concave
-   notch's wall topping out where the source's flat top resumes; emit the apex so
-   the vertex is kept (and, for Difference, also when the clip-cut coupled edge has
-   already closed). Drops the diagonal-cut-notch-apex class.
-5. **Subset-invariant filter (result level, `runBooleanOp`)** — the sweep can still
-   over-trace a cross-source bound past where it EXITS the op-region (a maxing bound
-   does not update an exiting neighbour's winding without a crossing event), emitting
-   an entirely-spurious *hole-free* piece OUTSIDE the result's superset. Difference
-   ⊆ A and Intersect ⊆ A∩B, so a hole-free piece whose interior point violates that
-   is dropped (point-in-polygon; never drops a valid piece). Catches the remaining
-   Difference/Union spurious fragments.
+- **Sweep level.** Two exactly-coincident AEL edges tie on CurrX and slope, so
+  they are ordered by where their bounds first *diverge* just above the scanline
+  (`coincidentDivergeLess`, 128-bit cross product), not an arbitrary slope tie —
+  this fixes which wall carries `WindOther` and hence contributes. At a coincident
+  apex, `closeBound` decides whether a ring continues above from the winding
+  *strictly above* the scanline (`opMember` / `otherSourceWindingAbove`), closing
+  at the seam via `AddLocalMaxPoly` when nothing resumes; a hot maxima edge with a
+  cold same-source partner emits its apex so the vertex is kept.
+- **Result level.** A `runBooleanOp` subset-invariant filter drops a hole-free
+  piece whose interior point violates `Difference ⊆ A` / `Intersect ⊆ A∩B`
+  (point-in-polygon) — catching any residual over-trace where a maxing bound fails
+  to update an exiting neighbour's winding. Never drops a valid piece.
 
-**Xor** is computed by composition — `Difference(Union(a,b), Intersect(a,b))` —
-rather than the direct `OpXor` sweep, which mis-resolves a residual class of these
-confluences that U/I/D handle correctly. The symmetric difference is exact. The
-direct `OpXor` sweep and the sweep-level over-trace at clip-exits-subject
-crossings remain latent (masked by composition + the subset filter); a future
-per-segment winding model at confluences would let `OpXor` and the filtered
-Difference cases resolve in-sweep.
+**Xor** is computed by composition `Difference(Union(a,b), Intersect(a,b))`; the
+direct `OpXor` sweep mis-resolves a residual confluence class that U/I/D handle
+correctly, so the public API does not use it. Retiring these masks — letting
+`OpXor` and the filtered cases resolve in-sweep via a per-segment winding model at
+confluences — is future work, tracked by `rawconfluence_test.go`
+(`TestRawInSweepIdFailRatchet` ratchets the unmasked violation count downward).
 
-**In-sweep rework (retiring the masks).** The public ops are correct, but the
-masks hide a residual in-sweep over-trace. `rawconfluence_test.go` measures it
-directly — `rawOp` runs the pipeline with NO masking, and
-`TestRawInSweepIdFailRatchet` ratchets the unmasked identity-violation count so
-the rework can only shrink it. Two confluence handlers in `dispatchIntersect`
-drive it down without touching the masked public path:
+### 7.7 Multipiece-subject Difference
 
-- The opposite-side coincident-horizontal SKIP (defer to `processHorzJoins`)
-  fires only when at least one edge is `Contributing` — when both are
-  non-contributing the shared edge bounds no output region, so the pair closes
-  at the seam instead (the §7.6 both-OUT seam).
-- `confluenceForcesClose` further blocks the skip when a bound that TERMINATES
-  at the overlap (`IsBoundLast`) is itself a `Contributing` output boundary AND
-  the region is not interior on both sides (`coincidentMembership`, a hole-aware
-  signed-winding probe). Such an edge is a genuine output-boundary maximum that
-  must close its ring — the Intersect/Difference outer-corner case where a
-  source's contributing top maxes while the other's wall continues up, which
-  otherwise over-traces into a spurious lobe. The membership carve-out keeps a
-  subject hole-top coincident with a continuing clip edge deferring (its
-  terminating edge is non-contributing), so holed inputs stay byte-identical.
+A multipiece subject (one source contributing several disjoint rings) hit the same
+coincident cross-source over-trace as §7.6, but with a second piece present the
+spurious trace merges with a valid ring, so the §7.6 subset filter cannot drop it.
+`Difference` therefore differences a multipiece subject **per piece** —
+`(∪ᵢ Pᵢ) ∖ B = ∪ᵢ (Pᵢ ∖ B)`, exact since a valid `MultiPolygon`'s pieces are
+disjoint (results disjoint, union is plain concatenation). Each `Pᵢ ∖ B` runs the
+clean single-subject path, where the over-trace becomes a stray hole-free lobe the
+subset filter drops; pieces clear of `B` short-circuit on bbox. The differential
+`multipiece` scenario is the regression gate. (`Intersect`/`Union`/`Xor` on
+multipiece subjects were already clean. The in-sweep resolution that would let one
+pass difference a multipiece subject is the same deferred rework as §7.6.)
 
-Residual: 7 direct-`OpXor` cases (`TestRawInSweepIdFailRatchet`).
+### 7.8 Clipper2 feature parity
 
-### 7.7 Multipiece-subject Difference over-trace (DONE)
+Goal: nothing Clipper2 does on planar polygons should be missing here. Current
+state vs. Clipper2's planar API:
 
-The §7.6 work drove identity violations to zero on inputs where each source is a
-SINGLE ring (the skyline reachability corpus and the differential, both of which
-only ever generated single-piece `A` and `B`). A routine slicer input it never
-exercised is a **multipiece** `MultiPolygon` — one source contributing several
-disjoint rings. The differential now covers it (the `multipiece` scenario: `A` is
-two vertically-stacked disjoint axis-aligned rectangles, `B` carves the lower one
-along a shared collinear top edge), and it surfaces a **Difference-only**
-violation class (`idD` ≈ 4% of interacting multipiece pairs; `U`/`I`/`X` clean).
+| Clipper2 feature             | polyclip | Plan |
+|------------------------------|----------|------|
+| Boolean ops (∪ ∩ − ⊕)        | done     | —    |
+| Polygon offset, closed       | done     | —    |
+| Join Miter / Round / Square  | done     | —    |
+| Join Bevel                   | gap      | (a)  |
+| Fill rules incl. EvenOdd     | gap      | (b)  |
+| Open-path clipping           | gap      | (c)  |
+| Open-path offset (end caps)  | gap      | (c) / §7.4 |
+| Nested `PolyTree` output     | gap      | (d)  |
+| Minkowski sum / difference   | gap      | (e)  |
+| RectClip / RectClipLines     | gap      | (f)  |
+| Path reduction (Douglas–Peucker) | gap  | (g)  |
+| Z-coords / vertex callback   | gap      | (h)  |
+| Triangulation                | gap      | (i)  |
 
-Minimal repro: `A = {[0,2]×[0,2]} ∪ {[0,3]×[3,5]}` (two Subject rings, a clear
-y-gap between them), `B = [1,2]×[−1,2]`. `Difference` should give the lower
-piece carved to `[0,1]×[0,2]` (area 2) plus the upper piece unchanged (area 6),
-total 8; instead it returns ≈5.5, mis-tracing the UPPER piece into a tangled ring
-`[(2,2)(1,5)(0,5)(0,3)(1,3)(1,2)]` with a spurious diagonal `(2,2)→(1,5)`.
+Most are **additive API** over the existing sweep, the containment forest (§11.9),
+or `Union` — only open-path *clipping* and Z-coords touch the engine.
 
-Root cause: at `(2,2)` the lower piece's right wall (Subject) and `B`'s right wall
-(Clip) are **coincident cross-source vertical walls both topping out** — exactly
-the §7.6 C-class confluence. The sweep over-traces a bound past where it exits the
-op-region (a maxing bound does not update an exiting neighbour's winding without a
-crossing event), so a spurious ring spawns at the confluence and, finding the
-upper piece's bounds next in the AEL, threads itself INTO the upper piece across
-the empty gap. For SINGLE-piece inputs this same over-trace produced a
-cleanly-spurious lobe that the **result-level subset filter** (§7.6 fix 5)
-dropped; with a second piece present the spurious trace MERGES with a valid ring,
-so the filter cannot drop it (the tangled ring contains real area) and the
-violation is unmaskable. This is therefore the SAME deferred sweep-level
-over-trace as §7.6 — the subset filter was a result-level shortcut, not an
-in-sweep resolution.
+**(a) Bevel join.** Add `JoinBevel` to `JoinType`; at a convex corner emit the
+straight chord between the two offset-edge endpoints (no apex) — `emitVertex`'s
+overlap fallback already produces those two points. Trivial.
 
-Fix: a multipiece subject is differenced **per piece** rather than in one sweep —
-`(∪ᵢ Pᵢ) ∖ B = ∪ᵢ (Pᵢ ∖ B)`, an exact set-algebra identity since a valid
-`MultiPolygon`'s pieces are disjoint (so the per-piece results are disjoint and
-the union is plain concatenation, no merge). Each `Pᵢ ∖ B` then runs on the
-single-subject sweep path the rest of §7 proved clean: the lower-confluence
-over-trace again spawns a *stray* hole-free lobe with no second piece to merge
-into, which the existing subset filter (§7.6 fix 5) drops. Pieces clear of `B`
-short-circuit on bbox, so the common slicer case stays cheap. This is the same
-philosophy as the subset filter and Xor-by-composition — exploit a set-algebra
-identity to route around the sweep's coincident-cross-source limitation — but
-exact, with no risk of dropping valid output. (The in-sweep
-per-segment-winding-at-confluence resolution would let the engine difference a
-multipiece subject in one pass; it remains the deferred deep rework, but is no
-longer reachable via `Difference`. Post-hoc ring surgery on the merged tangle is a
-known dead end — DESIGN §7.6 history.) The differential `multipiece` scenario
-(idD 2259→0, gross fails 4531→0) is the regression gate; `Intersect`/`Union`/`Xor`
-on multipiece subjects were already clean and are unchanged.
+**(b) Caller-selectable fill rules.** `clip.FillRule` already has NonZero /
+Positive / Negative; add `FillEvenOdd` (boundary test becomes a crossing-parity
+flip). Expose a root-package `FillRule` and accept it via an options overload
+(e.g. `UnionWith(a, b, opts)`), defaulting to NonZero so current signatures and
+output are unchanged. Additive, gated on the rule. Low effort/risk.
+
+**(c) Open paths — clipping and offset.** The largest gap; reverses the former
+§1/§3/§7.4 non-goal. Open paths are subjects only (a clip region must be closed).
+- *Type:* `Polyline []Point` alongside `Polygon`; a result carries both a closed
+  `MultiPolygon` and `[]Polyline`.
+- *Clipping:* an open edge is tagged `open` — it participates in crossing
+  detection (so it splits at every boundary crossing) but does **not** contribute
+  to ring winding. After the sweep each open sub-segment is kept or dropped by
+  sampling the closed operands' membership at its midpoint under the op, then
+  survivors are stitched into open chains. Engine work is a per-edge `open` flag
+  plus a separate open-output collector; the closed-ring machinery is untouched.
+- *Offset (§7.4):* offset a polyline into a closed ribbon — its two offset sides
+  joined by end caps (`EndType` Butt / Square / Round / Joined) — then the existing
+  positive-fill self-union (§4.3) resolves overlaps. Reuses the join emitters; adds
+  end-cap emission, and is independent of open-path clipping so it can land first.
+Phase: ribbon offset first, then clipping. Medium–high effort; only the clipping
+half touches the sweep.
+
+**(d) Nested `PolyTree` output.** Postprocess already builds a containment forest
+over all output rings (§11.9) and merely flattens it into `MultiPolygon`. Expose
+the forest: a `PolyTree`/`PolyTreeNode{Polygon; IsHole; Children}` type and a
+variant (or option) that returns the hierarchy instead of flattening. Pure
+post-processing, no engine change. Low–medium effort.
+
+**(e) Minkowski sum / difference.** `MinkowskiSum(pattern, path, closed)` places a
+copy of `pattern` at each `path` vertex and unions the copies plus the quads swept
+between consecutive placements (`UnionAll`); `MinkowskiDiff` reflects the pattern.
+Built entirely on existing `Union`. Medium effort, low risk.
+
+**(f) RectClip / RectClipLines.** A specialized `O(n)` per-path Sutherland–Hodgman
+clip against an axis-aligned rectangle (closed paths) and an open-path variant,
+independent of the sweep — validated for parity against `Intersect` with the rect
+as a polygon. The point is speed on the common "clip a layer to the build plate"
+case. Medium effort, low risk.
+
+**(g) Path reduction (Douglas–Peucker).** Add `SimplifyPaths(m, epsilon)`
+(Ramer–Douglas–Peucker per ring). Distinct from `Simplify` (self-intersection
+resolution) and `Clean` (collinear/tiny removal); named to avoid the clash.
+Standalone, no engine. Trivial.
+
+**(h) Z-coordinates / vertex callback.** Clipper2's compile-time `USINGZ`. Most
+invasive: rather than widen `Point` (a perf-sensitive value type), thread an
+optional `ZCallback` invoked when a crossing creates a new vertex, plus an opaque
+per-vertex Z in a side-table keyed by the point. Lowest priority; niche for a
+slicer. Design noted for completeness.
+
+**(i) Triangulation.** Clipper2 ships a triangulation utility (known unreliable —
+not a usable reference). If wanted, implement standalone (monotone decomposition +
+ear-clipping). Lowest priority; arguably separate from clipping.
 
 ---
 

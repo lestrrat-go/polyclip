@@ -49,7 +49,7 @@ func SweepRingsFill(orderedRings [][]Segment, op Operation, fill FillRule) *Swee
 
 	s := newSweepFromMinima(flat, op, fill, minima)
 	s.run()
-	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings()}
+	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings(), Err: s.err}
 }
 
 type ringSpan struct{ lo, hi int }

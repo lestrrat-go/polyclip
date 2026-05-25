@@ -2,6 +2,7 @@ package clip
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/lestrrat-go/polyclip/fixed"
@@ -37,7 +38,7 @@ func SweepFill(segs []Segment, op Operation, fill FillRule) *SweepResult {
 	}
 	s.ael.Fill = fill
 	s.run()
-	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings()}
+	return &SweepResult{Trace: s.trace, Rings: s.ael.Rings(), Err: s.err}
 }
 
 // SweepResult is the result of [Sweep].
@@ -51,8 +52,10 @@ type SweepResult struct {
 	// must be filtered out by postprocess.
 	Rings []*OutRec
 
-	// Err is non-nil if the sweep aborted before processing — currently
-	// only when [ClassifyHorizontals] rejects a mid-bound horizontal.
+	// Err is non-nil if the sweep aborted: before processing (when
+	// [ClassifyHorizontals] rejects a mid-bound horizontal) or mid-run, when
+	// [sweep.reconcileSharedVertexCrossings] hits the coincident-edge ordering
+	// degeneracy and bails rather than spin/OOM.
 	Err error
 }
 
@@ -241,6 +244,9 @@ func (s *sweep) run() {
 	started := false
 	var prevY fixed.Coord
 	for s.queue.Len() > 0 {
+		if s.err != nil { // a sub-phase aborted (e.g. reconcile non-convergence)
+			return
+		}
 		y := s.queue.Peek().P.Y
 		// Resolve every edge crossing inside the scanbeam (prevY, y) from the
 		// settled AEL BEFORE handling this scanline's events (DESIGN.md §12.11).
@@ -620,7 +626,27 @@ func (s *sweep) handleScanlineBound(evs []Event, y fixed.Coord) {
 // (sweep.go local-min IsValidAelOrder loop). The outer loop repeats until no
 // adjacent inversion remains, resolving multi-bound confluences at one vertex.
 func (s *sweep) reconcileSharedVertexCrossings(y fixed.Coord) {
-	for {
+	// A convergent reconcile bubble-sorts the AEL into slope order, so it can do
+	// at most one adjacent swap per pair per pass and at most n passes — O(n^2)
+	// swaps total. Exceeding that means two edges are exactly coincident at this
+	// scanline (equal CurrX and mutually-Less): IntersectEdges keeps "swapping"
+	// them but Less stays inverted, so the loop never settles AND each swap emits
+	// ring output, growing memory without bound (the WSL OOM in the offset
+	// self-union's rotated frames, where a rotation+grid-rounding can make two
+	// distinct walls collapse onto one column). This is the documented
+	// coincident-edge ordering degeneracy (DESIGN.md §7.6 / §7.2); there is no
+	// well-defined order to settle into, so abort the sweep into s.err. The only
+	// caller that can hit it — selfUnionPositive — discards this rotated frame
+	// and the rotation vote resolves the geometry from the frames that converge.
+	// A convergent sweep never reaches the cap, so this is byte-identical for the
+	// boolean ops.
+	n := s.ael.Len()
+	maxIter := n*n + 16
+	for iter := 0; ; iter++ {
+		if iter > maxIter {
+			s.err = fmt.Errorf("clip: reconcileSharedVertexCrossings did not converge after %d passes (n=%d, y=%d): coincident-edge ordering degeneracy", iter, n, y)
+			return
+		}
 		swapped := false
 		for i := 0; i+1 < s.ael.Len(); i++ {
 			l := s.ael.At(i)

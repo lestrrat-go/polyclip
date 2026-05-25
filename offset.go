@@ -567,7 +567,21 @@ func selfUnionPositive(rings []Polygon) MultiPolygon {
 // selfUnionAt rotates rings about (cx,cy) by ang, runs the positive-fill
 // self-union, and rotates the result back. ang == 0 skips both rotations so
 // the output coordinates are exactly the input ones.
-func selfUnionAt(rings []Polygon, cx, cy, ang float64) MultiPolygon {
+//
+// Returns nil if this frame fails to resolve — by a sweep error or by a panic
+// from an unhandled engine degeneracy (a coincident-edge confluence the
+// scanline can mis-step on for a particular frame; see DESIGN.md §7.6). A
+// failed frame is expected: [selfUnionPositive] runs several frames and votes,
+// so one degenerate frame must not crash the whole resolution. Recovering here
+// is consistent with the nil/err frame-failure paths the vote already tolerates;
+// each frame builds an independent sweep, so a recovered panic leaves no shared
+// state behind.
+func selfUnionAt(rings []Polygon, cx, cy, ang float64) (out MultiPolygon) {
+	defer func() {
+		if recover() != nil {
+			out = nil
+		}
+	}()
 	work := rings
 	ca, sa := 1.0, 0.0
 	if ang != 0 {

@@ -1314,18 +1314,22 @@ func (s *sweep) closeBound(ae *ActiveEdge, maxPt fixed.Point) {
 				// Exactly one edge is hot: its maxima partner is a COLD same-source
 				// edge (e.g. a concave notch's wall topping out where the source's
 				// flat top resumes — the notch wall is hot, the resumed top edge is
-				// cold). When the hot edge's ring CONTINUES on a different still-active
-				// coupled edge (here the notch's other wall), it must emit its apex
-				// maxPt so the vertex is kept and Case B closes the ring later;
-				// dropping it loses the apex and dangles the ring, which a downstream
-				// join then splices with a spurious diagonal (DESIGN.md §7.6). If the
-				// ring instead closes here (no other active edge) the original
-				// drop-both is correct — emitting would dangle it.
+				// cold). Emit the hot edge's apex maxPt so the vertex is kept and the
+				// ring closes via its coupled edge / a downstream join; dropping it
+				// loses the apex and dangles the ring, which a join then splices with
+				// a spurious diagonal (DESIGN.md §7.6). Emit when the ring still
+				// CONTINUES on a different active coupled edge (the notch's other
+				// wall). For Difference also emit when the coupled edge is already gone
+				// (a clip bound cut the subject's side and closed below): the subject's
+				// flat top still bounds the difference and must keep its apex. Union/Xor
+				// must NOT emit in the coupled-gone case — there the ring genuinely
+				// closes and an extra apex dangles it, dropping holed-input area.
 				hot, cold := ae, partner
 				if !ae.IsHotEdge() {
 					hot, cold = partner, ae
 				}
-				if oe := outrecOther(hot); oe != nil && oe != cold && s.ael.IndexOf(oe) >= 0 {
+				oe := outrecOther(hot)
+				if (oe != nil && oe != cold && s.ael.IndexOf(oe) >= 0) || s.op == OpDifference {
 					AddOutPt(hot, maxPt)
 				}
 			}

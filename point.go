@@ -13,6 +13,11 @@ func (p Point) Sub(q Point) Point {
 	return Point{X: p.X - q.X, Y: p.Y - q.Y}
 }
 
+// Neg returns the vector -p.
+func (p Point) Neg() Point {
+	return Point{X: -p.X, Y: -p.Y}
+}
+
 // Cross returns the 2D cross product p × q (p.X*q.Y - p.Y*q.X). Treating p and
 // q as vectors, its sign gives their turn orientation and its magnitude is the
 // area of the parallelogram they span.

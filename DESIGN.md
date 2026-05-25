@@ -35,6 +35,7 @@ github.com/lestrrat-go/polyclip
 ├── polygon.go             Polygon, ExPolygon, MultiPolygon; winding, area, contains
 ├── boolean.go             Union, Intersect, Difference, Xor, UnionAll (public API)
 ├── offset.go              Offset, JoinType, EndType, OffsetOptions (public API)
+├── offsetpaths.go         OffsetPaths — open-polyline ribbon offset with end caps
 ├── validate.go            Validate, Clean
 ├── clip/                  scanline boolean engine (subpackage)
 │   ├── segment.go         fixed-point directed-edge type, source tag
@@ -69,7 +70,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset). Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`; fast axis-aligned rectangle clip via `RectClip`/`RectClipLines`.
+Not yet implemented — planned for Clipper2 parity (§7.8): open-polyline clipping. Open-polyline offset (ribbons with end caps) is available via `OffsetPaths`; caller-selectable fill rules (incl. even-odd) via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`; fast axis-aligned rectangle clip via `RectClip`/`RectClipLines`.
 
 ---
 
@@ -231,9 +232,10 @@ directly (the oracle is Monte-Carlo, not Clipper2).
 
 ### 7.4 Open-path offset (`EndType`)
 
-`EndType` is a reserved stub; only `EndPolygon` is implemented. Slicers want
-open-polyline offset (thin-wall / gap-fill / single-extrusion features) with end
-caps. Formerly a non-goal; now planned for Clipper2 parity — design in §7.8(c).
+Done via `OffsetPaths` (§7.8c). `EndType` now offers `EndButt`/`EndSquare`/
+`EndRound` open-path caps in addition to `EndPolygon` (the closed `Offset`
+behaviour); slicers can offset open polylines (thin-wall / gap-fill /
+single-extrusion features) into ribbons. `EndJoined` is the remaining gap.
 
 ### 7.5 Reachable `ErrHorizontalNotSupported`
 
@@ -306,7 +308,7 @@ state vs. Clipper2's planar API:
 | Join Bevel                   | done     | (a)  |
 | Fill rules incl. EvenOdd     | done     | (b)  |
 | Open-path clipping           | gap      | (c)  |
-| Open-path offset (end caps)  | gap      | (c) / §7.4 |
+| Open-path offset (end caps)  | done     | (c) / §7.4 |
 | Nested `PolyTree` output     | done     | (d)  |
 | Minkowski sum / difference   | done     | (e)  |
 | RectClip / RectClipLines     | done     | (f)  |
@@ -366,12 +368,20 @@ yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-forme
   sampling the closed operands' membership at its midpoint under the op, then
   survivors are stitched into open chains. Engine work is a per-edge `open` flag
   plus a separate open-output collector; the closed-ring machinery is untouched.
-- *Offset (§7.4):* offset a polyline into a closed ribbon — its two offset sides
-  joined by end caps (`EndType` Butt / Square / Round / Joined) — then the existing
-  positive-fill self-union (§4.3) resolves overlaps. Reuses the join emitters; adds
-  end-cap emission, and is independent of open-path clipping so it can land first.
-Phase: ribbon offset first, then clipping. Medium–high effort; only the clipping
-half touches the sweep.
+- *Offset (§7.4) — done:* `OffsetPaths(lines []Polyline, d, opts)` offsets a
+  polyline into a closed ribbon, |d| to each side, capped per `opts.End`
+  (`EndButt` flush / `EndSquare` extended `|d|` / `EndRound` semicircle). The
+  ribbon is one closed ring — start cap, forward-side interior joins, end cap,
+  reverse-side joins — traced CCW so the existing positive-fill self-union (§4.3)
+  resolves the self-overlap of sharp interior turns and overlapping ribbons.
+  Reuses the `Offset` join emitters and `resolveOffsetPiece` unchanged; the only
+  new geometry is `emitEndCap` (a faithful transcription of Clipper2's
+  `DoBevel`/`DoSquare`/`DoRound` endpoint case). No engine/clip change → the
+  differential is structurally unaffected (byte-identical, gross 93/236).
+  `EndPolygon` is rejected (`ErrOffsetEndType`); `EndJoined` (open path closed
+  into a loop band) is not yet implemented. Tests: `offsetpaths_test.go`.
+Clipping (the sweep-touching half) is still a gap. Only the clipping half touches
+the sweep.
 
 **(d) Nested `PolyTree` output (done).** Root `PolyTree{Children}` /
 `PolyTreeNode{Polygon; IsHole; Children}` plus `Builder.ExecuteTree(op)`.

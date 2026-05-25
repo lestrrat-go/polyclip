@@ -28,20 +28,32 @@ const (
 	JoinBevel
 )
 
-// EndType is reserved for future open-path offset support; closed
-// polygons (the only currently-supported input) always behave as
-// [EndPolygon].
+// EndType selects how the ends of an open path are capped by [OffsetPaths].
+// [Offset] (closed input) always behaves as [EndPolygon] and ignores this
+// setting.
 type EndType int
 
 const (
 	// EndPolygon offsets a closed polygonal region — the Minkowski sum of
-	// the input with a disk for positive d, the erosion for negative d.
+	// the input with a disk for positive d, the erosion for negative d. It is
+	// the implicit end type of [Offset] and is not valid for [OffsetPaths].
 	EndPolygon EndType = iota
+	// EndButt caps an open path flush with its endpoints — a flat end with no
+	// extension (the offset spans exactly between the endpoint side offsets).
+	EndButt
+	// EndSquare caps an open path with a square that extends |d| beyond each
+	// endpoint along the path direction.
+	EndSquare
+	// EndRound caps an open path with a semicircular arc of radius |d| centred
+	// on each endpoint, tessellated to [OffsetOptions.ArcTol].
+	EndRound
 )
 
-// OffsetOptions configures [Offset]. Zero values pick documented defaults.
+// OffsetOptions configures [Offset] and [OffsetPaths]. Zero values pick
+// documented defaults.
 type OffsetOptions struct {
 	Join       JoinType // default JoinMiter
+	End        EndType  // open-path cap for OffsetPaths; default EndButt. Ignored by Offset.
 	MiterLimit float64  // multiplier on |d| beyond which miters are bevelled. Default 2.0.
 	ArcTol     float64  // max chord deviation for round joins, in user units. Default abs(d) * 0.01.
 }

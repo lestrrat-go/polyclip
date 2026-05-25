@@ -135,6 +135,18 @@ type sweep struct {
 	// span is a doubled INTERIOR boundary and must not extend the ring along it
 	// (DESIGN.md §12.11, max-plateau coincident hole-top). Reset each scanline.
 	coldMaxPlateaus []plateauSpan
+
+	// Scratch buffers for [buildIntersectList], reused across beams to avoid
+	// re-allocating per scanline (it runs once per beam and the candidate-pair
+	// slice in particular dominates the engine's allocation churn). Each is
+	// truncated to [:0] at the top of the function and grows to the beam's max
+	// width once. isectNodes is returned to [doIntersections], which consumes it
+	// synchronously before the next beam resets it.
+	isectItems []xEdge
+	isectHoriz []int
+	isectPairs []uint64
+	isectBuf   []xEdge
+	isectNodes []intersectNode
 }
 
 // plateauSpan is a horizontal span [X0,X1] at Y produced by a cold max-plateau
@@ -349,28 +361,30 @@ func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
 	if n < 2 {
 		return nil
 	}
-	items := make([]xEdge, 0, n)
-	var horiz []int
+	s.isectItems = s.isectItems[:0]
+	s.isectHoriz = s.isectHoriz[:0]
 	for i := range n {
 		e := s.ael.At(i)
 		if e.Seg.Horizontal() {
-			horiz = append(horiz, i)
+			s.isectHoriz = append(s.isectHoriz, i)
 			continue
 		}
-		items = append(items, xEdge{pos: i, seg: e.Seg})
+		s.isectItems = append(s.isectItems, xEdge{pos: i, seg: e.Seg})
 	}
+	items, horiz := s.isectItems, s.isectHoriz
 
 	// Candidate (lower, higher) AEL-position pairs to test exactly. Each pair is
 	// packed into one uint64 as (lower<<32 | higher) — AEL positions are small
 	// non-negative ints, so this is lossless and its ascending uint64 order is
 	// exactly the (lower, higher) lexicographic order. Packing lets the dedup
-	// sort below use the specialized slices.Sort over a comparator closure.
-	var pairs []uint64
+	// sort below use the specialized slices.Sort over a comparator closure. The
+	// slice itself is reused across beams (see the isect* scratch fields).
+	s.isectPairs = s.isectPairs[:0]
 	add := func(p, q int) {
 		if p > q {
 			p, q = q, p
 		}
-		pairs = append(pairs, uint64(p)<<32|uint64(q))
+		s.isectPairs = append(s.isectPairs, uint64(p)<<32|uint64(q))
 	}
 
 	if len(items) >= 2 {
@@ -403,8 +417,10 @@ func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
 			a = b
 		}
 
-		buf := make([]xEdge, len(items))
-		enumInversionPairs(items, buf, topY, add)
+		if cap(s.isectBuf) < len(items) {
+			s.isectBuf = make([]xEdge, len(items))
+		}
+		enumInversionPairs(items, s.isectBuf[:len(items)], topY, add)
 	}
 
 	// AEL-adjacent pairs. Nearly-parallel edges that never swap order in the
@@ -428,17 +444,18 @@ func (s *sweep) buildIntersectList(botY, topY fixed.Coord) []intersectNode {
 	// Sort + dedup: a pair found twice would otherwise be dispatched twice and
 	// swap the edges back. Sorted (lower, higher) order also makes the node list
 	// deterministic and matches the old full-scan ordering.
+	pairs := s.isectPairs
 	slices.Sort(pairs)
-	var nodes []intersectNode
+	s.isectNodes = s.isectNodes[:0]
 	var prev uint64
 	for i, key := range pairs {
 		if i > 0 && key == prev {
 			continue
 		}
 		prev = key
-		s.addCrossing(int(key>>32), int(key&0xffffffff), botY, topY, &nodes)
+		s.addCrossing(int(key>>32), int(key&0xffffffff), botY, topY, &s.isectNodes)
 	}
-	return nodes
+	return s.isectNodes
 }
 
 // enumInversionPairs merge-sorts items by exact X at topY ascending (buf is

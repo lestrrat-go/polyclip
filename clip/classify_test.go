@@ -58,6 +58,67 @@ func TestClassifyTwoSameSource(t *testing.T) {
 	}
 }
 
+func TestClassifyEvenOddSameSourceNested(t *testing.T) {
+	// Two nested same-source squares (outer X=0..20, inner X=5..15), all CCW.
+	// Under even-odd every edge bounds the source region regardless of winding
+	// magnitude, so ALL four verticals are contributing (the inner pair forms a
+	// hole). NonZero would drop the inner pair (WindSelf == 2).
+	sLO := vert(0, Subject, true)   // +1
+	sLI := vert(5, Subject, true)   // +1
+	sRI := vert(15, Subject, false) // -1
+	sRO := vert(20, Subject, false) // -1
+
+	ael := NewAEL()
+	ael.Fill = FillEvenOdd
+	edges := []*ActiveEdge{}
+	for _, s := range []*Segment{&sLO, &sLI, &sRI, &sRO} {
+		ae := &ActiveEdge{Seg: s, CurrX: s.Bot.X, WindDx: signedContribution(s)}
+		ael.Insert(ae)
+		edges = append(edges, ae)
+	}
+	for _, ae := range edges {
+		Classify(ael, ae, OpUnion)
+	}
+	for i, ae := range edges {
+		if ae.WindOther != 0 {
+			t.Errorf("edge %d: WindOther=%d want 0 (no clip)", i, ae.WindOther)
+		}
+		if !ae.Contributing {
+			t.Errorf("edge %d: not contributing; even-odd treats every edge as a boundary", i)
+		}
+	}
+}
+
+func TestClassifyEvenOddCrossSourceParity(t *testing.T) {
+	// Two nested clip walls to the left, then a subject wall. The subject edge
+	// sees two clip crossings → even parity → OUTSIDE the clip under even-odd, so
+	// it does NOT contribute to an Intersection (NonZero's WindOther==2 would).
+	cL1 := vert(0, Clip, true)   // +1
+	cL2 := vert(2, Clip, true)   // +1
+	sV := vert(5, Subject, true) // +1
+	cR2 := vert(8, Clip, false)  // -1
+	cR1 := vert(10, Clip, false) // -1
+
+	ael := NewAEL()
+	ael.Fill = FillEvenOdd
+	edges := []*ActiveEdge{}
+	for _, s := range []*Segment{&cL1, &cL2, &sV, &cR2, &cR1} {
+		ae := &ActiveEdge{Seg: s, CurrX: s.Bot.X, WindDx: signedContribution(s)}
+		ael.Insert(ae)
+		edges = append(edges, ae)
+	}
+	for _, ae := range edges {
+		Classify(ael, ae, OpIntersect)
+	}
+	sa := edges[2] // the subject wall
+	if sa.WindOther != 0 {
+		t.Errorf("subject WindOther=%d want 0 (even clip parity)", sa.WindOther)
+	}
+	if sa.Contributing {
+		t.Error("subject wall should NOT contribute to Intersect: even clip parity = outside clip")
+	}
+}
+
 func TestClassifyTwoOverlappingSquares(t *testing.T) {
 	// Subject square at X=0..10, clip square at X=5..15. Both CCW.
 	// At a scanline that crosses all four vertical edges:

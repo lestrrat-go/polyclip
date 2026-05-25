@@ -69,7 +69,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): caller-selectable fill rules, open polylines (clipping and offset), a nested `PolyTree` output, Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction.
+Not yet implemented — planned for Clipper2 parity (§7.8): open polylines (clipping and offset), a nested `PolyTree` output, Minkowski sum/difference, a fast rectangle clip, and Douglas–Peucker path reduction. Caller-selectable fill rules (incl. even-odd) are available via `Builder.Fill`.
 
 ---
 
@@ -304,7 +304,7 @@ state vs. Clipper2's planar API:
 | Polygon offset, closed       | done     | —    |
 | Join Miter / Round / Square  | done     | —    |
 | Join Bevel                   | gap      | (a)  |
-| Fill rules incl. EvenOdd     | gap      | (b)  |
+| Fill rules incl. EvenOdd     | done     | (b)  |
 | Open-path clipping           | gap      | (c)  |
 | Open-path offset (end caps)  | gap      | (c) / §7.4 |
 | Nested `PolyTree` output     | gap      | (d)  |
@@ -333,11 +333,26 @@ and `ExecuteTree` are reserved for steps (b)/(c)/(d).
 straight chord between the two offset-edge endpoints (no apex) — `emitVertex`'s
 overlap fallback already produces those two points. Trivial.
 
-**(b) Caller-selectable fill rules.** `clip.FillRule` already has NonZero /
-Positive / Negative; add `FillEvenOdd` (boundary test becomes a crossing-parity
-flip). Expose a root-package `FillRule` and accept it via an options overload
-(e.g. `UnionWith(a, b, opts)`), defaulting to NonZero so current signatures and
-output are unchanged. Additive, gated on the rule. Low effort/risk.
+**(b) Caller-selectable fill rules (done).** `clip.FillEvenOdd` added: in
+`Classify`/`isContributing` the source-boundary winding-magnitude test is skipped
+(every edge is a boundary) and the other source's membership is counted by
+crossing parity (`WindOther` toggles 0↔1) rather than a signed sum; `IntersectEdges`
+swaps `WindSelf` and toggles `WindOther` on a crossing — a direct transcription of
+Clipper2's `SetWindCountForClosedPathEdge`/`IsContributingClosed`/`IntersectEdges`
+EvenOdd branches. Exposed at the root as `FillRule` (NonZero default, plus EvenOdd
+/Positive/Negative) selected via `Builder.Fill(r)`; the named free functions stay
+NonZero. `FillRule` threads through `sweepSegments`→`clip.SweepFill`. For a
+non-NonZero fill, `execOp` routes through `execOpFilled`, which drops the
+identity/disjoint/per-piece short-circuits (they assume well-formed, simply-wound
+inputs — a non-NonZero fill is chosen precisely to re-resolve self-overlapping
+input, where e.g. `Union(s,∅)` must re-fill `s` rather than return it verbatim);
+only fill-independent empty results short-circuit, and Xor stays a composition.
+The NonZero path is byte-identical (differential random 0, degenerate 93, holes
+236, multipiece 0, idU=idD=idX=0). Known residual: a non-NonZero Difference over a
+multipiece subject runs one sweep (no per-piece decomposition), so it can hit the
+§7.7 coincident-confluence over-trace; there is no even-odd differential oracle
+yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-formed
+≡ NonZero) + `clip` EvenOdd classify tests.
 
 **(c) Open paths — clipping and offset.** The largest gap; reverses the former
 §1/§3/§7.4 non-goal. Open paths are subjects only (a clip region must be closed).
@@ -514,7 +529,7 @@ This chapter distills the parts of the algorithm translated from Clipper2 (`CPP/
 
 Each input polygon is reframed as alternating **ascending** and **descending bounds** — chains of edges monotonic in Y. A **local minimum** is where a descending bound meets an ascending one (the ring turns from down to up); a **local maximum** is the inverse. A bound is a single AEL entry that advances through its edges via in-place cursor advance (§12.10.4), rather than one event per edge.
 
-`BuildLocalMinima` (`clip/bounds.go`) walks each ring, finds every Y-direction reversal (horizontals count toward their non-horizontal neighbours' direction), and emits a `LocalMinima` record with its two emerging bounds, sorted by Y-ascending (X for ties) — the event processing order. polyclip is non-polytree: hole nesting is recomputed in postprocess (§11.9), open paths are out of scope, and the only fill rule is NonZero.
+`BuildLocalMinima` (`clip/bounds.go`) walks each ring, finds every Y-direction reversal (horizontals count toward their non-horizontal neighbours' direction), and emits a `LocalMinima` record with its two emerging bounds, sorted by Y-ascending (X for ties) — the event processing order. polyclip is non-polytree: hole nesting is recomputed in postprocess (§11.9), open paths are out of scope, and the boolean fill rules over this path are NonZero and EvenOdd (Positive/Negative use the ordered-minima self-union, §7.2).
 
 ### 12.2 ActiveEdge / OutRec fields
 

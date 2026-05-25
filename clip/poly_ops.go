@@ -43,7 +43,13 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	// flips/steps WindSelf; crossing the other source's edge steps WindOther.
 	// This is by edge identity (uses e1/e2's WindDx), so the AEL position swap
 	// is irrelevant to it.
-	if samePolyType && ael.Ordered {
+	switch {
+	case samePolyType && ael.Fill == FillEvenOdd:
+		// Even-odd: crossing a same-source edge just swaps the two edges' WindSelf
+		// (both are ±1 directions), matching Clipper2 IntersectEdges
+		// (engine.cpp:1876). The magnitude is irrelevant to the contributing test.
+		e1.WindSelf, e2.WindSelf = e2.WindSelf, e1.WindSelf
+	case samePolyType && ael.Ordered:
 		// Ordered positive/negative fill: pure signed step, matching Classify's
 		// prefix sum. The NonZero reflection trick below (negate when the count
 		// would reach 0) is specific to the abs-value contributing test and
@@ -51,7 +57,7 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 		// (DESIGN.md §7.2).
 		e1.WindSelf += e2.WindDx
 		e2.WindSelf -= e1.WindDx
-	} else if samePolyType {
+	case samePolyType:
 		if e1.WindSelf+e2.WindDx == 0 {
 			e1.WindSelf = -e1.WindSelf
 		} else {
@@ -62,7 +68,12 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 		} else {
 			e2.WindSelf -= e1.WindDx
 		}
-	} else {
+	case ael.Fill == FillEvenOdd:
+		// Even-odd: crossing the other source's edge toggles its membership parity
+		// (Clipper2 engine.cpp:1903).
+		e1.WindOther ^= 1
+		e2.WindOther ^= 1
+	default:
 		e1.WindOther += e2.WindDx
 		e2.WindOther -= e1.WindDx
 	}

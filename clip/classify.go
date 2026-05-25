@@ -20,6 +20,13 @@ const (
 	// FillNegative fills a region with strictly negative winding; an outer
 	// boundary edge has WindSelf == -1.
 	FillNegative
+	// FillEvenOdd fills a region crossed by an odd number of edges. Every edge
+	// is a source boundary regardless of winding magnitude (the WindSelf test in
+	// [isContributing] is skipped), and the other source's membership is counted
+	// by crossing parity rather than signed winding. Used for self-overlapping
+	// or self-intersecting inputs where the doubled regions of [FillNonZero]
+	// should read as holes.
+	FillEvenOdd
 )
 
 // Operation is the boolean set operation requested by the caller.
@@ -86,6 +93,24 @@ func Classify(ael *AEL, ae *ActiveEdge, op Operation) {
 		}
 		ae.WindSelf = sum
 		ae.WindOther = 0
+		ae.Contributing = isContributing(ael.Fill, ael.Ordered, op, ae)
+		return
+	}
+
+	// Even-odd fill (Clipper2 SetWindCountForClosedPathEdge, engine.cpp:1028):
+	// WindSelf is just the edge direction (every edge is a source boundary; the
+	// magnitude test is skipped in isContributing), and WindOther is the PARITY
+	// of the other source's edges to ae's left (each crossing toggles inside/
+	// outside) rather than a signed sum.
+	if ael.Fill == FillEvenOdd {
+		ae.WindSelf = delta
+		other := 0
+		for i := range pos {
+			if prev := ael.At(i); prev.Seg.Src != ae.Seg.Src {
+				other ^= 1
+			}
+		}
+		ae.WindOther = other
 		ae.Contributing = isContributing(ael.Fill, ael.Ordered, op, ae)
 		return
 	}
@@ -173,6 +198,10 @@ func signedContribution(seg *Segment) int {
 // exact test.
 func isContributing(fill FillRule, ordered bool, op Operation, ae *ActiveEdge) bool {
 	switch fill {
+	case FillEvenOdd:
+		// Every edge bounds its own source's region (crossing parity), so there is
+		// no WindSelf magnitude test; membership is decided entirely by the WindOther
+		// parity test below (Clipper2 IsContributingClosed, engine.cpp:912).
 	case FillPositive:
 		if ordered {
 			if (ae.WindSelf > 0) == (ae.WindSelf-ae.WindDx > 0) {

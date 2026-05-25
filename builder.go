@@ -27,6 +27,41 @@ const (
 	OpXor
 )
 
+// FillRule selects which winding counts as "inside" when the engine fills a
+// region. The default [FillNonZero] reproduces the free functions' behavior;
+// the other rules are selected via [Builder.Fill].
+type FillRule int
+
+const (
+	// FillNonZero fills a region whose winding count is non-zero. The default
+	// and the rule used by the named free functions.
+	FillNonZero FillRule = iota
+	// FillEvenOdd fills a region crossed by an odd number of edges. Use it for
+	// self-overlapping or self-intersecting inputs where the doubly-covered
+	// regions should read as holes.
+	FillEvenOdd
+	// FillPositive fills a region with strictly positive winding (counter-
+	// clockwise outer boundaries).
+	FillPositive
+	// FillNegative fills a region with strictly negative winding (clockwise
+	// outer boundaries).
+	FillNegative
+)
+
+// toClipFill maps the public FillRule onto the engine's clip.FillRule.
+func toClipFill(r FillRule) clip.FillRule {
+	switch r {
+	case FillEvenOdd:
+		return clip.FillEvenOdd
+	case FillPositive:
+		return clip.FillPositive
+	case FillNegative:
+		return clip.FillNegative
+	default:
+		return clip.FillNonZero
+	}
+}
+
 // Polyline is an open path: a sequence of points with no implicit closing
 // edge. It is the open-subject input type and the open-result type. Open-path
 // support is a planned feature; today's closed-polygon ops never produce one.
@@ -52,6 +87,7 @@ type Result struct {
 type Builder struct {
 	subj MultiPolygon
 	clip MultiPolygon
+	fill FillRule
 }
 
 // NewBuilder returns an empty Builder.
@@ -78,11 +114,21 @@ func (b *Builder) AddClip(m ...MultiPolygon) *Builder {
 	return b
 }
 
+// Fill sets the fill rule used to decide which winding counts as inside. The
+// default is [FillNonZero], which matches the named free functions. Returns the
+// receiver for chaining.
+func (b *Builder) Fill(r FillRule) *Builder {
+	b.fill = r
+	return b
+}
+
 // Reset clears the accumulated subjects and clips so the Builder can be reused
-// for a fresh set of inputs. Returns the receiver for chaining.
+// for a fresh set of inputs. The fill rule is also reset to [FillNonZero].
+// Returns the receiver for chaining.
 func (b *Builder) Reset() *Builder {
 	b.subj = nil
 	b.clip = nil
+	b.fill = FillNonZero
 	return b
 }
 
@@ -91,7 +137,7 @@ func (b *Builder) Reset() *Builder {
 // repeatedly with different ops. Result.Open is nil (open paths are a planned
 // feature).
 func (b *Builder) Execute(op Operation) (Result, error) {
-	closed, err := execOp(b.subj, b.clip, op)
+	closed, err := execOp(b.subj, b.clip, op, b.fill)
 	if err != nil {
 		return Result{}, err
 	}
@@ -103,7 +149,10 @@ func (b *Builder) Execute(op Operation) (Result, error) {
 // the aggregated clip set. The named free functions and Execute both route
 // through here, so all callers get identical handling. The sweep path
 // (runBooleanOp) carries the subset-invariant filter.
-func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
+func execOp(s, c MultiPolygon, op Operation, fill FillRule) (MultiPolygon, error) {
+	if fill != FillNonZero {
+		return execOpFilled(s, c, op, fill)
+	}
 	switch op {
 	case OpUnion:
 		switch {
@@ -128,7 +177,7 @@ func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
 			out = append(out, c...)
 			return out, nil
 		}
-		return runBooleanOp(s, c, clip.OpUnion)
+		return runBooleanOp(s, c, clip.OpUnion, clip.FillNonZero)
 
 	case OpIntersect:
 		if len(s) == 0 || len(c) == 0 {
@@ -140,7 +189,7 @@ func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
 		if !s.BoundingBox().Intersects(c.BoundingBox()) {
 			return MultiPolygon{}, nil
 		}
-		return runBooleanOp(s, c, clip.OpIntersect)
+		return runBooleanOp(s, c, clip.OpIntersect, clip.FillNonZero)
 
 	case OpDifference:
 		if len(s) == 0 {
@@ -165,7 +214,7 @@ func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
 		if len(s) > 1 {
 			var out MultiPolygon
 			for _, piece := range s {
-				d, err := execOp(MultiPolygon{piece}, c, OpDifference)
+				d, err := execOp(MultiPolygon{piece}, c, OpDifference, FillNonZero)
 				if err != nil {
 					return nil, err
 				}
@@ -173,7 +222,7 @@ func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
 			}
 			return out, nil
 		}
-		return runBooleanOp(s, c, clip.OpDifference)
+		return runBooleanOp(s, c, clip.OpDifference, clip.FillNonZero)
 
 	case OpXor:
 		switch {
@@ -197,15 +246,63 @@ func execOp(s, c MultiPolygon, op Operation) (MultiPolygon, error) {
 		// OpXor sweep, which mis-resolves a residual class of coincident /
 		// cross-source confluences (DESIGN.md §7.6) that Union, Intersect and
 		// Difference now handle correctly (incl. the subset-invariant filter).
-		u, err := execOp(s, c, OpUnion)
+		u, err := execOp(s, c, OpUnion, FillNonZero)
 		if err != nil {
 			return nil, err
 		}
-		i, err := execOp(s, c, OpIntersect)
+		i, err := execOp(s, c, OpIntersect, FillNonZero)
 		if err != nil {
 			return nil, err
 		}
-		return execOp(u, i, OpDifference)
+		return execOp(u, i, OpDifference, FillNonZero)
+
+	default:
+		return nil, errUnknownOperation
+	}
+}
+
+// execOpFilled is the non-NonZero fill path. Unlike the NonZero path it does
+// NOT take the identity (mpolyEqual), disjoint-bbox, or per-piece short-circuits:
+// those assume well-formed, simply-wound inputs, and a non-NonZero fill is
+// chosen precisely to re-interpret self-overlapping or self-intersecting inputs
+// (where, e.g., Union(s,∅) must still re-resolve s under the rule rather than
+// return it verbatim). Only fill-independent empty results short-circuit; every
+// other case runs the sweep. Xor stays a composition (a set identity holds under
+// any single fill rule) to avoid the direct OpXor sweep (DESIGN.md §7.6).
+func execOpFilled(s, c MultiPolygon, op Operation, fill FillRule) (MultiPolygon, error) {
+	cf := toClipFill(fill)
+	switch op {
+	case OpUnion:
+		if len(s) == 0 && len(c) == 0 {
+			return MultiPolygon{}, nil
+		}
+		return runBooleanOp(s, c, clip.OpUnion, cf)
+
+	case OpIntersect:
+		if len(s) == 0 || len(c) == 0 {
+			return MultiPolygon{}, nil
+		}
+		return runBooleanOp(s, c, clip.OpIntersect, cf)
+
+	case OpDifference:
+		if len(s) == 0 {
+			return MultiPolygon{}, nil
+		}
+		return runBooleanOp(s, c, clip.OpDifference, cf)
+
+	case OpXor:
+		if len(s) == 0 && len(c) == 0 {
+			return MultiPolygon{}, nil
+		}
+		u, err := execOpFilled(s, c, OpUnion, fill)
+		if err != nil {
+			return nil, err
+		}
+		i, err := execOpFilled(s, c, OpIntersect, fill)
+		if err != nil {
+			return nil, err
+		}
+		return execOpFilled(u, i, OpDifference, fill)
 
 	default:
 		return nil, errUnknownOperation

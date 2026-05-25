@@ -39,7 +39,7 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 // [ErrHorizontalNotSupported] when the bound-model pre-pass fails on
 // shared-vertex inputs that fall back to the per-edge path.
 func Union(a, b MultiPolygon) (MultiPolygon, error) {
-	return execOp(a, b, OpUnion)
+	return execOp(a, b, OpUnion, FillNonZero)
 }
 
 // UnionAll returns the union of all inputs. It is functionally equivalent
@@ -89,7 +89,7 @@ func UnionAll(polys ...MultiPolygon) (MultiPolygon, error) {
 // and the §11.4 / §12.5 classification rules emit exactly the region
 // covered by BOTH inputs.
 func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
-	return execOp(a, b, OpIntersect)
+	return execOp(a, b, OpIntersect, FillNonZero)
 }
 
 // Difference returns a ∖ b — the region covered by a but not by b.
@@ -98,7 +98,7 @@ func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
 // unchanged. Disjoint bounding boxes return a unchanged. Otherwise the
 // Vatti engine runs with [clip.OpDifference].
 func Difference(a, b MultiPolygon) (MultiPolygon, error) {
-	return execOp(a, b, OpDifference)
+	return execOp(a, b, OpDifference, FillNonZero)
 }
 
 // Xor returns the symmetric difference (a ∪ b) ∖ (a ∩ b) — the region
@@ -108,7 +108,7 @@ func Difference(a, b MultiPolygon) (MultiPolygon, error) {
 // empty). Disjoint bounding boxes return the concatenation, equivalent to
 // Union. Otherwise the Vatti engine runs with [clip.OpXor].
 func Xor(a, b MultiPolygon) (MultiPolygon, error) {
-	return execOp(a, b, OpXor)
+	return execOp(a, b, OpXor, FillNonZero)
 }
 
 // Simplify resolves self-intersections and self-overlaps in m, returning an
@@ -138,7 +138,7 @@ func Simplify(m MultiPolygon) (MultiPolygon, error) {
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
 	segs := collectSegments(m, clip.Subject, scale)
-	return sweepSegments(segs, clip.OpUnion, scale)
+	return sweepSegments(segs, clip.OpUnion, clip.FillNonZero, scale)
 }
 
 // mpolyEqual reports whether two MultiPolygons are deeply equal — same
@@ -188,11 +188,11 @@ func polyEqual(a, b Polygon) bool {
 // fixed-point scale used to build segs). It is the single seam shared by
 // [runBooleanOp] and [Simplify]; op- and operand-specific post-filtering (the
 // subset invariant) stays in the caller.
-func sweepSegments(segs []clip.Segment, op clip.Operation, scale fixed.Scale) (MultiPolygon, error) {
+func sweepSegments(segs []clip.Segment, op clip.Operation, fill clip.FillRule, scale fixed.Scale) (MultiPolygon, error) {
 	segs = clip.SplitOverlaps(segs)
 	segs = clip.SplitTJunctions(segs)
 	segs = clip.DedupCoincidentEdges(segs)
-	sw := clip.Sweep(segs, op)
+	sw := clip.SweepFill(segs, op, fill)
 	if sw.Err != nil {
 		if errors.Is(sw.Err, clip.ErrUnsupportedHorizontal) {
 			return nil, fmt.Errorf("%w: %v", ErrHorizontalNotSupported, sw.Err)
@@ -205,14 +205,14 @@ func sweepSegments(segs []clip.Segment, op clip.Operation, scale fixed.Scale) (M
 // runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
 // segments through the sweep, and convert rings back to a user-space
 // MultiPolygon.
-func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
+func runBooleanOp(a, b MultiPolygon, op clip.Operation, fill clip.FillRule) (MultiPolygon, error) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
 	segs := collectSegments(a, clip.Subject, scale)
 	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
 
-	res, err := sweepSegments(segs, op, scale)
+	res, err := sweepSegments(segs, op, fill, scale)
 	if err != nil {
 		return nil, err
 	}

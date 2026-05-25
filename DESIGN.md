@@ -369,7 +369,7 @@ crossings remain latent (masked by composition + the subset filter); a future
 per-segment winding model at confluences would let `OpXor` and the filtered
 Difference cases resolve in-sweep.
 
-### 7.7 Multipiece-subject Difference over-trace (OPEN)
+### 7.7 Multipiece-subject Difference over-trace (DONE)
 
 The §7.6 work drove identity violations to zero on inputs where each source is a
 SINGLE ring (the skyline reachability corpus and the differential, both of which
@@ -398,10 +398,25 @@ dropped; with a second piece present the spurious trace MERGES with a valid ring
 so the filter cannot drop it (the tangled ring contains real area) and the
 violation is unmaskable. This is therefore the SAME deferred sweep-level
 over-trace as §7.6 — the subset filter was a result-level shortcut, not an
-in-sweep resolution. The fix is the per-segment-winding-at-confluence model noted
-above (close/transfer the over-tracing bound's ring AT the maxing confluence,
-lifecycle-correctly); post-hoc ring surgery is a known dead end (DESIGN §7.6
-history). Left open; the differential `multipiece` scenario is the regression gate.
+in-sweep resolution.
+
+Fix: a multipiece subject is differenced **per piece** rather than in one sweep —
+`(∪ᵢ Pᵢ) ∖ B = ∪ᵢ (Pᵢ ∖ B)`, an exact set-algebra identity since a valid
+`MultiPolygon`'s pieces are disjoint (so the per-piece results are disjoint and
+the union is plain concatenation, no merge). Each `Pᵢ ∖ B` then runs on the
+single-subject sweep path the rest of §7 proved clean: the lower-confluence
+over-trace again spawns a *stray* hole-free lobe with no second piece to merge
+into, which the existing subset filter (§7.6 fix 5) drops. Pieces clear of `B`
+short-circuit on bbox, so the common slicer case stays cheap. This is the same
+philosophy as the subset filter and Xor-by-composition — exploit a set-algebra
+identity to route around the sweep's coincident-cross-source limitation — but
+exact, with no risk of dropping valid output. (The in-sweep
+per-segment-winding-at-confluence resolution would let the engine difference a
+multipiece subject in one pass; it remains the deferred deep rework, but is no
+longer reachable via `Difference`. Post-hoc ring surgery on the merged tangle is a
+known dead end — DESIGN §7.6 history.) The differential `multipiece` scenario
+(idD 2259→0, gross fails 4531→0) is the regression gate; `Intersect`/`Union`/`Xor`
+on multipiece subjects were already clean and are unchanged.
 
 ---
 

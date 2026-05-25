@@ -2865,3 +2865,49 @@ func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
 		t.Errorf("%s: got %v want %v", identX, x.Area(), u.Area()-iA)
 	}
 }
+
+// TestDifferenceMultipieceSubject covers DESIGN.md §7.7: a multipiece subject
+// (one source contributing several disjoint rings) differenced by a clip that
+// carves only the LOWER piece along a coincident cross-source vertical wall. A
+// single sweep over the multipiece subject over-traced at that confluence and
+// threaded a spurious trace up into the UPPER piece, where it merged with real
+// area and escaped the subset filter (result ≈5.5 / piece-tangled). Differencing
+// each disjoint piece independently — exact set algebra (∪Pᵢ)∖B = ∪(Pᵢ∖B) —
+// keeps every piece on the clean single-subject path.
+func TestDifferenceMultipieceSubject(t *testing.T) {
+	t.Run("minimal repro", func(t *testing.T) {
+		a := MultiPolygon{
+			{Outer: Polygon{{0, 0}, {2, 0}, {2, 2}, {0, 2}}}, // lower, area 4
+			{Outer: Polygon{{0, 3}, {3, 3}, {3, 5}, {0, 5}}}, // upper, area 6
+		}
+		b := MultiPolygon{{Outer: Polygon{{1, -1}, {2, -1}, {2, 2}, {1, 2}}}}
+		got, err := Difference(a, b)
+		if err != nil {
+			t.Fatalf("difference: %v", err)
+		}
+		// lower carved to [0,1]x[0,2] (area 2) + upper unchanged (area 6) = 8.
+		if math.Abs(got.Area()-8) > 1e-9 {
+			t.Errorf("area=%v want 8 (result=%v)", got.Area(), got)
+		}
+		if len(got) != 2 {
+			t.Errorf("pieces=%d want 2 (result=%v)", len(got), got)
+		}
+	})
+	t.Run("upper piece wider than B span", func(t *testing.T) {
+		// From the differential: B carves the lower piece and the upper piece
+		// (area 15) was being dropped to a 3-area tangle.
+		a := MultiPolygon{
+			{Outer: Polygon{{0, 0}, {2, 0}, {2, 1}, {0, 1}}}, // lower, area 2
+			{Outer: Polygon{{1, 2}, {6, 2}, {6, 5}, {1, 5}}}, // upper, area 15
+		}
+		b := MultiPolygon{{Outer: Polygon{{1, -2}, {2, -2}, {2, 1}, {1, 1}}}}
+		got, err := Difference(a, b)
+		if err != nil {
+			t.Fatalf("difference: %v", err)
+		}
+		// lower ∩ B = [1,2]x[0,1] (area 1); lower∖B = 1; upper untouched = 15.
+		if math.Abs(got.Area()-16) > 1e-9 {
+			t.Errorf("area=%v want 16 (result=%v)", got.Area(), got)
+		}
+	})
+}

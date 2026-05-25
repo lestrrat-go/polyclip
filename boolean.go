@@ -148,6 +148,26 @@ func Difference(a, b MultiPolygon) (MultiPolygon, error) {
 	if !a.BoundingBox().Intersects(b.BoundingBox()) {
 		return a, nil
 	}
+	// Multipiece subject: (∪ᵢ Pᵢ) ∖ B = ∪ᵢ (Pᵢ ∖ B). A valid MultiPolygon's
+	// pieces are disjoint, so differencing each piece independently is exact set
+	// algebra and the results stay disjoint (plain concatenation, no merge). This
+	// keeps every piece on the proven single-subject sweep path: a single sweep
+	// over a multipiece subject over-traces at a coincident cross-source vertical
+	// confluence, threading a spurious lower-piece trace into an upper piece where
+	// it MERGES with real area and so escapes the subset filter (DESIGN.md §7.7).
+	// Per-piece, that spurious lobe is again a stray hole-free piece the subset
+	// filter in runBooleanOp drops. Pieces clear of B short-circuit on bbox.
+	if len(a) > 1 {
+		var out MultiPolygon
+		for _, piece := range a {
+			d, err := Difference(MultiPolygon{piece}, b)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, d...)
+		}
+		return out, nil
+	}
 	return runBooleanOp(a, b, clip.OpDifference)
 }
 

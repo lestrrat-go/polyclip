@@ -240,17 +240,7 @@ func Simplify(m MultiPolygon) (MultiPolygon, error) {
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
 	segs := collectSegments(m, clip.Subject, scale)
-	segs = clip.SplitOverlaps(segs)
-	segs = clip.SplitTJunctions(segs)
-	segs = clip.DedupCoincidentEdges(segs)
-	sw := clip.Sweep(segs, clip.OpUnion)
-	if sw.Err != nil {
-		if errors.Is(sw.Err, clip.ErrUnsupportedHorizontal) {
-			return nil, fmt.Errorf("%w: %v", ErrHorizontalNotSupported, sw.Err)
-		}
-		return nil, sw.Err
-	}
-	return assembleResult(sw.Rings, scale), nil
+	return sweepSegments(segs, clip.OpUnion, scale)
 }
 
 // mpolyEqual reports whether two MultiPolygons are deeply equal — same
@@ -294,16 +284,13 @@ func polyEqual(a, b Polygon) bool {
 	return true
 }
 
-// runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
-// segments through the sweep, and convert rings back to a user-space
-// MultiPolygon.
-func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
-	bbox := a.BoundingBox().Union(b.BoundingBox())
-	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
-
-	segs := collectSegments(a, clip.Subject, scale)
-	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
-
+// sweepSegments runs the shared engine pipeline over source-tagged segments:
+// split overlaps and T-junctions, dedup coincident pairs, sweep under op, then
+// assemble the output rings back to a user-space MultiPolygon at scale (the same
+// fixed-point scale used to build segs). It is the single seam shared by
+// [runBooleanOp] and [Simplify]; op- and operand-specific post-filtering (the
+// subset invariant) stays in the caller.
+func sweepSegments(segs []clip.Segment, op clip.Operation, scale fixed.Scale) (MultiPolygon, error) {
 	segs = clip.SplitOverlaps(segs)
 	segs = clip.SplitTJunctions(segs)
 	segs = clip.DedupCoincidentEdges(segs)
@@ -314,7 +301,23 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 		}
 		return nil, sw.Err
 	}
-	res := assembleResult(sw.Rings, scale)
+	return assembleResult(sw.Rings, scale), nil
+}
+
+// runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
+// segments through the sweep, and convert rings back to a user-space
+// MultiPolygon.
+func runBooleanOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
+	bbox := a.BoundingBox().Union(b.BoundingBox())
+	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
+
+	segs := collectSegments(a, clip.Subject, scale)
+	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
+
+	res, err := sweepSegments(segs, op, scale)
+	if err != nil {
+		return nil, err
+	}
 	// Subset invariant: A∖B ⊆ A and A∩B ⊆ A∩B. The sweep can over-trace a
 	// cross-source bound past where it exits the op-region (DESIGN.md §7.6),
 	// emitting a spurious piece that lies OUTSIDE the required superset. Drop any

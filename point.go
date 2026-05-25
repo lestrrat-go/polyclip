@@ -2,10 +2,18 @@ package polyclip
 
 import "math"
 
-// Point is a 2D point in user units. The library does not interpret the
-// units; the same units are used throughout an operation.
+// Point is a 2D point in user units, optionally carrying a Z coordinate. The
+// library does not interpret the units; the same units are used throughout an
+// operation.
+//
+// Z is auxiliary data the geometry engine never reads — boolean ops, offset,
+// and every other routine compare and snap points by X/Y only. Z is preserved
+// from input to output and, when a [ZAssigner] is installed via
+// [Builder.SetZAssigner], computed for the new vertices created where edges
+// cross (DESIGN.md §7.8h). Leave it zero if unused.
 type Point struct {
 	X, Y float64
+	Z    float64
 }
 
 // Sub returns the vector p - q.

@@ -33,6 +33,7 @@ func IntersectEdges(ael *AEL, op Operation, e1, e2 *ActiveEdge, pt fixed.Point) 
 	if i2 != i1+1 {
 		return nil
 	}
+	ael.recordCrossing(e1, e2, pt)
 
 	e1Hot := e1.IsHotEdge()
 	e2Hot := e2.IsHotEdge()

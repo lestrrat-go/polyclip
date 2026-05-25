@@ -635,7 +635,7 @@ func selfUnionAt(rings []Polygon, cx, cy, ang float64) (out MultiPolygon) {
 	if sw.Err != nil {
 		return nil
 	}
-	res := assembleResult(sw.Rings, scale)
+	res := assembleResult(sw.Rings, scale, nil)
 	if ang != 0 {
 		for _, ex := range res {
 			for i, p := range ex.Outer {

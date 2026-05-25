@@ -17,8 +17,8 @@ func rawOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
-	segs := collectSegments(a, clip.Subject, scale)
-	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
+	segs := collectSegments(a, clip.Subject, scale, nil)
+	segs = append(segs, collectSegments(b, clip.Clip, scale, nil)...)
 	segs = clip.SplitOverlaps(segs)
 	segs = clip.SplitTJunctions(segs)
 	segs = clip.DedupCoincidentEdges(segs)
@@ -26,7 +26,7 @@ func rawOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
 	if sw.Err != nil {
 		return nil, sw.Err
 	}
-	return assembleResult(sw.Rings, scale), nil
+	return assembleResult(sw.Rings, scale, nil), nil
 }
 
 // countRawIdFails counts UNMASKED algebraic-identity violations over the skyline
@@ -100,10 +100,10 @@ func TestRawInSweepIdFailRatchet(t *testing.T) {
 // outside A). Raw (unmasked) Intersect must equal the true area, not 6.
 func TestRawIntersectOuterCornerCloses(t *testing.T) {
 	a := MultiPolygon{ExPolygon{Outer: []Point{
-		{0, 0}, {5, 0}, {5, 2}, {4, 2}, {3, 2}, {2, 2}, {2, 1}, {1, 1}, {1, 4}, {0, 4},
+		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: 4}, {X: 0, Y: 4},
 	}}}
 	b := MultiPolygon{ExPolygon{Outer: []Point{
-		{2, -1}, {7, -1}, {7, 5}, {6, 5}, {6, 3}, {5, 3}, {5, 2}, {4, 2}, {4, 1}, {3, 1}, {3, 5}, {2, 5},
+		{X: 2, Y: -1}, {X: 7, Y: -1}, {X: 7, Y: 5}, {X: 6, Y: 5}, {X: 6, Y: 3}, {X: 5, Y: 3}, {X: 5, Y: 2}, {X: 4, Y: 2}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 5}, {X: 2, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpIntersect)
 	if err != nil {
@@ -121,10 +121,10 @@ func TestRawIntersectOuterCornerCloses(t *testing.T) {
 // reconnection pass for Xor (as U/I/D use) closes them. True Xor = U−I = 5.
 func TestRawXorCoincidentReconnect(t *testing.T) {
 	a := MultiPolygon{ExPolygon{Outer: []Point{
-		{0, 0}, {5, 0}, {5, 3}, {4, 3}, {4, 1}, {3, 1}, {3, 5}, {2, 5}, {2, 1}, {1, 1}, {1, 5}, {0, 5},
+		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 3}, {X: 4, Y: 3}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 5}, {X: 2, Y: 5}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: 5}, {X: 0, Y: 5},
 	}}}
 	b := MultiPolygon{ExPolygon{Outer: []Point{
-		{0, 0}, {5, 0}, {5, 5}, {4, 5}, {4, 2}, {3, 2}, {3, 5}, {2, 5}, {2, 3}, {1, 3}, {1, 5}, {0, 5},
+		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 4, Y: 5}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 3, Y: 5}, {X: 2, Y: 5}, {X: 2, Y: 3}, {X: 1, Y: 3}, {X: 1, Y: 5}, {X: 0, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpXor)
 	if err != nil {

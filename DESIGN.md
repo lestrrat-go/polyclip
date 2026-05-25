@@ -313,12 +313,13 @@ state vs. Clipper2's planar API:
 | Minkowski sum / difference   | done     | (e)  |
 | RectClip / RectClipLines     | done     | (f)  |
 | Path reduction (Douglas–Peucker) | done | (g)  |
-| Z-coords / vertex callback   | gap      | (h)  |
+| Z-coords / vertex callback   | done     | (h)  |
 | Triangulation                | gap      | (i)  |
 
 Most are **additive API** over the existing sweep, the containment forest (§11.9),
-or `Union` — only Z-coords would touch the engine. (Open-path clipping was
-expected to, but landed as a standalone post-sweep pass — see (c).)
+or `Union`. Z-coords is the only one that touches the engine, and only minimally
+— a recording hook in the AEL behind an off-by-default flag (see (h)). (Open-path
+clipping was also expected to, but landed as a standalone post-sweep pass — (c).)
 
 **(0) `Builder` accumulator API (done).** The Clipper2-style entry point the
 remaining features build on: `NewBuilder().AddSubject(…).AddClip(…).Execute(op)`
@@ -458,11 +459,31 @@ vertices pass through; a ring reduced below 3 vertices is dropped (and an
 `ExPolygon` whose outer ring is dropped is omitted). Standalone, no engine.
 Tests: `simplifypaths_test.go`.
 
-**(h) Z-coordinates / vertex callback.** Clipper2's compile-time `USINGZ`. Most
-invasive: rather than widen `Point` (a perf-sensitive value type), thread an
-optional `ZCallback` invoked when a crossing creates a new vertex, plus an opaque
-per-vertex Z in a side-table keyed by the point. Lowest priority; niche for a
-slicer. Design noted for completeness.
+**(h) Z-coordinates / vertex callback (done).** Clipper2's compile-time `USINGZ`,
+as a runtime opt-in. `Point` gains a third field `Z float64`; the engine ignores
+it (every comparison and the fixed-point snap are X/Y-only), so it is pure
+auxiliary data carried input→output. A [ZAssigner] interface
+(`AssignZ(e1bot, e1top, e2bot, e2top, crossing Point) float64`, the analog of
+Clipper2's ZCallback) is installed via `Builder.SetZAssigner`; nil disables
+tracking (the default), leaving the standard path bit-for-bit identical and
+allocation-free.
+
+Wiring: a `zTracker` (assigner + a `map[fixed.Point]float64` keyed by snapped
+grid point) is threaded through `execOp`/`runBooleanOp` — nil on the Z-free path.
+`appendRing` records each input vertex's Z under its grid point; the sweep, run
+via `clip.SweepFillZ`, records every edge meeting `IntersectEdges` dispatches as
+a `clip.ZCrossing` (four endpoints + crossing point) behind the AEL's off-by-
+default `RecordCrossings` flag. `runBooleanOp` then maps each crossing through
+the assigner — input vertices take precedence, so a meeting at an existing vertex
+keeps that vertex's Z — and `assembleResult` reads the table when unsnapping each
+output vertex. Composition propagates naturally: Xor (Union/Intersect/Difference)
+and per-piece Difference recurse with the same assigner, and intermediate results
+already carry Z, so the next sub-op sees it as input Z. Z applies to
+`Result.Closed` only; open-path output is rebuilt by interpolation and carries no
+Z. Side note: adding the field is a (pre-1.0) breaking change to positional
+`Point{x, y}` / `Polygon{{x,y},…}` literals — use keyed fields. Tests:
+`zcoord_test.go`; no engine X/Y change → differential byte-identical (random 0,
+degenerate 93, holes 236, multipiece 0, idU=idD=idX=0).
 
 **(i) Triangulation.** Clipper2 ships a triangulation utility (known unreliable —
 not a usable reference). If wanted, implement standalone (monotone decomposition +

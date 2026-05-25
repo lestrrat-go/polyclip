@@ -7,9 +7,9 @@ import (
 
 func TestValidateNoIssues(t *testing.T) {
 	m := MultiPolygon{ExPolygon{
-		Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}, // CCW
+		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}, // CCW
 		Holes: []Polygon{
-			{{2, 2}, {2, 4}, {4, 4}, {4, 2}}, // CW
+			{{X: 2, Y: 2}, {X: 2, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 2}}, // CW
 		},
 	}}
 	if got := m.Validate(); got != nil {
@@ -18,7 +18,7 @@ func TestValidateNoIssues(t *testing.T) {
 }
 
 func TestValidateTooFewVertices(t *testing.T) {
-	m := MultiPolygon{ExPolygon{Outer: Polygon{{0, 0}, {1, 1}}}} // only 2 vertices
+	m := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}} // only 2 vertices
 	issues := m.Validate()
 	if len(issues) != 1 || issues[0].Kind != IssueTooFewVertices {
 		t.Errorf("expected one too-few-vertices issue, got %v", issues)
@@ -28,7 +28,7 @@ func TestValidateTooFewVertices(t *testing.T) {
 func TestValidateWrongWindingOuter(t *testing.T) {
 	// CW outer (signed area < 0)
 	m := MultiPolygon{ExPolygon{Outer: Polygon{
-		{0, 0}, {0, 10}, {10, 10}, {10, 0},
+		{X: 0, Y: 0}, {X: 0, Y: 10}, {X: 10, Y: 10}, {X: 10, Y: 0},
 	}}}
 	issues := m.Validate()
 	if len(issues) != 1 || issues[0].Kind != IssueWrongWinding {
@@ -39,8 +39,8 @@ func TestValidateWrongWindingOuter(t *testing.T) {
 func TestValidateWrongWindingHole(t *testing.T) {
 	// CCW hole (should be CW)
 	m := MultiPolygon{ExPolygon{
-		Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}},
-		Holes: []Polygon{{{4, 4}, {6, 4}, {6, 6}, {4, 6}}}, // CCW
+		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []Polygon{{{X: 4, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 4, Y: 6}}}, // CCW
 	}}
 	issues := m.Validate()
 	if len(issues) != 1 || issues[0].Kind != IssueWrongWinding || issues[0].Ring != 0 {
@@ -51,7 +51,7 @@ func TestValidateWrongWindingHole(t *testing.T) {
 func TestValidateSelfIntersecting(t *testing.T) {
 	// Bow-tie outer: edges (0,0)-(10,10) crosses (10,0)-(0,10).
 	m := MultiPolygon{ExPolygon{Outer: Polygon{
-		{0, 0}, {10, 10}, {10, 0}, {0, 10},
+		{X: 0, Y: 0}, {X: 10, Y: 10}, {X: 10, Y: 0}, {X: 0, Y: 10},
 	}}}
 	issues := m.Validate()
 	found := false
@@ -68,8 +68,8 @@ func TestValidateSelfIntersecting(t *testing.T) {
 
 func TestValidateHoleOutsideOuter(t *testing.T) {
 	m := MultiPolygon{ExPolygon{
-		Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}},
-		Holes: []Polygon{{{20, 20}, {25, 20}, {25, 25}, {20, 25}}}, // CCW, outside
+		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []Polygon{{{X: 20, Y: 20}, {X: 25, Y: 20}, {X: 25, Y: 25}, {X: 20, Y: 25}}}, // CCW, outside
 	}}
 	issues := m.Validate()
 	// Expect both wrong-winding (CCW hole) and hole-outside-outer.
@@ -86,10 +86,10 @@ func TestValidateHoleOutsideOuter(t *testing.T) {
 
 func TestValidateOverlappingHoles(t *testing.T) {
 	m := MultiPolygon{ExPolygon{
-		Outer: Polygon{{0, 0}, {20, 0}, {20, 20}, {0, 20}},
+		Outer: Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 20}, {X: 0, Y: 20}},
 		Holes: []Polygon{
-			{{4, 4}, {4, 12}, {12, 12}, {12, 4}}, // CW
-			{{8, 8}, {8, 16}, {16, 16}, {16, 8}}, // CW, overlaps hole 0
+			{{X: 4, Y: 4}, {X: 4, Y: 12}, {X: 12, Y: 12}, {X: 12, Y: 4}}, // CW
+			{{X: 8, Y: 8}, {X: 8, Y: 16}, {X: 16, Y: 16}, {X: 16, Y: 8}}, // CW, overlaps hole 0
 		},
 	}}
 	issues := m.Validate()

@@ -136,10 +136,35 @@ type AEL struct {
 	// coincident walls. The soup-based [SweepFill] / boolean paths leave it
 	// false and keep Clipper2's incremental NonZero model unchanged.
 	Ordered bool
+
+	// RecordCrossings, set by [SweepFillZ], makes [IntersectEdges] record each
+	// edge meeting it dispatches (the four endpoints + crossing point) for
+	// Z-coordinate assignment. Off by default, so the standard path allocates
+	// nothing extra and is bit-for-bit identical.
+	RecordCrossings bool
+	crossings       []ZCrossing
 }
 
 // NewAEL returns an empty AEL.
 func NewAEL() *AEL { return &AEL{} }
+
+// recordCrossing appends the meeting of e1 and e2 at pt to the crossing log,
+// when recording is enabled. Called from [IntersectEdges]; see [ZCrossing].
+func (a *AEL) recordCrossing(e1, e2 *ActiveEdge, pt fixed.Point) {
+	if !a.RecordCrossings {
+		return
+	}
+	s1, s2 := e1.Seg, e2.Seg
+	a.crossings = append(a.crossings, ZCrossing{
+		E1Bot: s1.Bot, E1Top: s1.Top,
+		E2Bot: s2.Bot, E2Top: s2.Top,
+		P: pt,
+	})
+}
+
+// Crossings returns the recorded edge meetings (nil unless [RecordCrossings]
+// was set). See [SweepFillZ].
+func (a *AEL) Crossings() []ZCrossing { return a.crossings }
 
 // NextOutRecIdx returns a fresh sequential index for a new [OutRec]. Used by
 // [AddLocalMinPoly] for deterministic ring-merge tie-breaking.

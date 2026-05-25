@@ -304,8 +304,8 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 // crossing flows through the normal IntersectEdges path. Expected single
 // merged piece of area 184 (100 + 100 − 16 overlap).
 func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{6, 6}, {16, 6}, {16, 16}, {6, 16}}}}
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}}
 	got, err := Union(a, b)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -335,8 +335,8 @@ func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
 // between-edges via IntersectEdges, mirroring Clipper2's DoMaxima
 // (engine.cpp:2729). Expected area 130: pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5).
 func TestUnionCoincidentHorizConfluence(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{-5, -5}, {5, -5}, {-2, 5}, {-5, 5}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{-2, -5}, {8, -5}, {8, 5}, {-2, 5}}}}
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: -5, Y: -5}, {X: 5, Y: -5}, {X: -2, Y: 5}, {X: -5, Y: 5}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: -2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}, {X: -2, Y: 5}}}}
 	got, err := Union(a, b)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -363,8 +363,8 @@ func TestUnionCoincidentHorizConfluence(t *testing.T) {
 //
 // Expected area 254.5454…: |a|+|b| − overlap = 155 + 100 − 5/11.
 func TestUnionSlantCoincidentBottom(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{-5, -5}, {16, -5}, {5, 5}, {-5, 5}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{15, -5}, {25, -5}, {25, 5}, {15, 5}}}}
+	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: -5, Y: -5}, {X: 16, Y: -5}, {X: 5, Y: 5}, {X: -5, Y: 5}}}}
+	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 15, Y: -5}, {X: 25, Y: -5}, {X: 25, Y: 5}, {X: 15, Y: 5}}}}
 	got, err := Union(a, b)
 	if err != nil {
 		t.Fatalf("err: %v", err)

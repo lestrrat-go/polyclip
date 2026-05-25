@@ -19,20 +19,20 @@ func TestBBoxEmpty(t *testing.T) {
 
 func TestBBoxAdd(t *testing.T) {
 	b := EmptyBBox()
-	b = b.Add(Point{1, 2})
-	b = b.Add(Point{-1, 5})
-	b = b.Add(Point{4, 3})
-	want := BBox{Min: Point{-1, 2}, Max: Point{4, 5}}
+	b = b.Add(Point{X: 1, Y: 2})
+	b = b.Add(Point{X: -1, Y: 5})
+	b = b.Add(Point{X: 4, Y: 3})
+	want := BBox{Min: Point{X: -1, Y: 2}, Max: Point{X: 4, Y: 5}}
 	if b != want {
 		t.Fatalf("Add: got %+v want %+v", b, want)
 	}
 }
 
 func TestBBoxUnion(t *testing.T) {
-	a := BBox{Min: Point{0, 0}, Max: Point{10, 10}}
-	b := BBox{Min: Point{5, -5}, Max: Point{20, 5}}
+	a := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
+	b := BBox{Min: Point{X: 5, Y: -5}, Max: Point{X: 20, Y: 5}}
 	got := a.Union(b)
-	want := BBox{Min: Point{0, -5}, Max: Point{20, 10}}
+	want := BBox{Min: Point{X: 0, Y: -5}, Max: Point{X: 20, Y: 10}}
 	if got != want {
 		t.Fatalf("Union: got %+v want %+v", got, want)
 	}
@@ -45,30 +45,30 @@ func TestBBoxUnion(t *testing.T) {
 }
 
 func TestBBoxContains(t *testing.T) {
-	b := BBox{Min: Point{0, 0}, Max: Point{10, 10}}
+	b := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
 	cases := []struct {
 		p  Point
 		in bool
 	}{
-		{Point{5, 5}, true},
-		{Point{0, 0}, true},
-		{Point{10, 10}, true},
-		{Point{10, 5}, true},
-		{Point{-0.001, 5}, false},
-		{Point{5, 10.001}, false},
+		{Point{X: 5, Y: 5}, true},
+		{Point{X: 0, Y: 0}, true},
+		{Point{X: 10, Y: 10}, true},
+		{Point{X: 10, Y: 5}, true},
+		{Point{X: -0.001, Y: 5}, false},
+		{Point{X: 5, Y: 10.001}, false},
 	}
 	for _, c := range cases {
 		if got := b.Contains(c.p); got != c.in {
 			t.Errorf("Contains(%v): got %v want %v", c.p, got, c.in)
 		}
 	}
-	if EmptyBBox().Contains(Point{0, 0}) {
+	if EmptyBBox().Contains(Point{X: 0, Y: 0}) {
 		t.Errorf("empty bbox should contain no points")
 	}
 }
 
 func TestBBoxWidthHeight(t *testing.T) {
-	b := BBox{Min: Point{1, 2}, Max: Point{4, 7}}
+	b := BBox{Min: Point{X: 1, Y: 2}, Max: Point{X: 4, Y: 7}}
 	if b.Width() != 3 {
 		t.Errorf("Width: %v want 3", b.Width())
 	}

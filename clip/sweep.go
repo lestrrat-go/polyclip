@@ -52,6 +52,11 @@ type SweepResult struct {
 	// must be filtered out by postprocess.
 	Rings []*OutRec
 
+	// Crossings holds every genuine edge crossing, populated only when the
+	// sweep was run via [SweepFillZ] (nil otherwise). Used to assign Z
+	// coordinates to crossing vertices; it does not affect X/Y geometry.
+	Crossings []ZCrossing
+
 	// Err is non-nil if the sweep aborted: before processing (when
 	// [ClassifyHorizontals] rejects a mid-bound horizontal) or mid-run, when
 	// [sweep.reconcileSharedVertexCrossings] hits the coincident-edge ordering

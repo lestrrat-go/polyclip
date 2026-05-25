@@ -299,6 +299,7 @@ state vs. Clipper2's planar API:
 
 | Clipper2 feature             | polyclip | Plan |
 |------------------------------|----------|------|
+| `Clipper` accumulator API    | done     | (0)  |
 | Boolean ops (∪ ∩ − ⊕)        | done     | —    |
 | Polygon offset, closed       | done     | —    |
 | Join Miter / Round / Square  | done     | —    |
@@ -315,6 +316,18 @@ state vs. Clipper2's planar API:
 
 Most are **additive API** over the existing sweep, the containment forest (§11.9),
 or `Union` — only open-path *clipping* and Z-coords touch the engine.
+
+**(0) `Clipper` accumulator API (done).** The Clipper2-style entry point the
+remaining features build on: `NewClipper().AddSubject(…).AddClip(…).Execute(op)`
+returning `Result{Closed, Open}`, with a root-package `Operation`
+(`OpUnion`/`OpIntersect`/`OpDifference`/`OpXor`). The accumulator is the general
+path; the named free functions (`Union`/`Intersect`/`Difference`/`Xor`) became
+thin wrappers over the unexported `execOp`, which is now the single home for the
+per-op short-circuits, Xor-by-composition (§7.6), and per-piece Difference (§7.7).
+`Execute` is non-destructive and `Reset` clears the inputs for reuse. Landed
+behavior-preserving: differential byte-identical (random 0, degenerate 93,
+holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection, `AddOpenSubject`,
+and `ExecuteTree` are reserved for steps (b)/(c)/(d).
 
 **(a) Bevel join.** Add `JoinBevel` to `JoinType`; at a convex corner emit the
 straight chord between the two offset-edge endpoints (no apex) — `emitVertex`'s

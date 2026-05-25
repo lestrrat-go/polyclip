@@ -39,34 +39,7 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 // [ErrHorizontalNotSupported] when the bound-model pre-pass fails on
 // shared-vertex inputs that fall back to the per-edge path.
 func Union(a, b MultiPolygon) (MultiPolygon, error) {
-	switch {
-	case len(a) == 0 && len(b) == 0:
-		return MultiPolygon{}, nil
-	case len(a) == 0:
-		return b, nil
-	case len(b) == 0:
-		return a, nil
-	}
-
-	// Idempotency short-circuit: Union(A, A) = A. Identical inputs are a
-	// degenerate case where every edge becomes a diff-src coincident pair
-	// at the SAME vertex; the bound model's local-min disambiguation isn't
-	// designed for that. Other diff-src coincident cases (overlapping but
-	// not identical, e.g. TestUnionOverlappingAxisAligned) are resolved by
-	// the sweep's winding classification over first-class horizontal AEL
-	// edges (DESIGN.md §12.6.1).
-	if mpolyEqual(a, b) {
-		return a, nil
-	}
-
-	if !a.BoundingBox().Intersects(b.BoundingBox()) {
-		out := make(MultiPolygon, 0, len(a)+len(b))
-		out = append(out, a...)
-		out = append(out, b...)
-		return out, nil
-	}
-
-	return runBooleanOp(a, b, clip.OpUnion)
+	return execOp(a, b, OpUnion)
 }
 
 // UnionAll returns the union of all inputs. It is functionally equivalent
@@ -116,17 +89,7 @@ func UnionAll(polys ...MultiPolygon) (MultiPolygon, error) {
 // and the §11.4 / §12.5 classification rules emit exactly the region
 // covered by BOTH inputs.
 func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
-	if len(a) == 0 || len(b) == 0 {
-		return MultiPolygon{}, nil
-	}
-	// Idempotency short-circuit: Intersect(A, A) = A. See [Union] note.
-	if mpolyEqual(a, b) {
-		return a, nil
-	}
-	if !a.BoundingBox().Intersects(b.BoundingBox()) {
-		return MultiPolygon{}, nil
-	}
-	return runBooleanOp(a, b, clip.OpIntersect)
+	return execOp(a, b, OpIntersect)
 }
 
 // Difference returns a ∖ b — the region covered by a but not by b.
@@ -135,40 +98,7 @@ func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
 // unchanged. Disjoint bounding boxes return a unchanged. Otherwise the
 // Vatti engine runs with [clip.OpDifference].
 func Difference(a, b MultiPolygon) (MultiPolygon, error) {
-	if len(a) == 0 {
-		return MultiPolygon{}, nil
-	}
-	if len(b) == 0 {
-		return a, nil
-	}
-	// Identity short-circuit: Difference(A, A) = ∅.
-	if mpolyEqual(a, b) {
-		return MultiPolygon{}, nil
-	}
-	if !a.BoundingBox().Intersects(b.BoundingBox()) {
-		return a, nil
-	}
-	// Multipiece subject: (∪ᵢ Pᵢ) ∖ B = ∪ᵢ (Pᵢ ∖ B). A valid MultiPolygon's
-	// pieces are disjoint, so differencing each piece independently is exact set
-	// algebra and the results stay disjoint (plain concatenation, no merge). This
-	// keeps every piece on the proven single-subject sweep path: a single sweep
-	// over a multipiece subject over-traces at a coincident cross-source vertical
-	// confluence, threading a spurious lower-piece trace into an upper piece where
-	// it MERGES with real area and so escapes the subset filter (DESIGN.md §7.7).
-	// Per-piece, that spurious lobe is again a stray hole-free piece the subset
-	// filter in runBooleanOp drops. Pieces clear of B short-circuit on bbox.
-	if len(a) > 1 {
-		var out MultiPolygon
-		for _, piece := range a {
-			d, err := Difference(MultiPolygon{piece}, b)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, d...)
-		}
-		return out, nil
-	}
-	return runBooleanOp(a, b, clip.OpDifference)
+	return execOp(a, b, OpDifference)
 }
 
 // Xor returns the symmetric difference (a ∪ b) ∖ (a ∩ b) — the region
@@ -178,39 +108,7 @@ func Difference(a, b MultiPolygon) (MultiPolygon, error) {
 // empty). Disjoint bounding boxes return the concatenation, equivalent to
 // Union. Otherwise the Vatti engine runs with [clip.OpXor].
 func Xor(a, b MultiPolygon) (MultiPolygon, error) {
-	switch {
-	case len(a) == 0 && len(b) == 0:
-		return MultiPolygon{}, nil
-	case len(a) == 0:
-		return b, nil
-	case len(b) == 0:
-		return a, nil
-	}
-	// Identity short-circuit: Xor(A, A) = ∅.
-	if mpolyEqual(a, b) {
-		return MultiPolygon{}, nil
-	}
-	if !a.BoundingBox().Intersects(b.BoundingBox()) {
-		out := make(MultiPolygon, 0, len(a)+len(b))
-		out = append(out, a...)
-		out = append(out, b...)
-		return out, nil
-	}
-	// Xor = (A∪B) ∖ (A∩B), computed by composition rather than the direct
-	// OpXor sweep. The direct sweep mis-resolves a residual class of
-	// coincident/cross-source confluences (DESIGN.md §7.6) that Union, Intersect
-	// and Difference now handle correctly (incl. the subset-invariant filter), so
-	// composing them yields the exact symmetric difference where OpXor alone
-	// diagonal-cuts or drops regions.
-	u, err := Union(a, b)
-	if err != nil {
-		return nil, err
-	}
-	i, err := Intersect(a, b)
-	if err != nil {
-		return nil, err
-	}
-	return Difference(u, i)
+	return execOp(a, b, OpXor)
 }
 
 // Simplify resolves self-intersections and self-overlaps in m, returning an

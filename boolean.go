@@ -176,7 +176,21 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 		out = append(out, b...)
 		return out, nil
 	}
-	return runBooleanOp(a, b, clip.OpXor)
+	// Xor = (A∪B) ∖ (A∩B), computed by composition rather than the direct
+	// OpXor sweep. The direct sweep mis-resolves a residual class of
+	// coincident/cross-source confluences (DESIGN.md §7.6) that Union, Intersect
+	// and Difference now handle correctly (incl. the subset-invariant filter), so
+	// composing them yields the exact symmetric difference where OpXor alone
+	// diagonal-cuts or drops regions.
+	u, err := Union(a, b)
+	if err != nil {
+		return nil, err
+	}
+	i, err := Intersect(a, b)
+	if err != nil {
+		return nil, err
+	}
+	return Difference(u, i)
 }
 
 // Simplify resolves self-intersections and self-overlaps in m, returning an

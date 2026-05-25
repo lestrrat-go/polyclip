@@ -367,13 +367,31 @@ byte-identical (idU=idD=idX=0, gross 93/236). Regression: `TestHorizJoinHangRepr
 
 Pre-existing, distinct from §7.5 (surfaces *after* the §7.5 fallback succeeds,
 on inputs the bound model DOES handle). A class of algebraic-identity violations
-on axis-aligned pairs sharing collinear boundary segments. The minimal
-**Intersect spurious-lobe** case is now FIXED (below); a residual set of more
-complex *staircase* configurations remains — `TestHorizontalFallbackReachability`
-still logs **73** identity violations (down from ~106), now dominated by
-Union/Xor under-counts (e.g. a 16-vertex comb `A` over a small `B` giving U=29
-where `A+B−I = 30`). Those are a related but distinct mechanism and are left for
-a future increment.
+on axis-aligned pairs sharing collinear boundary segments, dominated (67 of the
+original 73) by a **coincident cross-source vertical wall** (one polygon's wall
+lies exactly on the other's, overlapping in Y). Two fixes have landed, cutting
+`TestHorizontalFallbackReachability`'s logged violations from ~106 → 73 → **44**:
+
+1. **Intersect spurious-lobe** (below) — the outer-max coincident-horizontal apex.
+2. **Coincident AEL edge ordering by divergence** (`aelLess` / `coincidentDivergeLess`,
+   `clip/ael.go`). Two exactly-coincident edges tie on both CurrX and slope, so a
+   static order is arbitrary and decides each wall's `WindOther` (hence which
+   contributes) — wrongly, because the correct order is context-dependent. The
+   geometrically correct order is where the two bounds first *diverge* just above
+   the scanline (Clipper2's collinear-edge handling): look ahead along both
+   bounds' upward vertex paths to the first differing vertex and order by which
+   ray runs left (128-bit cross product — the 2^60 grid overflows int64). A bound
+   that tops out at the divergence contributes a synthetic turn vertex from its
+   `WindDx` (interior side). Differential byte-identical (idU=idD=idX=0).
+
+**Residual (44):** the spurious lobes are half-integer (diagonal) artifacts where
+a Difference/Union ring mis-traces *up* a coincident wall reached via through-vertex
+advancement (which does not reclassify), then pinches into a diagonal spur. The
+remaining fix is a coincident-wall **ring redirect** at the confluence (turn the
+boundary onto the horizontal seam instead of climbing the doubled wall). NOTE: a
+blunt reconcile that dispatches the coincident pair through `IntersectEdges`
+CRASHES (nil deref — the crossing dispatch assumes a transversal cross, not a
+doubled non-crossing boundary); the redirect needs custom topology handling.
 
 **Intersect spurious lobe — FIXED.** The symptom was an algebraic-identity
 violation on axis-aligned pairs sharing a collinear boundary segment — e.g.

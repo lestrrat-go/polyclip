@@ -70,59 +70,76 @@ func TestTriangulateConcave(t *testing.T) {
 	}
 }
 
-func TestTriangulateWithHole(t *testing.T) {
-	m := MultiPolygon{{
-		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
-	}}
-	tris := Triangulate(m)
-	require.InDelta(t, 100.0-16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 100.0-16.0)
-	for i, tri := range tris {
-		require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "triangle %d not CCW: %v", i, tri)
-		c := triCentroid(tri)
-		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
-	}
-}
-
-func TestTriangulateTouchingHole(t *testing.T) {
-	// A hole pinched against the outer boundary at two shared vertices — a
-	// real (non-normalized) boolean-engine output. The robust fallbacks must
-	// still cover the region exactly without overlap.
-	m := MultiPolygon{{
-		Outer: Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
-		Holes: []Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
-	}}
-	tris := Triangulate(m)
-	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
-	for i, tri := range tris {
-		c := triCentroid(tri)
-		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
-	}
-}
-
-func TestTriangulateTwoHoles(t *testing.T) {
-	m := MultiPolygon{{
-		Outer: Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
-		Holes: []Polygon{
-			{{X: 2, Y: 2}, {X: 2, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 2}},     // CW
-			{{X: 12, Y: 3}, {X: 12, Y: 7}, {X: 16, Y: 7}, {X: 16, Y: 3}}, // CW
+func TestTriangulateHolesAndPieces(t *testing.T) {
+	cases := []struct {
+		name string
+		m    MultiPolygon
+		// wantArea, when set, overrides the default expected area of m.Area().
+		wantArea *float64
+		// checkCCW asserts each triangle is wound counter-clockwise.
+		checkCCW bool
+		// checkCentroid asserts each triangle's centroid lies inside the region.
+		checkCentroid bool
+	}{
+		{
+			name: "WithHole",
+			m: MultiPolygon{{
+				Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+				Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
+			}},
+			wantArea:      func() *float64 { v := 100.0 - 16.0; return &v }(),
+			checkCCW:      true,
+			checkCentroid: true,
 		},
-	}}
-	tris := Triangulate(m)
-	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
-	for i, tri := range tris {
-		c := triCentroid(tri)
-		require.True(t, m.Contains(c), "triangle %d centroid %v outside region", i, c)
+		{
+			// A hole pinched against the outer boundary at two shared vertices — a
+			// real (non-normalized) boolean-engine output. The robust fallbacks must
+			// still cover the region exactly without overlap.
+			name: "TouchingHole",
+			m: MultiPolygon{{
+				Outer: Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
+				Holes: []Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
+			}},
+			checkCentroid: true,
+		},
+		{
+			name: "TwoHoles",
+			m: MultiPolygon{{
+				Outer: Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
+				Holes: []Polygon{
+					{{X: 2, Y: 2}, {X: 2, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 2}},     // CW
+					{{X: 12, Y: 3}, {X: 12, Y: 7}, {X: 16, Y: 7}, {X: 16, Y: 3}}, // CW
+				},
+			}},
+			checkCentroid: true,
+		},
+		{
+			name: "MultiPiece",
+			m: MultiPolygon{
+				{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
+				{Outer: Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
+			},
+		},
 	}
-}
-
-func TestTriangulateMultiPiece(t *testing.T) {
-	m := MultiPolygon{
-		{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
-		{Outer: Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := tc.m.Area()
+			if tc.wantArea != nil {
+				want = *tc.wantArea
+			}
+			tris := Triangulate(tc.m)
+			require.InDelta(t, want, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), want)
+			for i, tri := range tris {
+				if tc.checkCCW {
+					require.Greater(t, orient(tri[0], tri[1], tri[2]), 0.0, "triangle %d not CCW: %v", i, tri)
+				}
+				if tc.checkCentroid {
+					c := triCentroid(tri)
+					require.True(t, tc.m.Contains(c), "triangle %d centroid %v outside region", i, c)
+				}
+			}
+		})
 	}
-	tris := Triangulate(m)
-	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 }
 
 func TestTriangulateDegenerate(t *testing.T) {

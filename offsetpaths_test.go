@@ -12,32 +12,63 @@ func approx(t *testing.T, got, want, tol float64, what string) {
 	require.InDelta(t, want, got, tol, "%s = %g, want %g (tol %g)", what, got, want, tol)
 }
 
-func TestOffsetPathsStraightButt(t *testing.T) {
-	// A horizontal segment of length 10, half-width 2: a 10×4 rectangle.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndButt})
-	require.NoError(t, err)
-	require.Len(t, res, 1, "butt pieces = %d, want 1", len(res))
-	approx(t, res.Area(), 40, 1e-9, "butt area")
+func TestOffsetPathsStraight(t *testing.T) {
+	// All cases build the same horizontal segment of length 10, offset by
+	// half-width 2, varying only the End cap type and the expected area.
+	roundWant := 40 + math.Pi*4
+	cases := []struct {
+		name string
+		end  EndType
+		want float64
+		// tol differs per case: butt/square are exact (1e-9); round is only
+		// approximate because tessellation chords cut slightly inside the
+		// true arc, so it allows 1% relative.
+		tol float64
+		// what is the label passed to approx.
+		what string
+		// pieces, when non-nil, asserts res has exactly that many pieces.
+		pieces *int
+	}{
+		{
+			// A horizontal segment of length 10, half-width 2: a 10×4 rectangle.
+			name:   "Butt",
+			end:    EndButt,
+			want:   40,
+			tol:    1e-9,
+			what:   "butt area",
+			pieces: intPtr(1),
+		},
+		{
+			// Square caps extend 2 beyond each end: 14×4 = 56.
+			name: "Square",
+			end:  EndSquare,
+			want: 56,
+			tol:  1e-9,
+			what: "square area",
+		},
+		{
+			// Round caps add two semicircles of radius 2: 40 + pi*4.
+			name: "Round",
+			end:  EndRound,
+			want: roundWant,
+			tol:  roundWant * 0.01,
+			what: "round area",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
+			res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: tc.end})
+			require.NoError(t, err)
+			if tc.pieces != nil {
+				require.Len(t, res, *tc.pieces, "butt pieces = %d, want %d", len(res), *tc.pieces)
+			}
+			approx(t, res.Area(), tc.want, tc.tol, tc.what)
+		})
+	}
 }
 
-func TestOffsetPathsStraightSquare(t *testing.T) {
-	// Square caps extend 2 beyond each end: 14×4 = 56.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndSquare})
-	require.NoError(t, err)
-	approx(t, res.Area(), 56, 1e-9, "square area")
-}
-
-func TestOffsetPathsStraightRound(t *testing.T) {
-	// Round caps add two semicircles of radius 2: 40 + pi*4.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndRound})
-	require.NoError(t, err)
-	want := 40 + math.Pi*4
-	// Tessellation chords cut slightly inside the true arc; allow 1%.
-	approx(t, res.Area(), want, want*0.01, "round area")
-}
+func intPtr(i int) *int { return &i }
 
 func TestOffsetPathsVerticalButt(t *testing.T) {
 	// Orientation must be CCW (positive area) regardless of path direction.
@@ -87,22 +118,58 @@ func TestOffsetPathsMultiple(t *testing.T) {
 	approx(t, res.Area(), 80, 1e-9, "multi area")
 }
 
-func TestOffsetPathsEndPolygonRejected(t *testing.T) {
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	_, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndPolygon})
-	require.Equal(t, ErrOffsetEndType, err, "OffsetPaths(EndPolygon) err = %v, want ErrOffsetEndType", err)
-}
-
-func TestOffsetPathsEmpty(t *testing.T) {
-	_, err := OffsetPaths(nil, 2, OffsetOptions{End: EndButt})
-	require.Equal(t, ErrOffsetEmpty, err, "OffsetPaths(nil) err = %v, want ErrOffsetEmpty", err)
-}
-
-func TestOffsetPathsShortSkipped(t *testing.T) {
-	// A single-point path (and a zero-length repeat) has no direction; skipped.
-	lines := []Polyline{{{X: 5, Y: 5}}, {{X: 1, Y: 1}, {X: 1, Y: 1}}}
-	_, err := OffsetPaths(lines, 2, OffsetOptions{End: EndButt})
-	require.Equal(t, ErrOffsetEmpty, err, "OffsetPaths(short) err = %v, want ErrOffsetEmpty", err)
+func TestOffsetPathsErrors(t *testing.T) {
+	// Each case feeds invalid/edge input to OffsetPaths and asserts the exact
+	// sentinel error it must return. The cases differ in the input paths, the
+	// offset distance, and which ErrOffset* sentinel they expect.
+	cases := []struct {
+		name    string
+		lines   []Polyline
+		dist    float64
+		opts    OffsetOptions
+		wantErr error
+		msg     string
+	}{
+		{
+			name:    "EndPolygonRejected",
+			lines:   []Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
+			dist:    2,
+			opts:    OffsetOptions{End: EndPolygon},
+			wantErr: ErrOffsetEndType,
+			msg:     "OffsetPaths(EndPolygon) err = %v, want ErrOffsetEndType",
+		},
+		{
+			name:    "Empty",
+			lines:   nil,
+			dist:    2,
+			opts:    OffsetOptions{End: EndButt},
+			wantErr: ErrOffsetEmpty,
+			msg:     "OffsetPaths(nil) err = %v, want ErrOffsetEmpty",
+		},
+		{
+			// A single-point path (and a zero-length repeat) has no direction; skipped.
+			name:    "ShortSkipped",
+			lines:   []Polyline{{{X: 5, Y: 5}}, {{X: 1, Y: 1}, {X: 1, Y: 1}}},
+			dist:    2,
+			opts:    OffsetOptions{End: EndButt},
+			wantErr: ErrOffsetEmpty,
+			msg:     "OffsetPaths(short) err = %v, want ErrOffsetEmpty",
+		},
+		{
+			name:    "ZeroWidth",
+			lines:   []Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
+			dist:    0,
+			opts:    OffsetOptions{End: EndButt},
+			wantErr: ErrOffsetEmpty,
+			msg:     "OffsetPaths(d=0) err = %v, want ErrOffsetEmpty",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := OffsetPaths(tc.lines, tc.dist, tc.opts)
+			require.Equal(t, tc.wantErr, err, tc.msg, err)
+		})
+	}
 }
 
 func TestOffsetPathsJoinedSquareLoop(t *testing.T) {
@@ -164,10 +231,4 @@ func TestOffsetPathsJoinedTwoPointFallback(t *testing.T) {
 	require.NoError(t, err)
 	a := res.Area()
 	require.Greater(t, a, 0.0, "joined 2-point area = %g, want > 0", a)
-}
-
-func TestOffsetPathsZeroWidth(t *testing.T) {
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	_, err := OffsetPaths([]Polyline{line}, 0, OffsetOptions{End: EndButt})
-	require.Equal(t, ErrOffsetEmpty, err, "OffsetPaths(d=0) err = %v, want ErrOffsetEmpty", err)
 }

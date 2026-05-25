@@ -21,59 +21,79 @@ func TestOffsetZero(t *testing.T) {
 	require.InDelta(t, in.Area(), got.Area(), 0.01, "Offset(_, 0) changed area: %v vs %v", got.Area(), in.Area())
 }
 
-func TestOffsetSquareOutwardMiter(t *testing.T) {
-	// 10x10 square offset outward by 2 with miter joins gives a 14x14
-	// square (area 196).
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
-	got, err := Offset(in, 2, OffsetOptions{Join: JoinMiter})
-	require.NoError(t, err)
-	require.Len(t, got, 1, "expected 1 piece, got %d: %+v", len(got), got)
-	wantArea := 14.0 * 14.0
-	require.InDelta(t, wantArea, got.Area(), 0.5, "Offset(square, 2, miter) area %v want %v", got.Area(), wantArea)
-}
+func TestOffsetSquareOutward(t *testing.T) {
+	// A 10x10 square offset outward by 2 under each join style. The
+	// expected resulting area depends on how the corners are joined.
+	cases := []struct {
+		name string
+		opts OffsetOptions
+		// wantArea is the expected area for the case.
+		wantArea float64
+		// wantPieces, when > 0, asserts the number of resulting pieces.
+		wantPieces int
+		// tol, when > 0, drives a symmetric require.InDelta check.
+		tol float64
+		// assert, when non-nil, replaces the InDelta check with a custom
+		// assertion (used for the range-style "Square" case).
+		assert func(t *testing.T, area float64)
+	}{
+		{
+			// miter joins give a 14x14 square (area 196).
+			name:       "Miter",
+			opts:       OffsetOptions{Join: JoinMiter},
+			wantArea:   14.0 * 14.0,
+			wantPieces: 1,
+			tol:        0.5,
+		},
+		{
+			// round joins: the four corners become quarter-circles.
+			// Area = 14*14 - 4*4 + π*4 = 196 - 16 + 12.566 = 192.566.
+			// Round join uses chord approximation — looser tolerance.
+			name:     "Round",
+			opts:     OffsetOptions{Join: JoinRound, ArcTol: 0.05},
+			wantArea: 14.0*14.0 - 4.0*4.0 + math.Pi*4.0,
+			tol:      2,
+		},
+		{
+			// square joins produce a square corner (same as miter for
+			// axial). Area should equal the miter case: 196.
+			name:     "Square",
+			opts:     OffsetOptions{Join: JoinSquare},
+			wantArea: 14 * 14,
+			assert: func(t *testing.T, area float64) {
+				require.False(t, area < 14*14*0.95 || area > 14*14*1.05, "Offset(square, 2, square) area %v want ≈196", area)
+			},
+		},
+		{
+			// bevel joins: each 90° corner is cut by a straight chord
+			// between the two offset endpoints, removing a 2x2 right-
+			// triangle (area 2) from each corner of the 14x14 miter square.
+			// Area = 196 - 4*2 = 188.
+			name:       "Bevel",
+			opts:       OffsetOptions{Join: JoinBevel},
+			wantArea:   188.0,
+			wantPieces: 1,
+			tol:        0.5,
+		},
+	}
 
-func TestOffsetSquareOutwardRound(t *testing.T) {
-	// 10x10 square offset outward by 2 with round joins: the four
-	// corners become quarter-circles. Area = 14*14 - 4*4 + π*4 = 196 - 16
-	// + 12.566 = 192.566.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
-	got, err := Offset(in, 2, OffsetOptions{Join: JoinRound, ArcTol: 0.05})
-	require.NoError(t, err)
-	wantArea := 14.0*14.0 - 4.0*4.0 + math.Pi*4.0
-	// Round join uses chord approximation — allow looser tolerance.
-	require.InDelta(t, wantArea, got.Area(), 2, "Offset(square, 2, round) area %v want %v", got.Area(), wantArea)
-}
-
-func TestOffsetSquareOutwardSquare(t *testing.T) {
-	// 10x10 square offset outward by 2 with square joins: the four
-	// corners become 2x2 squares (45° chamfers from the offset endpoints).
-	// Actually square join produces a square corner (same as miter for
-	// axial). Area should equal the miter case: 196.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
-	got, err := Offset(in, 2, OffsetOptions{Join: JoinSquare})
-	require.NoError(t, err)
-	require.False(t, got.Area() < 14*14*0.95 || got.Area() > 14*14*1.05, "Offset(square, 2, square) area %v want ≈196", got.Area())
-}
-
-func TestOffsetSquareOutwardBevel(t *testing.T) {
-	// 10x10 square offset outward by 2 with bevel joins: each 90° corner is
-	// cut by a straight chord between the two offset endpoints, removing a
-	// 2x2 right-triangle (area 2) from each corner of the 14x14 miter square.
-	// Area = 196 - 4*2 = 188.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
-	got, err := Offset(in, 2, OffsetOptions{Join: JoinBevel})
-	require.NoError(t, err)
-	require.Len(t, got, 1, "expected 1 piece, got %d: %+v", len(got), got)
-	wantArea := 188.0
-	require.InDelta(t, wantArea, got.Area(), 0.5, "Offset(square, 2, bevel) area %v want %v", got.Area(), wantArea)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := MultiPolygon{ExPolygon{Outer: Polygon{
+				{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
+			}}}
+			got, err := Offset(in, 2, tc.opts)
+			require.NoError(t, err)
+			if tc.wantPieces > 0 {
+				require.Len(t, got, tc.wantPieces, "expected %d piece, got %d: %+v", tc.wantPieces, len(got), got)
+			}
+			if tc.assert != nil {
+				tc.assert(t, got.Area())
+			} else {
+				require.InDelta(t, tc.wantArea, got.Area(), tc.tol, "Offset(square, 2, %s) area %v want %v", tc.name, got.Area(), tc.wantArea)
+			}
+		})
+	}
 }
 
 func TestOffsetSquareInward(t *testing.T) {

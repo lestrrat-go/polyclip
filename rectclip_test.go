@@ -25,34 +25,84 @@ func mpArea(m MultiPolygon) float64 {
 	return a
 }
 
-func TestRectClipFullyInside(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	sub := MultiPolygon{{Outer: Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}}}
-	got := RectClip(sub, rect)
-	require.Len(t, got, 1, "got %d pieces, want 1", len(got))
-	require.InDelta(t, 16, mpArea(got), 1e-9, "area = %v, want 16", mpArea(got))
-	require.True(t, got[0].Outer.IsCCW(), "outer ring not normalized to CCW")
-}
+func TestRectClip(t *testing.T) {
+	cases := []struct {
+		name string
+		rect BBox
+		sub  MultiPolygon
+		// wantPieces, when checkPieces is true, asserts the exact number of
+		// clipped pieces (require.Len). EmptyRect/FullyOutside expect 0.
+		checkPieces bool
+		wantPieces  int
+		// wantArea, when checkArea is true, asserts the total clipped area
+		// within 1e-9. Cases that do not set checkArea make no area claim.
+		checkArea bool
+		wantArea  float64
+		// extra runs any additional bespoke assertions on the result.
+		extra func(t *testing.T, got MultiPolygon)
+	}{
+		{
+			name:        "FullyInside",
+			rect:        BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			sub:         MultiPolygon{{Outer: Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}}},
+			checkPieces: true,
+			wantPieces:  1,
+			checkArea:   true,
+			wantArea:    16,
+			extra: func(t *testing.T, got MultiPolygon) {
+				require.True(t, got[0].Outer.IsCCW(), "outer ring not normalized to CCW")
+			},
+		},
+		{
+			name:        "FullyOutside",
+			rect:        BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
+			sub:         MultiPolygon{{Outer: Polygon{{X: 20, Y: 20}, {X: 30, Y: 20}, {X: 30, Y: 30}, {X: 20, Y: 30}}}},
+			checkPieces: true,
+			wantPieces:  0,
+		},
+		{
+			// A small rect entirely within a large solid polygon clips to the full rect.
+			name:      "RectInsideSolid",
+			rect:      BBox{Min: Point{X: 40, Y: 40}, Max: Point{X: 60, Y: 60}},
+			sub:       MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 100, Y: 0}, {X: 100, Y: 100}, {X: 0, Y: 100}}}},
+			checkArea: true,
+			wantArea:  400,
+		},
+		{
+			// Subject overlaps only the top-right corner region [6,10]x[6,10] of the rect.
+			name:      "CornerOverlap",
+			rect:      BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			sub:       MultiPolygon{{Outer: Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}},
+			checkArea: true,
+			wantArea:  16,
+		},
+		{
+			name:        "EmptyRect",
+			rect:        EmptyBBox(),
+			sub:         MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 0, Y: 5}}}},
+			checkPieces: true,
+			wantPieces:  0,
+		},
+	}
 
-func TestRectClipFullyOutside(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}}
-	sub := MultiPolygon{{Outer: Polygon{{X: 20, Y: 20}, {X: 30, Y: 20}, {X: 30, Y: 30}, {X: 20, Y: 30}}}}
-	got := RectClip(sub, rect)
-	require.Empty(t, got, "got %d pieces, want 0", len(got))
-}
-
-func TestRectClipRectInsideSolid(t *testing.T) {
-	// A small rect entirely within a large solid polygon clips to the full rect.
-	rect := BBox{Min: Point{X: 40, Y: 40}, Max: Point{X: 60, Y: 60}}
-	sub := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 100, Y: 0}, {X: 100, Y: 100}, {X: 0, Y: 100}}}}
-	require.InDelta(t, 400, mpArea(RectClip(sub, rect)), 1e-9, "area want 400")
-}
-
-func TestRectClipCornerOverlap(t *testing.T) {
-	// Subject overlaps only the top-right corner region [6,10]x[6,10] of the rect.
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	sub := MultiPolygon{{Outer: Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}}
-	require.InDelta(t, 16, mpArea(RectClip(sub, rect)), 1e-9, "area want 16")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RectClip(tc.sub, tc.rect)
+			if tc.checkPieces {
+				if tc.wantPieces == 0 {
+					require.Empty(t, got, "got %d pieces, want 0", len(got))
+				} else {
+					require.Len(t, got, tc.wantPieces, "got %d pieces, want %d", len(got), tc.wantPieces)
+				}
+			}
+			if tc.checkArea {
+				require.InDelta(t, tc.wantArea, mpArea(got), 1e-9, "area = %v, want %v", mpArea(got), tc.wantArea)
+			}
+			if tc.extra != nil {
+				tc.extra(t, got)
+			}
+		})
+	}
 }
 
 func TestRectClipHolePreserved(t *testing.T) {
@@ -79,12 +129,6 @@ func TestRectClipConcaveSplitAreaParity(t *testing.T) {
 	want, err := Intersect(u, rectAsPolygon(rect))
 	require.NoError(t, err)
 	require.InDelta(t, mpArea(want), mpArea(got), 1e-9, "area want %v (Intersect)", mpArea(want))
-}
-
-func TestRectClipEmptyRect(t *testing.T) {
-	sub := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 0, Y: 5}}}}
-	got := RectClip(sub, EmptyBBox())
-	require.Empty(t, got, "got %d pieces, want 0", len(got))
 }
 
 func TestRectClipIntersectParityRandom(t *testing.T) {
@@ -121,46 +165,66 @@ func TestRectClipIntersectParityRandom(t *testing.T) {
 	require.GreaterOrEqual(t, checked, 1000, "only %d non-degenerate cases exercised, want > 1000", checked)
 }
 
-func TestRectClipLinesCrossing(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	got := RectClipLines([]Polyline{{{X: -5, Y: 5}, {X: 15, Y: 5}}}, rect)
-	want := []Polyline{{{X: 0, Y: 5}, {X: 10, Y: 5}}}
-	require.True(t, polylinesEqual(got, want), "got %v, want %v", got, want)
-}
+func TestRectClipLines(t *testing.T) {
+	cases := []struct {
+		name string
+		rect BBox
+		in   []Polyline
+		// want is the expected clipped output; when empty is true the result
+		// must be empty instead (require.Empty) and want is ignored.
+		want  []Polyline
+		empty bool
+	}{
+		{
+			name: "Crossing",
+			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			in:   []Polyline{{{X: -5, Y: 5}, {X: 15, Y: 5}}},
+			want: []Polyline{{{X: 0, Y: 5}, {X: 10, Y: 5}}},
+		},
+		{
+			name: "FullyInside",
+			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			in:   []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
+			want: []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
+		},
+		{
+			name:  "FullyOutside",
+			rect:  BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			in:    []Polyline{{{X: 20, Y: 20}, {X: 30, Y: 30}}},
+			empty: true,
+		},
+		{
+			// A path that dips out of the rect and back in is split into two polylines.
+			name: "Reentry",
+			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			in:   []Polyline{{{X: 2, Y: 5}, {X: 2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}}},
+			want: []Polyline{{{X: 2, Y: 5}, {X: 2, Y: 0}}, {{X: 8, Y: 0}, {X: 8, Y: 5}}},
+		},
+		{
+			// A vertex sitting exactly on the boundary must not split the polyline.
+			name: "TouchVertexStaysJoined",
+			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			in:   []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
+			want: []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
+		},
+		{
+			name:  "EmptyRect",
+			rect:  EmptyBBox(),
+			in:    []Polyline{{{X: 0, Y: 0}, {X: 5, Y: 5}}},
+			empty: true,
+		},
+	}
 
-func TestRectClipLinesFullyInside(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	in := Polyline{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}
-	got := RectClipLines([]Polyline{in}, rect)
-	require.True(t, polylinesEqual(got, []Polyline{in}), "got %v, want %v", got, in)
-}
-
-func TestRectClipLinesFullyOutside(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	got := RectClipLines([]Polyline{{{X: 20, Y: 20}, {X: 30, Y: 30}}}, rect)
-	require.Empty(t, got, "got %v, want none", got)
-}
-
-func TestRectClipLinesReentry(t *testing.T) {
-	// A path that dips out of the rect and back in is split into two polylines.
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	path := Polyline{{X: 2, Y: 5}, {X: 2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}}
-	got := RectClipLines([]Polyline{path}, rect)
-	want := []Polyline{{{X: 2, Y: 5}, {X: 2, Y: 0}}, {{X: 8, Y: 0}, {X: 8, Y: 5}}}
-	require.True(t, polylinesEqual(got, want), "got %v, want %v", got, want)
-}
-
-func TestRectClipLinesTouchVertexStaysJoined(t *testing.T) {
-	// A vertex sitting exactly on the boundary must not split the polyline.
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	path := Polyline{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}
-	got := RectClipLines([]Polyline{path}, rect)
-	require.True(t, polylinesEqual(got, []Polyline{path}), "got %v, want %v", got, path)
-}
-
-func TestRectClipLinesEmptyRect(t *testing.T) {
-	got := RectClipLines([]Polyline{{{X: 0, Y: 0}, {X: 5, Y: 5}}}, EmptyBBox())
-	require.Empty(t, got, "got %v, want none", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RectClipLines(tc.in, tc.rect)
+			if tc.empty {
+				require.Empty(t, got, "got %v, want none", got)
+				return
+			}
+			require.True(t, polylinesEqual(got, tc.want), "got %v, want %v", got, tc.want)
+		})
+	}
 }
 
 func polylinesEqual(a, b []Polyline) bool {

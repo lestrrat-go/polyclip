@@ -16,197 +16,204 @@ func vert(xv int64, src Source, reversed bool) Segment {
 	return Segment{Bot: bot, Top: top, Src: src, Reversed: false}
 }
 
-func TestClassifyLeftmostEdge(t *testing.T) {
-	// One subject edge, no neighbors.
-	s := vert(0, Subject, true) // Reversed → delta = +1
-	ael := NewAEL()
-	ae := &ActiveEdge{Seg: &s, CurrX: 0, WindDx: signedContribution(&s)}
-	ael.Insert(ae)
-	Classify(ael, ae, OpUnion)
-	require.Equal(t, 1, ae.WindSelf, "WindSelf: %d want 1", ae.WindSelf)
-	require.Equal(t, 0, ae.WindOther, "WindOther: %d want 0", ae.WindOther)
-	require.True(t, ae.Contributing, "leftmost edge should be contributing for Union")
-}
-
-func TestClassifyTwoSameSource(t *testing.T) {
-	// CCW subject square: left edge (X=0, downward in input — Reversed)
-	// then right edge (X=10, upward — non-Reversed). At Y=5.
-	left := vert(0, Subject, true)    // delta = +1
-	right := vert(10, Subject, false) // delta = -1
-	ael := NewAEL()
-	aeL := &ActiveEdge{Seg: &left, CurrX: 0, WindDx: signedContribution(&left)}
-	aeR := &ActiveEdge{Seg: &right, CurrX: 10, WindDx: signedContribution(&right)}
-	ael.Insert(aeL)
-	ael.Insert(aeR)
-	Classify(ael, aeL, OpUnion)
-	Classify(ael, aeR, OpUnion)
-
-	// WindSelf is Clipper2's wind_cnt — the HIGHER of the winding counts of
-	// the two regions touching the edge — so both sides of the square read 1
-	// (interior region has winding 1; exterior 0). The right edge reverses
-	// direction relative to the left, so it inherits the left's count.
-	require.True(t, aeL.WindSelf == 1 && aeR.WindSelf == 1, "WindSelf: L=%d R=%d want 1 1", aeL.WindSelf, aeR.WindSelf)
-	require.True(t, aeL.Contributing && aeR.Contributing, "Contributing: L=%v R=%v want both true", aeL.Contributing, aeR.Contributing)
-}
-
-func TestClassifyEvenOddSameSourceNested(t *testing.T) {
-	// Two nested same-source squares (outer X=0..20, inner X=5..15), all CCW.
-	// Under even-odd every edge bounds the source region regardless of winding
-	// magnitude, so ALL four verticals are contributing (the inner pair forms a
-	// hole). NonZero would drop the inner pair (WindSelf == 2).
-	sLO := vert(0, Subject, true)   // +1
-	sLI := vert(5, Subject, true)   // +1
-	sRI := vert(15, Subject, false) // -1
-	sRO := vert(20, Subject, false) // -1
-
-	ael := NewAEL()
-	ael.Fill = FillEvenOdd
-	edges := []*ActiveEdge{}
-	for _, s := range []*Segment{&sLO, &sLI, &sRI, &sRO} {
-		ae := &ActiveEdge{Seg: s, CurrX: s.Bot.X, WindDx: signedContribution(s)}
-		ael.Insert(ae)
-		edges = append(edges, ae)
+func TestClassify(t *testing.T) {
+	// Each case builds vertical segments via vert(), optionally sets the fill
+	// rule, inserts them into an AEL, classifies each edge with the given
+	// operation, then runs its check closure against the resulting edges (in
+	// insertion order).
+	type segSpec struct {
+		x        int64
+		src      Source
+		reversed bool
 	}
-	for _, ae := range edges {
-		Classify(ael, ae, OpUnion)
-	}
-	for i, ae := range edges {
-		require.Equal(t, 0, ae.WindOther, "edge %d: WindOther=%d want 0 (no clip)", i, ae.WindOther)
-		require.True(t, ae.Contributing, "edge %d: not contributing; even-odd treats every edge as a boundary", i)
-	}
-}
-
-func TestClassifyEvenOddCrossSourceParity(t *testing.T) {
-	// Two nested clip walls to the left, then a subject wall. The subject edge
-	// sees two clip crossings → even parity → OUTSIDE the clip under even-odd, so
-	// it does NOT contribute to an Intersection (NonZero's WindOther==2 would).
-	cL1 := vert(0, Clip, true)   // +1
-	cL2 := vert(2, Clip, true)   // +1
-	sV := vert(5, Subject, true) // +1
-	cR2 := vert(8, Clip, false)  // -1
-	cR1 := vert(10, Clip, false) // -1
-
-	ael := NewAEL()
-	ael.Fill = FillEvenOdd
-	edges := []*ActiveEdge{}
-	for _, s := range []*Segment{&cL1, &cL2, &sV, &cR2, &cR1} {
-		ae := &ActiveEdge{Seg: s, CurrX: s.Bot.X, WindDx: signedContribution(s)}
-		ael.Insert(ae)
-		edges = append(edges, ae)
-	}
-	for _, ae := range edges {
-		Classify(ael, ae, OpIntersect)
-	}
-	sa := edges[2] // the subject wall
-	require.Equal(t, 0, sa.WindOther, "subject WindOther=%d want 0 (even clip parity)", sa.WindOther)
-	require.False(t, sa.Contributing, "subject wall should NOT contribute to Intersect: even clip parity = outside clip")
-}
-
-func TestClassifyTwoOverlappingSquares(t *testing.T) {
-	// Subject square at X=0..10, clip square at X=5..15. Both CCW.
-	// At a scanline that crosses all four vertical edges:
-	//   X=0  subject left  (Reversed → +1)
-	//   X=5  clip left     (Reversed → +1)
-	//   X=10 subject right (Reversed=false → -1)
-	//   X=15 clip right    (Reversed=false → -1)
-	sL := vert(0, Subject, true)
-	cL := vert(5, Clip, true)
-	sR := vert(10, Subject, false)
-	cR := vert(15, Clip, false)
-
-	ael := NewAEL()
-	aeSL := &ActiveEdge{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)}
-	aeCL := &ActiveEdge{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)}
-	aeSR := &ActiveEdge{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)}
-	aeCR := &ActiveEdge{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)}
-	ael.Insert(aeSL)
-	ael.Insert(aeCL)
-	ael.Insert(aeSR)
-	ael.Insert(aeCR)
-
-	// Classify in left-to-right order (insertion order in this case).
-	for _, ae := range []*ActiveEdge{aeSL, aeCL, aeSR, aeCR} {
-		Classify(ael, ae, OpUnion)
-	}
-
-	// WindSelf is Clipper2's wind_cnt (higher winding of the two adjacent
-	// same-source regions), so each square's left and right edges both read 1.
-	// Contributing is what actually drives output and is unchanged:
-	//   aeSL: WindSelf=1 WindOther=0  contributing (subject outer, outside clip)
-	//   aeCL: WindSelf=1 WindOther=1  NOT contributing (clip edge inside subject)
-	//   aeSR: WindSelf=1 WindOther=1  NOT contributing (subject edge inside clip)
-	//   aeCR: WindSelf=1 WindOther=0  contributing (clip outer, outside subject)
 	cases := []struct {
-		name        string
-		ae          *ActiveEdge
-		wantSelf    int
-		wantOther   int
-		wantContrib bool
+		name    string
+		fill    FillRule // zero value = FillNonZero
+		setFill bool
+		op      Operation
+		segs    []segSpec
+		check   func(t *testing.T, edges []*ActiveEdge)
 	}{
-		{"aeSL", aeSL, 1, 0, true},
-		{"aeCL", aeCL, 1, 1, false},
-		{"aeSR", aeSR, 1, 1, false},
-		{"aeCR", aeCR, 1, 0, true},
+		{
+			// One subject edge, no neighbors.
+			name: "LeftmostEdge",
+			op:   OpUnion,
+			segs: []segSpec{
+				{0, Subject, true}, // Reversed → delta = +1
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				ae := edges[0]
+				require.Equal(t, 1, ae.WindSelf, "WindSelf: %d want 1", ae.WindSelf)
+				require.Equal(t, 0, ae.WindOther, "WindOther: %d want 0", ae.WindOther)
+				require.True(t, ae.Contributing, "leftmost edge should be contributing for Union")
+			},
+		},
+		{
+			// CCW subject square: left edge (X=0, downward in input — Reversed)
+			// then right edge (X=10, upward — non-Reversed). At Y=5.
+			name: "TwoSameSource",
+			op:   OpUnion,
+			segs: []segSpec{
+				{0, Subject, true},   // delta = +1
+				{10, Subject, false}, // delta = -1
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				aeL, aeR := edges[0], edges[1]
+				// WindSelf is Clipper2's wind_cnt — the HIGHER of the winding counts
+				// of the two regions touching the edge — so both sides of the square
+				// read 1 (interior region has winding 1; exterior 0). The right edge
+				// reverses direction relative to the left, so it inherits the left's
+				// count.
+				require.True(t, aeL.WindSelf == 1 && aeR.WindSelf == 1, "WindSelf: L=%d R=%d want 1 1", aeL.WindSelf, aeR.WindSelf)
+				require.True(t, aeL.Contributing && aeR.Contributing, "Contributing: L=%v R=%v want both true", aeL.Contributing, aeR.Contributing)
+			},
+		},
+		{
+			// Two nested same-source squares (outer X=0..20, inner X=5..15), all
+			// CCW. Under even-odd every edge bounds the source region regardless of
+			// winding magnitude, so ALL four verticals are contributing (the inner
+			// pair forms a hole). NonZero would drop the inner pair (WindSelf == 2).
+			name:    "EvenOddSameSourceNested",
+			fill:    FillEvenOdd,
+			setFill: true,
+			op:      OpUnion,
+			segs: []segSpec{
+				{0, Subject, true},   // +1
+				{5, Subject, true},   // +1
+				{15, Subject, false}, // -1
+				{20, Subject, false}, // -1
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				for i, ae := range edges {
+					require.Equal(t, 0, ae.WindOther, "edge %d: WindOther=%d want 0 (no clip)", i, ae.WindOther)
+					require.True(t, ae.Contributing, "edge %d: not contributing; even-odd treats every edge as a boundary", i)
+				}
+			},
+		},
+		{
+			// Two nested clip walls to the left, then a subject wall. The subject
+			// edge sees two clip crossings → even parity → OUTSIDE the clip under
+			// even-odd, so it does NOT contribute to an Intersection (NonZero's
+			// WindOther==2 would).
+			name:    "EvenOddCrossSourceParity",
+			fill:    FillEvenOdd,
+			setFill: true,
+			op:      OpIntersect,
+			segs: []segSpec{
+				{0, Clip, true},    // +1
+				{2, Clip, true},    // +1
+				{5, Subject, true}, // +1
+				{8, Clip, false},   // -1
+				{10, Clip, false},  // -1
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				sa := edges[2] // the subject wall
+				require.Equal(t, 0, sa.WindOther, "subject WindOther=%d want 0 (even clip parity)", sa.WindOther)
+				require.False(t, sa.Contributing, "subject wall should NOT contribute to Intersect: even clip parity = outside clip")
+			},
+		},
+		{
+			// Subject square at X=0..10, clip square at X=5..15. Both CCW.
+			// At a scanline that crosses all four vertical edges:
+			//   X=0  subject left  (Reversed → +1)
+			//   X=5  clip left     (Reversed → +1)
+			//   X=10 subject right (Reversed=false → -1)
+			//   X=15 clip right    (Reversed=false → -1)
+			name: "TwoOverlappingSquares",
+			op:   OpUnion,
+			segs: []segSpec{
+				{0, Subject, true},
+				{5, Clip, true},
+				{10, Subject, false},
+				{15, Clip, false},
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				// WindSelf is Clipper2's wind_cnt (higher winding of the two adjacent
+				// same-source regions), so each square's left and right edges both
+				// read 1. Contributing is what actually drives output and is
+				// unchanged:
+				//   aeSL: WindSelf=1 WindOther=0  contributing (subject outer, outside clip)
+				//   aeCL: WindSelf=1 WindOther=1  NOT contributing (clip edge inside subject)
+				//   aeSR: WindSelf=1 WindOther=1  NOT contributing (subject edge inside clip)
+				//   aeCR: WindSelf=1 WindOther=0  contributing (clip outer, outside subject)
+				inner := []struct {
+					name        string
+					ae          *ActiveEdge
+					wantSelf    int
+					wantOther   int
+					wantContrib bool
+				}{
+					{"aeSL", edges[0], 1, 0, true},
+					{"aeCL", edges[1], 1, 1, false},
+					{"aeSR", edges[2], 1, 1, false},
+					{"aeCR", edges[3], 1, 0, true},
+				}
+				for _, c := range inner {
+					require.True(t, c.ae.WindSelf == c.wantSelf && c.ae.WindOther == c.wantOther && c.ae.Contributing == c.wantContrib,
+						"%s: WindSelf=%d WindOther=%d Contributing=%v; want %d %d %v",
+						c.name, c.ae.WindSelf, c.ae.WindOther, c.ae.Contributing,
+						c.wantSelf, c.wantOther, c.wantContrib)
+				}
+			},
+		},
+		{
+			// Same configuration as TwoOverlappingSquares; for Intersect the inside
+			// edges contribute and the outside-only edges don't.
+			name: "OpIntersect",
+			op:   OpIntersect,
+			segs: []segSpec{
+				{0, Subject, true},
+				{5, Clip, true},
+				{10, Subject, false},
+				{15, Clip, false},
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				// For Intersect: contribute iff WindOther != 0.
+				wantContrib := []bool{false, true, true, false}
+				for i, w := range wantContrib {
+					require.Equal(t, w, edges[i].Contributing, "Intersect[%d].Contributing=%v want %v", i, edges[i].Contributing, w)
+				}
+			},
+		},
+		{
+			// For Xor every flip contributes regardless of WindOther.
+			name: "OpXor",
+			op:   OpXor,
+			segs: []segSpec{
+				{0, Subject, true},
+				{5, Clip, true},
+				{10, Subject, false},
+				{15, Clip, false},
+			},
+			check: func(t *testing.T, edges []*ActiveEdge) {
+				for i, ae := range edges {
+					require.True(t, ae.Contributing, "Xor[%d]: not contributing — should be (every flip contributes)", i)
+				}
+			},
+		},
 	}
-	for _, c := range cases {
-		require.True(t, c.ae.WindSelf == c.wantSelf && c.ae.WindOther == c.wantOther && c.ae.Contributing == c.wantContrib,
-			"%s: WindSelf=%d WindOther=%d Contributing=%v; want %d %d %v",
-			c.name, c.ae.WindSelf, c.ae.WindOther, c.ae.Contributing,
-			c.wantSelf, c.wantOther, c.wantContrib)
-	}
-}
 
-func TestClassifyOpIntersect(t *testing.T) {
-	// Same configuration as above; for Intersect the inside edges contribute
-	// and the outside-only edges don't.
-	sL := vert(0, Subject, true)
-	cL := vert(5, Clip, true)
-	sR := vert(10, Subject, false)
-	cR := vert(15, Clip, false)
-
-	ael := NewAEL()
-	aes := []*ActiveEdge{
-		{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)},
-		{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)},
-		{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)},
-		{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)},
-	}
-	for _, ae := range aes {
-		ael.Insert(ae)
-	}
-	for _, ae := range aes {
-		Classify(ael, ae, OpIntersect)
-	}
-
-	// For Intersect: contribute iff WindOther != 0.
-	wantContrib := []bool{false, true, true, false}
-	for i, w := range wantContrib {
-		require.Equal(t, w, aes[i].Contributing, "Intersect[%d].Contributing=%v want %v", i, aes[i].Contributing, w)
-	}
-}
-
-func TestClassifyOpXor(t *testing.T) {
-	// For Xor every flip contributes regardless of WindOther.
-	sL := vert(0, Subject, true)
-	cL := vert(5, Clip, true)
-	sR := vert(10, Subject, false)
-	cR := vert(15, Clip, false)
-
-	ael := NewAEL()
-	aes := []*ActiveEdge{
-		{Seg: &sL, CurrX: 0, WindDx: signedContribution(&sL)},
-		{Seg: &cL, CurrX: 5, WindDx: signedContribution(&cL)},
-		{Seg: &sR, CurrX: 10, WindDx: signedContribution(&sR)},
-		{Seg: &cR, CurrX: 15, WindDx: signedContribution(&cR)},
-	}
-	for _, ae := range aes {
-		ael.Insert(ae)
-	}
-	for _, ae := range aes {
-		Classify(ael, ae, OpXor)
-	}
-	for i, ae := range aes {
-		require.True(t, ae.Contributing, "Xor[%d]: not contributing — should be (every flip contributes)", i)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			segs := make([]Segment, len(tc.segs))
+			for i, sp := range tc.segs {
+				segs[i] = vert(sp.x, sp.src, sp.reversed)
+			}
+			ael := NewAEL()
+			if tc.setFill {
+				ael.Fill = tc.fill
+			}
+			edges := make([]*ActiveEdge, len(segs))
+			for i := range segs {
+				ae := &ActiveEdge{Seg: &segs[i], CurrX: segs[i].Bot.X, WindDx: signedContribution(&segs[i])}
+				ael.Insert(ae)
+				edges[i] = ae
+			}
+			for _, ae := range edges {
+				Classify(ael, ae, tc.op)
+			}
+			tc.check(t, edges)
+		})
 	}
 }
 

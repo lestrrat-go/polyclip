@@ -15,13 +15,117 @@ func seg(x1, y1, x2, y2 int64) Segment {
 	)
 }
 
-func TestIntersectProperCross(t *testing.T) {
-	a := seg(0, 0, 10, 10)
-	b := seg(0, 10, 10, 0)
-	r := Intersect(a, b)
-	require.Equal(t, ProperCross, r.Kind, "Kind: %v want ProperCross", r.Kind)
-	want := fixed.Point{X: 5, Y: 5}
-	require.Equal(t, want, r.P, "P: %+v want %+v", r.P, want)
+func TestIntersect(t *testing.T) {
+	pt := func(x, y int64) *fixed.Point {
+		return &fixed.Point{X: fixed.Coord(x), Y: fixed.Coord(y)}
+	}
+	cases := []struct {
+		name     string
+		a, b     Segment
+		wantKind Crossing
+		wantP    *fixed.Point // assert r.P only when non-nil
+		wantQ    *fixed.Point // assert r.Q only when non-nil
+	}{
+		{
+			name:     "ProperCross",
+			a:        seg(0, 0, 10, 10),
+			b:        seg(0, 10, 10, 0),
+			wantKind: ProperCross,
+			wantP:    pt(5, 5),
+		},
+		{
+			name:     "TouchAtEndpoint",
+			a:        seg(0, 0, 10, 0),
+			b:        seg(5, 0, 5, 10),
+			wantKind: Touch,
+			wantP:    pt(5, 0),
+		},
+		{
+			name:     "SharedEndpoint",
+			a:        seg(0, 0, 5, 5),
+			b:        seg(5, 5, 10, 0),
+			wantKind: Touch,
+			wantP:    pt(5, 5),
+		},
+		{
+			name:     "CollinearOverlap",
+			a:        seg(0, 0, 10, 0),
+			b:        seg(5, 0, 15, 0),
+			wantKind: CollinearOverlap,
+			wantP:    pt(5, 0),
+			wantQ:    pt(10, 0),
+		},
+		{
+			// Two collinear segments meeting at exactly one point.
+			name:     "CollinearTouch",
+			a:        seg(0, 0, 5, 0),
+			b:        seg(5, 0, 10, 0),
+			wantKind: Touch,
+			wantP:    pt(5, 0),
+		},
+		{
+			name:     "CollinearDisjoint",
+			a:        seg(0, 0, 5, 0),
+			b:        seg(10, 0, 15, 0),
+			wantKind: NoCrossing,
+		},
+		{
+			name:     "Parallel",
+			a:        seg(0, 0, 10, 10),
+			b:        seg(0, 5, 10, 15), // parallel, offset
+			wantKind: NoCrossing,
+		},
+		{
+			name:     "NonParallelNoOverlap",
+			a:        seg(0, 0, 1, 0),
+			b:        seg(10, 10, 11, 11), // far away, not parallel
+			wantKind: NoCrossing,
+		},
+		{
+			// b's bottom endpoint lies in the interior of a.
+			name:     "TJunction",
+			a:        seg(0, 0, 10, 0),
+			b:        seg(5, 0, 5, 10),
+			wantKind: Touch,
+			wantP:    pt(5, 0),
+		},
+		{
+			name:     "CollinearVertical",
+			a:        seg(3, 0, 3, 10),
+			b:        seg(3, 5, 3, 15),
+			wantKind: CollinearOverlap,
+			wantP:    pt(3, 5),
+			wantQ:    pt(3, 10),
+		},
+		{
+			name:     "CollinearContained",
+			a:        seg(0, 0, 10, 0),
+			b:        seg(3, 0, 7, 0),
+			wantKind: CollinearOverlap,
+			wantP:    pt(3, 0),
+			wantQ:    pt(7, 0),
+		},
+		{
+			// Both segments start at the origin.
+			name:     "AtOrigin",
+			a:        seg(0, 0, 10, 0),
+			b:        seg(0, 0, 0, 10),
+			wantKind: Touch,
+			wantP:    pt(0, 0),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Intersect(tc.a, tc.b)
+			require.Equal(t, tc.wantKind, r.Kind, "Kind: %v want %v", r.Kind, tc.wantKind)
+			if tc.wantP != nil {
+				require.Equal(t, *tc.wantP, r.P, "P: %+v want %+v", r.P, *tc.wantP)
+			}
+			if tc.wantQ != nil {
+				require.Equal(t, *tc.wantQ, r.Q, "Q: %+v want %+v", r.Q, *tc.wantQ)
+			}
+		})
+	}
 }
 
 func TestIntersectProperCrossOrderIndependent(t *testing.T) {
@@ -44,99 +148,4 @@ func TestIntersectProperCrossOrderIndependent(t *testing.T) {
 		require.True(t, ab.Kind == ProperCross && ba.Kind == ProperCross, "case %d: not a proper cross (%v,%v)", i, ab.Kind, ba.Kind)
 		require.Equal(t, ba.P, ab.P, "case %d: order-dependent crossing %+v vs %+v", i, ab.P, ba.P)
 	}
-}
-
-func TestIntersectTouchAtEndpoint(t *testing.T) {
-	a := seg(0, 0, 10, 0)
-	b := seg(5, 0, 5, 10)
-	r := Intersect(a, b)
-	require.Equal(t, Touch, r.Kind, "Kind: %v want Touch", r.Kind)
-	want := fixed.Point{X: 5, Y: 0}
-	require.Equal(t, want, r.P, "P: %+v want %+v", r.P, want)
-}
-
-func TestIntersectSharedEndpoint(t *testing.T) {
-	a := seg(0, 0, 5, 5)
-	b := seg(5, 5, 10, 0)
-	r := Intersect(a, b)
-	require.Equal(t, Touch, r.Kind, "Kind: %v want Touch", r.Kind)
-	want := fixed.Point{X: 5, Y: 5}
-	require.Equal(t, want, r.P, "P: %+v want %+v", r.P, want)
-}
-
-func TestIntersectCollinearOverlap(t *testing.T) {
-	a := seg(0, 0, 10, 0)
-	b := seg(5, 0, 15, 0)
-	r := Intersect(a, b)
-	require.Equal(t, CollinearOverlap, r.Kind, "Kind: %v want CollinearOverlap", r.Kind)
-	wantP := fixed.Point{X: 5, Y: 0}
-	wantQ := fixed.Point{X: 10, Y: 0}
-	require.Equal(t, wantP, r.P, "overlap: P=%v Q=%v want %v %v", r.P, r.Q, wantP, wantQ)
-	require.Equal(t, wantQ, r.Q, "overlap: P=%v Q=%v want %v %v", r.P, r.Q, wantP, wantQ)
-}
-
-func TestIntersectCollinearTouch(t *testing.T) {
-	// Two collinear segments meeting at exactly one point.
-	a := seg(0, 0, 5, 0)
-	b := seg(5, 0, 10, 0)
-	r := Intersect(a, b)
-	require.Equal(t, Touch, r.Kind, "Kind: %v want Touch", r.Kind)
-	require.Equal(t, fixed.Point{X: 5, Y: 0}, r.P, "P: %v", r.P)
-}
-
-func TestIntersectCollinearDisjoint(t *testing.T) {
-	a := seg(0, 0, 5, 0)
-	b := seg(10, 0, 15, 0)
-	r := Intersect(a, b)
-	require.Equal(t, NoCrossing, r.Kind, "Kind: %v want NoCrossing", r.Kind)
-}
-
-func TestIntersectParallel(t *testing.T) {
-	a := seg(0, 0, 10, 10)
-	b := seg(0, 5, 10, 15) // parallel, offset
-	r := Intersect(a, b)
-	require.Equal(t, NoCrossing, r.Kind, "Kind: %v want NoCrossing", r.Kind)
-}
-
-func TestIntersectNonParallelNoOverlap(t *testing.T) {
-	a := seg(0, 0, 1, 0)
-	b := seg(10, 10, 11, 11) // far away, not parallel
-	r := Intersect(a, b)
-	require.Equal(t, NoCrossing, r.Kind, "Kind: %v want NoCrossing", r.Kind)
-}
-
-func TestIntersectTJunction(t *testing.T) {
-	// b's bottom endpoint lies in the interior of a.
-	a := seg(0, 0, 10, 0)
-	b := seg(5, 0, 5, 10)
-	r := Intersect(a, b)
-	require.Equal(t, Touch, r.Kind, "Kind: %v want Touch (T-junction)", r.Kind)
-	require.Equal(t, fixed.Point{X: 5, Y: 0}, r.P, "P: %v", r.P)
-}
-
-func TestIntersectCollinearVertical(t *testing.T) {
-	a := seg(3, 0, 3, 10)
-	b := seg(3, 5, 3, 15)
-	r := Intersect(a, b)
-	require.Equal(t, CollinearOverlap, r.Kind, "Kind: %v want CollinearOverlap", r.Kind)
-	require.Equal(t, fixed.Point{X: 3, Y: 5}, r.P, "overlap: %v %v", r.P, r.Q)
-	require.Equal(t, fixed.Point{X: 3, Y: 10}, r.Q, "overlap: %v %v", r.P, r.Q)
-}
-
-func TestIntersectCollinearContained(t *testing.T) {
-	a := seg(0, 0, 10, 0)
-	b := seg(3, 0, 7, 0)
-	r := Intersect(a, b)
-	require.Equal(t, CollinearOverlap, r.Kind, "Kind: %v want CollinearOverlap", r.Kind)
-	require.Equal(t, fixed.Point{X: 3, Y: 0}, r.P, "overlap: %v %v", r.P, r.Q)
-	require.Equal(t, fixed.Point{X: 7, Y: 0}, r.Q, "overlap: %v %v", r.P, r.Q)
-}
-
-func TestIntersectAtOrigin(t *testing.T) {
-	// Both segments start at the origin.
-	a := seg(0, 0, 10, 0)
-	b := seg(0, 0, 0, 10)
-	r := Intersect(a, b)
-	require.Equal(t, Touch, r.Kind, "Kind: %v want Touch", r.Kind)
-	require.Equal(t, fixed.Point{X: 0, Y: 0}, r.P, "P: %v", r.P)
 }

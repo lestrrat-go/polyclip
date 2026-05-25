@@ -31,97 +31,151 @@ func makeClassifiedEdgeRev(currX int64, src Source, reversed bool, windSelf, win
 	}
 }
 
-func TestIntersectEdgesStaleEventDropped(t *testing.T) {
-	ael := NewAEL()
-	e1 := makeClassifiedEdge(0, Subject, 1, 0)
-	e2 := makeClassifiedEdge(10, Clip, 1, 0)
-	ael.Insert(e1)
-	ael.Insert(e2)
-	// e3 is not in the AEL — stale event.
-	e3 := makeClassifiedEdge(100, Subject, 1, 0)
-	got := IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 50, Y: 5})
-	require.Nil(t, got, "stale event should return nil, got %+v", got)
-}
+func TestIntersectEdges(t *testing.T) {
+	type edgeSpec struct {
+		currX     int64
+		src       Source
+		reversed  bool // only consulted when rev is true
+		rev       bool // build via makeClassifiedEdgeRev instead of makeClassifiedEdge
+		windSelf  int
+		windOther int
+	}
+	type testcase struct {
+		name string
+		// extra edges (besides e1/e2) to insert into the AEL before the call.
+		extra []edgeSpec
+		e1    edgeSpec
+		e2    edgeSpec
+		// callE2, when non-nil, is built and inserted but the IntersectEdges
+		// call uses it as the second edge instead of e2 (for stale/non-adjacent
+		// cases). When stale is set, callE2 is built but NOT inserted.
+		callE2  *edgeSpec
+		stale   bool
+		op      Operation
+		point   fixed.Point
+		wantNil bool
+		// assert, when non-nil, runs extra state assertions on the result and
+		// edges after the call.
+		assert func(t *testing.T, op *OutPt, e1, e2 *ActiveEdge)
+	}
 
-func TestIntersectEdgesNonAdjacentDropped(t *testing.T) {
-	ael := NewAEL()
-	e1 := makeClassifiedEdge(0, Subject, 1, 0)
-	e2 := makeClassifiedEdge(10, Clip, 1, 1)
-	e3 := makeClassifiedEdge(20, Subject, 0, 1)
-	ael.Insert(e1)
-	ael.Insert(e2)
-	ael.Insert(e3)
-	require.Nil(t, IntersectEdges(ael, OpUnion, e1, e3, fixed.Point{X: 15, Y: 5}), "non-adjacent edges should return nil")
-}
+	build := func(s edgeSpec) *ActiveEdge {
+		if s.rev {
+			return makeClassifiedEdgeRev(s.currX, s.src, s.reversed, s.windSelf, s.windOther)
+		}
+		return makeClassifiedEdge(s.currX, s.src, s.windSelf, s.windOther)
+	}
 
-func TestIntersectEdgesBranchCUnionFresh(t *testing.T) {
-	// Two cold edges of different sources cross.
-	// Branch C, different polytype → AddLocalMinPoly always.
-	ael := NewAEL()
-	e1 := makeClassifiedEdge(0, Subject, 1, 0)
-	e2 := makeClassifiedEdge(10, Clip, 1, 0)
-	ael.Insert(e1)
-	ael.Insert(e2)
+	cases := []testcase{
+		{
+			name:    "StaleEventDropped",
+			e1:      edgeSpec{currX: 0, src: Subject, windSelf: 1, windOther: 0},
+			e2:      edgeSpec{currX: 10, src: Clip, windSelf: 1, windOther: 0},
+			callE2:  &edgeSpec{currX: 100, src: Subject, windSelf: 1, windOther: 0},
+			stale:   true, // e3 (callE2) is not inserted into the AEL
+			op:      OpUnion,
+			point:   fixed.Point{X: 50, Y: 5},
+			wantNil: true,
+		},
+		{
+			name:    "NonAdjacentDropped",
+			e1:      edgeSpec{currX: 0, src: Subject, windSelf: 1, windOther: 0},
+			e2:      edgeSpec{currX: 10, src: Clip, windSelf: 1, windOther: 1},
+			callE2:  &edgeSpec{currX: 20, src: Subject, windSelf: 0, windOther: 1},
+			op:      OpUnion,
+			point:   fixed.Point{X: 15, Y: 5},
+			wantNil: true,
+		},
+		{
+			// Two cold edges of different sources cross.
+			// Branch C, different polytype → AddLocalMinPoly always.
+			name:  "BranchCUnionFresh",
+			e1:    edgeSpec{currX: 0, src: Subject, windSelf: 1, windOther: 0},
+			e2:    edgeSpec{currX: 10, src: Clip, windSelf: 1, windOther: 0},
+			op:    OpUnion,
+			point: fixed.Point{X: 5, Y: 50},
+			assert: func(t *testing.T, op *OutPt, e1, e2 *ActiveEdge) {
+				pt := fixed.Point{X: 5, Y: 50}
+				require.Equal(t, pt, op.P, "op.P = %v want %v", op.P, pt)
+				require.True(t, e1.IsHotEdge() && e2.IsHotEdge(), "edges should be hot after AddLocalMinPoly")
+			},
+		},
+		{
+			// Two cold edges of the SAME source converge: the left one is a
+			// left-side edge (reversed, WindDx +1) and the right one a
+			// right-side edge (non-reversed, WindDx -1), both at WindSelf 1
+			// with WindOther 0. The incremental wind update negates both to
+			// ±1, so branch C fires for Union (w1==w2==1, WindOther<=0 on
+			// both) → AddLocalMinPoly.
+			name:  "BranchCUnionSamePolyType",
+			e1:    edgeSpec{currX: 0, src: Subject, rev: true, reversed: true, windSelf: 1, windOther: 0},
+			e2:    edgeSpec{currX: 10, src: Subject, rev: true, reversed: false, windSelf: 1, windOther: 0},
+			op:    OpUnion,
+			point: fixed.Point{X: 5, Y: 50},
+		},
+		{
+			// Same polytype, wind 1, but both edges are inside the OTHER
+			// source (WindOther > 0). Union absorbs them — no contribution.
+			name:    "BranchCUnionInsideOther",
+			e1:      edgeSpec{currX: 0, src: Subject, windSelf: 1, windOther: 1},
+			e2:      edgeSpec{currX: 10, src: Subject, windSelf: 1, windOther: 1},
+			op:      OpUnion,
+			point:   fixed.Point{X: 5, Y: 50},
+			wantNil: true,
+		},
+		{
+			// Same polytype, converging (opposite WindDx) so both negate to
+			// ±1; both inside the other source (WindOther=1). op=Intersect
+			// contributes when WindOther>0 on both.
+			name:  "BranchCIntersect",
+			e1:    edgeSpec{currX: 0, src: Subject, rev: true, reversed: true, windSelf: 1, windOther: 1},
+			e2:    edgeSpec{currX: 10, src: Subject, rev: true, reversed: false, windSelf: 1, windOther: 1},
+			op:    OpIntersect,
+			point: fixed.Point{X: 5, Y: 50},
+		},
+		{
+			// Same polytype, converging (opposite WindDx) so both negate to
+			// ±1. op=Xor always contributes when w1==w2==1.
+			name:  "BranchCXor",
+			e1:    edgeSpec{currX: 0, src: Subject, rev: true, reversed: true, windSelf: 1, windOther: 0},
+			e2:    edgeSpec{currX: 10, src: Subject, rev: true, reversed: false, windSelf: 1, windOther: 0},
+			op:    OpXor,
+			point: fixed.Point{X: 5, Y: 50},
+		},
+	}
 
-	pt := fixed.Point{X: 5, Y: 50}
-	op := IntersectEdges(ael, OpUnion, e1, e2, pt)
-	require.NotNil(t, op, "expected AddLocalMinPoly to emit a vertex")
-	require.Equal(t, pt, op.P, "op.P = %v want %v", op.P, pt)
-	require.True(t, e1.IsHotEdge() && e2.IsHotEdge(), "edges should be hot after AddLocalMinPoly")
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ael := NewAEL()
+			e1 := build(tc.e1)
+			e2 := build(tc.e2)
+			ael.Insert(e1)
+			ael.Insert(e2)
+			for _, es := range tc.extra {
+				ael.Insert(build(es))
+			}
 
-func TestIntersectEdgesBranchCUnionSamePolyType(t *testing.T) {
-	// Two cold edges of the SAME source converge: the left one is a left-side
-	// edge (reversed, WindDx +1) and the right one a right-side edge
-	// (non-reversed, WindDx -1), both at WindSelf 1 with WindOther 0. The
-	// incremental wind update negates both to ±1, so branch C fires for Union
-	// (w1==w2==1, WindOther<=0 on both) → AddLocalMinPoly.
-	ael := NewAEL()
-	e1 := makeClassifiedEdgeRev(0, Subject, true, 1, 0)
-	e2 := makeClassifiedEdgeRev(10, Subject, false, 1, 0)
-	ael.Insert(e1)
-	ael.Insert(e2)
+			// The second edge passed to IntersectEdges. Defaults to e2 unless
+			// the case overrides it with callE2.
+			callE2 := e2
+			if tc.callE2 != nil {
+				callE2 = build(*tc.callE2)
+				if !tc.stale {
+					ael.Insert(callE2)
+				}
+			}
 
-	op := IntersectEdges(ael, OpUnion, e1, e2, fixed.Point{X: 5, Y: 50})
-	require.NotNil(t, op, "expected AddLocalMinPoly")
-}
-
-func TestIntersectEdgesBranchCUnionInsideOther(t *testing.T) {
-	// Same polytype, wind 1, but both edges are inside the OTHER source
-	// (WindOther > 0). Union absorbs them — no contribution.
-	ael := NewAEL()
-	e1 := makeClassifiedEdge(0, Subject, 1, 1)
-	e2 := makeClassifiedEdge(10, Subject, 1, 1)
-	ael.Insert(e1)
-	ael.Insert(e2)
-
-	op := IntersectEdges(ael, OpUnion, e1, e2, fixed.Point{X: 5, Y: 50})
-	require.Nil(t, op, "expected no emission, got %+v", op)
-}
-
-func TestIntersectEdgesBranchCIntersect(t *testing.T) {
-	// Same polytype, converging (opposite WindDx) so both negate to ±1; both
-	// inside the other source (WindOther=1). op=Intersect contributes when
-	// WindOther>0 on both.
-	ael := NewAEL()
-	e1 := makeClassifiedEdgeRev(0, Subject, true, 1, 1)
-	e2 := makeClassifiedEdgeRev(10, Subject, false, 1, 1)
-	ael.Insert(e1)
-	ael.Insert(e2)
-	op := IntersectEdges(ael, OpIntersect, e1, e2, fixed.Point{X: 5, Y: 50})
-	require.NotNil(t, op, "Intersect with both inside other should emit")
-}
-
-func TestIntersectEdgesBranchCXor(t *testing.T) {
-	// Same polytype, converging (opposite WindDx) so both negate to ±1.
-	// op=Xor always contributes when w1==w2==1.
-	ael := NewAEL()
-	e1 := makeClassifiedEdgeRev(0, Subject, true, 1, 0)
-	e2 := makeClassifiedEdgeRev(10, Subject, false, 1, 0)
-	ael.Insert(e1)
-	ael.Insert(e2)
-	op := IntersectEdges(ael, OpXor, e1, e2, fixed.Point{X: 5, Y: 50})
-	require.NotNil(t, op, "Xor should always emit at intersection")
+			op := IntersectEdges(ael, tc.op, e1, callE2, tc.point)
+			if tc.wantNil {
+				require.Nil(t, op, "expected nil result, got %+v", op)
+				return
+			}
+			require.NotNil(t, op, "expected IntersectEdges to emit a vertex")
+			if tc.assert != nil {
+				tc.assert(t, op, e1, callE2)
+			}
+		})
+	}
 }
 
 func TestIntersectEdgesBranchBOneHot(t *testing.T) {

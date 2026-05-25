@@ -511,6 +511,67 @@ remaining work is findable; the rationale lives in the cross-referenced section.
    `Triangulate` requires well-formed input and should be preceded by `Simplify`
    (§7.8(i)).
 
+### 7.10 Refactoring backlog (review 2026-05)
+
+Findings from a perf/UX-focused review of the shipped code. Each is a refactor,
+not a bug — current behaviour is correct. Ordered by impact. Profiled on
+`BenchmarkUnionManyPieces` (400 disjoint output rings) and `BrickWallLarge`.
+
+**Performance**
+
+1. **`buildContainmentForest` is `O(n²)` and the dominant non-sweep cost
+   (`boolean.go`).** The CPU profile puts it at ~12% of total runtime and
+   effectively *all* of `assembleResult` on the many-pieces workload. Every
+   output ring is matched against every other (`canContainRing` + `ringContains`)
+   even when the output is fully disjoint (the common slicer case: many islands,
+   no nesting), so all `n²` pairs are tested though none nest. It is a stabbing
+   query — *for each ring's interior point, which other ring bboxes contain it,
+   and of those the smallest-area `poly.Contains`*. A broad-phase fixes it
+   without touching the nesting semantics (the smallest-container selection is
+   unchanged; only the candidate set is pruned by sound bounds):
+   - low-risk: sort ring indices by `Min.X`, binary-search the X-window per
+     query, test only that window — near-linear for disjoint inputs;
+   - trivial partial win: a container must have strictly greater area
+     (`canContainRing`), so sorting by area and comparing each ring only against
+     larger ones halves the work.
+   This is the clear next step after the existing `interiorPoint` hoist into
+   `classifiedRing`. Complements §7.3 (which optimised preprocessing and crossing
+   enumeration but not the containment forest) and §7.9 item 4.
+2. **Preprocessing reallocates and re-maps three times (`sweepSegments`,
+   `boolean.go`).** `SplitOverlaps → SplitTJunctions → DedupCoincidentEdges` each
+   allocate a fresh `[]Segment` plus maps; `ManyPieces` shows ~61k allocs/op. The
+   worst offender is the per-segment `seen := map[fixed.Point]struct{}{}` inside
+   `splitAtInteriorEndpoints` (`preprocess.go`) — a map allocated for every
+   segment in a collinear bucket; for the common bucket size 2–3 a small slice +
+   linear scan wins. Constant-factor only; lower priority than item 1.
+
+**UX / API consistency**
+
+3. **`Simplify` vs `SimplifyPaths` name collision.** Unrelated operations —
+   `Simplify` resolves self-intersection via the engine; `SimplifyPaths` is
+   Douglas–Peucker vertex decimation. The names give no hint which is which.
+   Pre-1.0: consider renaming `SimplifyPaths` (e.g. `ReducePaths`/`Decimate`), or
+   lead each doc with an explicit "not the other one" line.
+4. **Empty-input convention is asymmetric.** `Offset(empty,…)` returns
+   `nil, ErrOffsetEmpty`, but `Union(empty,empty)` returns `MultiPolygon{}, nil`.
+   The same sentinel also conflates "you passed nothing" with "the shape
+   collapsed under inward offset"; the collapse signal is useful, the
+   empty-input-as-error part is the wart.
+5. **Result aliasing footgun in the boolean short-circuits (`execOp`,
+   `boolean.go`).** `Union(a,empty)` returns the caller's own `a` slice (the
+   disjoint-bbox path splices inputs), so mutating the result mutates the input.
+   The code already knows this — `buildPolyTree` copies defensively with the
+   comment that short-circuits "can return the caller's own polygons, which
+   Reverse must not mutate". Document on the public functions, or return a shallow
+   copy.
+6. **Minor type asymmetry.** `MinkowskiSum`/`MinkowskiDiff` take `path []Point`
+   while `OffsetPaths` takes `[]Polyline`, and `Polyline` *is* `[]Point`. Typing
+   the path parameter as `Polyline` would make the open-path intent explicit.
+
+   (Verified non-issue: `RectClip`/`RectClipLines`/`SimplifyPaths`/`Clean`/
+   `Triangulate` return no `error`, but each is genuinely sweep-free/geometric —
+   principled, not an oversight.)
+
 ---
 
 ## 8. Conventions and constraints

@@ -1,0 +1,92 @@
+package polyclip
+
+import (
+	"math/rand"
+	"testing"
+
+	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/lestrrat-go/polyclip/fixed"
+)
+
+// rawOp runs the engine pipeline with NO result-level masking: no subset filter,
+// no per-piece Difference decomposition, no Xor-by-composition (unlike the public
+// ops). It exposes the true IN-SWEEP correctness so the §7.6/§7.7 confluence
+// rework can be measured directly — the public ops report zero identity
+// violations only because those masks hide the residual sweep-level over-trace.
+func rawOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
+	bbox := a.BoundingBox().Union(b.BoundingBox())
+	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
+
+	segs := collectSegments(a, clip.Subject, scale)
+	segs = append(segs, collectSegments(b, clip.Clip, scale)...)
+	segs = clip.SplitOverlaps(segs)
+	segs = clip.SplitTJunctions(segs)
+	segs = clip.DedupCoincidentEdges(segs)
+	sw := clip.Sweep(segs, op)
+	if sw.Err != nil {
+		return nil, sw.Err
+	}
+	return assembleResult(sw.Rings, scale), nil
+}
+
+// countRawIdFails counts UNMASKED algebraic-identity violations over the skyline
+// corpus (axis-aligned shared-vertex inputs, the §7.6 stress set).
+func countRawIdFails() (int, int, int, int) {
+	tot, nU, nD, nX := 0, 0, 0, 0
+	for seed := range 40 {
+		rng := rand.New(rand.NewSource(int64(seed)*7919 + 3))
+		for range 400 {
+			m := 2 + rng.Intn(6)
+			a := MultiPolygon{ExPolygon{Outer: randSkyline(rng, 0, 0, m, 6)}}
+			bx, by := rng.Intn(m+1), rng.Intn(7)-3
+			b := MultiPolygon{ExPolygon{Outer: randSkyline(rng, bx, by, 1+rng.Intn(6), 6)}}
+			if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
+				continue
+			}
+			if !a.BoundingBox().Intersects(b.BoundingBox()) {
+				continue
+			}
+			u, ue := rawOp(a, b, clip.OpUnion)
+			i, ie := rawOp(a, b, clip.OpIntersect)
+			d, de := rawOp(a, b, clip.OpDifference)
+			x, xe := rawOp(a, b, clip.OpXor)
+			if ue != nil || ie != nil || de != nil || xe != nil {
+				continue
+			}
+			uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+			aA, bA := a.Area(), b.Area()
+			ub := abs(uA-(aA+bA-iA)) > 1e-6
+			db := abs(dA-(aA-iA)) > 1e-6
+			xb := abs(xA-(uA-iA)) > 1e-6
+			if ub || db || xb {
+				tot++
+				if ub {
+					nU++
+				}
+				if db {
+					nD++
+				}
+				if xb {
+					nX++
+				}
+			}
+		}
+	}
+	return tot, nU, nD, nX
+}
+
+// TestRawInSweepIdFailRatchet locks in the in-sweep confluence-rework progress.
+// The raw (unmasked) sweep still over-traces a residual class of coincident
+// cross-source confluences (§7.6/§7.7); the public ops mask it (subset filter,
+// Xor composition). This ratchets the residual so the rework can only shrink it.
+// Current residual: 13 — an Intersect-over-count cluster (a spurious lobe in
+// A∩B that surfaces as U/D/X identity breaks because want = f(I)) plus
+// direct-OpXor cases. Lower the bound as the rework progresses; never raise it.
+func TestRawInSweepIdFailRatchet(t *testing.T) {
+	const ratchet = 13
+	tot, nU, nD, nX := countRawIdFails()
+	t.Logf("raw in-sweep idfails: total=%d U=%d D=%d X=%d (ratchet=%d)", tot, nU, nD, nX, ratchet)
+	if tot > ratchet {
+		t.Errorf("raw in-sweep idfails regressed: got %d, ratchet %d", tot, ratchet)
+	}
+}

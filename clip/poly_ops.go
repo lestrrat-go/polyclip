@@ -142,9 +142,19 @@ func dispatchIntersect(
 	// coincident pair is a boundary EXIT, not a mutual cancellation — the
 	// continuing bound must re-spawn via the normal one-hot transfer, so do NOT
 	// skip there either. (DESIGN.md §12.11.)
+	// Skip only when at least one edge is a contributing boundary. When BOTH
+	// coincident edges are non-contributing the op region lies on neither side of
+	// the shared edge (it is interior to no output — e.g. a Difference seam where
+	// A∩B sits below and nothing above), so deferring to processHorzJoins leaves
+	// the two hot bounds dangling and one over-traces past where its source exits,
+	// spawning a spurious lobe (DESIGN.md §7.6). Falling through to the both-hot
+	// close (AddLocalMaxPoly) instead terminates the runs at the seam. This reads
+	// the maintained Contributing flags (not a fresh winding probe), so it is
+	// unaffected by enclosing-hole winding.
 	if op != OpXor && !samePolyType &&
 		e1.Outrec != e2.Outrec && w1 <= 1 && w2 <= 1 &&
 		e1.Seg.Horizontal() && e2.Seg.Horizontal() &&
+		(e1.Contributing || e2.Contributing) &&
 		(e1.Seg.Reversed != e2.Seg.Reversed || sameSideHotContinuesColdEnds(e1, e2) || sameSideBothHotOneEnds(e1, e2)) &&
 		max(e1.Seg.Bot.X, e2.Seg.Bot.X) < min(e1.Seg.Top.X, e2.Seg.Top.X) &&
 		(e1.IsBoundLast() || e2.IsBoundLast()) &&

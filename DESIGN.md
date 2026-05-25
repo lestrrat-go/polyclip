@@ -384,7 +384,14 @@ lies exactly on the other's, overlapping in Y). Two fixes have landed, cutting
    that tops out at the divergence contributes a synthetic turn vertex from its
    `WindDx` (interior side). Differential byte-identical (idU=idD=idX=0).
 
-**Residual (44):** the spurious lobes are half-integer (diagonal) artifacts where
+**Residual (43, was 44):** a third fix LANDED — `closeBound`'s cross-source
+self-closure now decides "ring continues above the coincident apex" by
+op-membership computed from the winding STRICTLY ABOVE the scanline (generalized
+from Intersect-only to all ops via `opMember`), closing the ring at the seam via
+`AddLocalMaxPoly` (lifecycle-respecting) when no output resumes above. Fixes the
+D13 Difference spurious-triangle; differential byte-identical.
+
+The remaining spurious lobes are half-integer (diagonal) artifacts where
 a Difference/Union ring mis-traces *up* a coincident wall reached via through-vertex
 advancement (which does not reclassify), then pinches into a diagonal spur. The
 remaining fix is a coincident-wall **ring redirect** at the confluence (turn the

@@ -3,7 +3,7 @@ package clip
 import (
 	"sort"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // SplitOverlaps takes a list of segments and returns a new list where every

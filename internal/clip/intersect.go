@@ -3,7 +3,7 @@ package clip
 import (
 	"math"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // Crossing classifies how two segments meet.

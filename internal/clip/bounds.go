@@ -6,7 +6,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // Bound is a chain of segments traversed monotonically in Y (non-decreasing).

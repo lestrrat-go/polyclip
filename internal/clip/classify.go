@@ -1,6 +1,6 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import "github.com/lestrrat-go/polyclip/internal/fixed"
 
 // FillRule selects which polygon-fill convention decides whether a winding
 // count is "inside". The boolean ops always use [FillNonZero]; [FillPositive]

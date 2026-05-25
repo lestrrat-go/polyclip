@@ -3,7 +3,7 @@ package polyclip
 import (
 	"errors"
 
-	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/lestrrat-go/polyclip/internal/clip"
 )
 
 // errUnknownOperation is returned by [Builder.Execute] for an Operation value

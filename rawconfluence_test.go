@@ -4,8 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/lestrrat-go/polyclip/clip"
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/clip"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 	"github.com/stretchr/testify/require"
 )
 

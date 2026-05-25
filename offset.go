@@ -4,8 +4,8 @@ import (
 	"errors"
 	"math"
 
-	"github.com/lestrrat-go/polyclip/clip"
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/clip"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // JoinType selects the geometry used at convex corners of an offset.

@@ -1,6 +1,6 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import "github.com/lestrrat-go/polyclip/internal/fixed"
 
 // OutPt is one vertex on an output ring's doubly-linked cyclic list.
 //

@@ -1,6 +1,6 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import "github.com/lestrrat-go/polyclip/internal/fixed"
 
 // Source identifies which input polygon a segment came from. The Vatti
 // algorithm distinguishes the two inputs because the boolean operation's

@@ -1,6 +1,6 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import "github.com/lestrrat-go/polyclip/internal/fixed"
 
 // ZCrossing records one genuine edge crossing — a [ProperCross] where two
 // segments meet strictly inside the sweep beam, producing a vertex that is not

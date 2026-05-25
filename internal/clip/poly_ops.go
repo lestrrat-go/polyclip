@@ -1,6 +1,6 @@
 package clip
 
-import "github.com/lestrrat-go/polyclip/fixed"
+import "github.com/lestrrat-go/polyclip/internal/fixed"
 
 // IntersectEdges applies DESIGN.md §12.5's decision tree at an intersection
 // of two adjacent AEL edges. It performs the AEL swap, updates the two edges'

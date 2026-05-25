@@ -3,7 +3,7 @@ package clip
 import (
 	"fmt"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // HorizClass tags a horizontal segment by its ring context, which determines

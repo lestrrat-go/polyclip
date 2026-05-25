@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/stretchr/testify/require"
 )
 

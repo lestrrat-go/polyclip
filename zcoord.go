@@ -1,8 +1,8 @@
 package polyclip
 
 import (
-	"github.com/lestrrat-go/polyclip/clip"
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/clip"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // ZAssigner computes the Z coordinate for a vertex the engine creates where two

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // Sweep runs the scanline sweep over segs for the given boolean operation

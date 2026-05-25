@@ -2,7 +2,7 @@
 // Intersect, Difference and Xor operations.
 //
 // The engine implements the Vatti polygon clipping algorithm on a fixed-point
-// integer grid (see [github.com/lestrrat-go/polyclip/fixed]). The high-level
+// integer grid (see [github.com/lestrrat-go/polyclip/internal/fixed]). The high-level
 // flow is:
 //
 //  1. The caller converts user-space polygons to fixed-point [Segment]s
@@ -14,6 +14,7 @@
 //     of the subject and clip inputs.
 //  4. The accumulated contributions are reassembled into output polygons.
 //
-// Public symbols here are exported so other subpackages within this module
-// can address them in tests; they are not part of polyclip's stable API.
+// This package lives under internal/ and is not importable outside this
+// module. Public symbols here are exported so other packages within the
+// module can address them; they are not part of polyclip's public API.
 package clip

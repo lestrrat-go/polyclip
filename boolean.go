@@ -6,8 +6,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/lestrrat-go/polyclip/clip"
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/clip"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // ErrHorizontalNotSupported is returned by the boolean ops when the
@@ -30,7 +30,7 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 //   - Inputs with non-horizontal edges or with horizontal edges that are
 //     each a local minimum (polygon bottom) or local maximum (polygon
 //     top) of their ring: the Vatti engine in
-//     [github.com/lestrrat-go/polyclip/clip] runs over the snapped
+//     [github.com/lestrrat-go/polyclip/internal/clip] runs over the snapped
 //     segments. Output rings are converted back to a float64
 //     MultiPolygon. Hole assignment uses signed-area sign and bbox-prefilter
 //     point-in-polygon (DESIGN.md §11.9).

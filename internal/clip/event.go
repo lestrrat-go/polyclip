@@ -3,7 +3,7 @@ package clip
 import (
 	"container/heap"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // EventKind tags the type of scanline event.

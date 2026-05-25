@@ -3,7 +3,7 @@ package clip
 import (
 	"sort"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // SweepRingsFill runs the sweep over rings given in per-ring traversal order

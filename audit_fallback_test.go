@@ -3,7 +3,7 @@ package polyclip
 import (
 	"testing"
 
-	"github.com/lestrrat-go/polyclip/clip"
+	"github.com/lestrrat-go/polyclip/internal/clip"
 )
 
 // TestAuditFallbackPath enumerates which tests trigger the legacy

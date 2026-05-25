@@ -26,6 +26,6 @@
 // # Stability
 //
 // The only stable public API surface is what is exported from this top-level
-// package. Subpackages under this module (e.g. clip/, offset/, fixed/) are
+// package. Packages under internal/ (internal/clip, internal/fixed) are
 // implementation detail and may change without notice.
 package polyclip

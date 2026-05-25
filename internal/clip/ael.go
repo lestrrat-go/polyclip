@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/lestrrat-go/polyclip/fixed"
+	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
 
 // ActiveEdge tracks a single segment as it crosses the active scanline.

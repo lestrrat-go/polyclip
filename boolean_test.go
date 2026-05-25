@@ -23,6 +23,61 @@ const (
 	identX = "X=U-I"
 )
 
+// opAreaCheck is one operation in a multi-op boolean regression test: run the
+// operation, expect no error, and assert the result area equals want within tol.
+type opAreaCheck struct {
+	name string
+	run  func() (MultiPolygon, error)
+	want float64
+}
+
+// runOpAreaChecks executes each check as a named subtest, asserting no error and
+// that the result area matches want within tol.
+func runOpAreaChecks(t *testing.T, tol float64, checks []opAreaCheck) {
+	t.Helper()
+	for _, c := range checks {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := c.run()
+			require.NoError(t, err, "%s: unexpected error", c.name)
+			require.InDelta(t, c.want, got.Area(), tol, "%s area %v want %v", c.name, got.Area(), c.want)
+		})
+	}
+}
+
+// boolAreas holds the input and four boolean-op result areas for a polygon pair.
+type boolAreas struct {
+	aA, bA, uA, iA, dA, xA float64
+}
+
+// runBooleanIdentities runs U/I/D/X on (a,b), asserts no error on each, and
+// checks the three set identities (U=A+B-I, D=A-I, X=U-I) within tol as named
+// subtests. It returns the areas so callers can add case-specific assertions.
+func runBooleanIdentities(t *testing.T, a, b MultiPolygon, tol float64) boolAreas {
+	t.Helper()
+	u, err := Union(a, b)
+	require.NoError(t, err, "union")
+	i, err := Intersect(a, b)
+	require.NoError(t, err, "intersect")
+	d, err := Difference(a, b)
+	require.NoError(t, err, "difference")
+	x, err := Xor(a, b)
+	require.NoError(t, err, "xor")
+	r := boolAreas{aA: a.Area(), bA: b.Area(), uA: u.Area(), iA: i.Area(), dA: d.Area(), xA: x.Area()}
+	for _, c := range []struct {
+		name      string
+		got, want float64
+	}{
+		{identU, r.uA, r.aA + r.bA - r.iA},
+		{identD, r.dA, r.aA - r.iA},
+		{identX, r.xA, r.uA - r.iA},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			require.InDelta(t, c.want, c.got, tol, "%s: got %v want %v", c.name, c.got, c.want)
+		})
+	}
+	return r
+}
+
 func sq(cx, cy, half float64) ExPolygon {
 	return ExPolygon{Outer: Polygon{
 		{X: cx - half, Y: cy - half},
@@ -400,21 +455,12 @@ func TestSharedCollinearHorizontalEdge(t *testing.T) {
 	}
 	mpA := MultiPolygon{{Outer: a}}
 	mpB := MultiPolygon{{Outer: b}}
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(mpA, mpB) }, 6},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
 		{opDifference, func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 4},
 		{opXor, func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 6},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
@@ -432,11 +478,6 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 		}
 		return MultiPolygon{{Outer: p}}
 	}
-	type check struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}
 	// Repro 1: A's top (7,8)-(2,8) and B's top (6,8)-(1,8) overlap on x∈[2,6].
 	// A lies almost entirely inside B; the difference is a thin top-right
 	// triangle (6,6),(7,8),(6,8) of area ~0.99 that was dropped (got 0).
@@ -446,7 +487,7 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 	// x∈[4,8]. Union dropped B's whole upper region (got 6.75 vs ~21.74).
 	a2 := mk(Polygon{{X: 1, Y: 2}, {X: 7, Y: 1}, {X: 8, Y: 3}, {X: 3, Y: 3}})
 	b2 := mk(Polygon{{X: 0, Y: 2}, {X: 4, Y: 3}, {X: 8, Y: 3}, {X: 2, Y: 6}})
-	checks := []check{
+	runOpAreaChecks(t, 0.05, []opAreaCheck{
 		{"r1/Union", func() (MultiPolygon, error) { return Union(a1, b1) }, 26.99},
 		{"r1/Intersect", func() (MultiPolygon, error) { return Intersect(a1, b1) }, 11.0},
 		{"r1/Difference", func() (MultiPolygon, error) { return Difference(a1, b1) }, 0.99},
@@ -454,12 +495,7 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 		{"r2/Union", func() (MultiPolygon, error) { return Union(a2, b2) }, 21.74},
 		{"r2/Intersect", func() (MultiPolygon, error) { return Intersect(a2, b2) }, 0.25},
 		{"r2/Difference", func() (MultiPolygon, error) { return Difference(a2, b2) }, 8.75},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.05, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
@@ -485,21 +521,12 @@ func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 4, Y: 4}, {X: 5, Y: 4}, {X: 7, Y: 3}, {X: 1, Y: 7}})
 	b := mk(Polygon{{X: 0, Y: 2}, {X: 3, Y: 2}, {X: 5, Y: 4}, {X: 2, Y: 4}})
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 8.5},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.5},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 8.5},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 	// Union must be a single merged ring, not two touching rings.
 	got, _ := Union(a, b)
 	require.Len(t, got, 1, "Union: got %d rings, want 1 merged ring", len(got))
@@ -516,20 +543,11 @@ func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
 	// is continuesCollinearHorizontal (DESIGN.md §12.11).
 	a := MultiPolygon{{Outer: Polygon{{X: 4, Y: 3}, {X: 2, Y: 6}, {X: 7, Y: 6}, {X: 0, Y: 8}}}}
 	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 3}, {X: 3, Y: 6}, {X: 0, Y: 6}, {X: 3, Y: 4}}}}
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 10.441667},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0.558333},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 5.441667},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
@@ -544,20 +562,11 @@ func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
 	// (DESIGN.md §12.11). Xor is a separate, unrelated class and is not asserted.
 	a := MultiPolygon{{Outer: Polygon{{X: 7, Y: 6}, {X: 8, Y: 6}, {X: 8, Y: 8}, {X: 1, Y: 3}}}}
 	b := MultiPolygon{{Outer: Polygon{{X: 1, Y: 2}, {X: 2, Y: 0}, {X: 8, Y: 6}, {X: 1, Y: 6}}}}
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 25.8},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 2.7},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.8},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
@@ -573,21 +582,12 @@ func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
 	// (DESIGN.md §12.11). Difference/Xor were already correct (Xor never skips).
 	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 3}, {X: 6, Y: 5}, {X: 8, Y: 5}, {X: 2, Y: 8}}}} // |A| = 16
 	b := MultiPolygon{{Outer: Polygon{{X: 0, Y: 4}, {X: 8, Y: 5}, {X: 7, Y: 5}, {X: 2, Y: 6}}}} // |B| = 6.5
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 16.5228},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 5.9772},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 10.0228},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 10.5456},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.01, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestSharedVertexCollinearHorizontalSimplified(t *testing.T) {
@@ -603,21 +603,12 @@ func TestSharedVertexCollinearHorizontalSimplified(t *testing.T) {
 	// truth is U=|A|+|B|, D=|A|, X=|A|+|B| (DESIGN.md §12.11).
 	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 0, Y: 5}, {X: 3, Y: 5}, {X: -1, Y: 6}}}} // |A| = 4
 	b := MultiPolygon{{Outer: Polygon{{X: 2, Y: 5}, {X: 1, Y: 5}, {X: 1, Y: 1}, {X: 3, Y: 5}}}}  // |B| = 4, (2,5) collinear
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 1e-9, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 8},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 4},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 8},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 1e-9, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestBooleanSharedVertexNotNested(t *testing.T) {
@@ -635,21 +626,12 @@ func TestBooleanSharedVertexNotNested(t *testing.T) {
 	mpA := MultiPolygon{{Outer: a}}
 	mpB := MultiPolygon{{Outer: b}}
 
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.5, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(mpA, mpB) }, 54},           // |A|+|B|, touch only
 		{opDifference, func() (MultiPolygon, error) { return Difference(mpA, mpB) }, 18}, // = |A|
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(mpA, mpB) }, 0},
 		{opXor, func() (MultiPolygon, error) { return Xor(mpA, mpB) }, 54},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.5, "%s area %v want %v (no false nesting at shared vertex)", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestSharedVertexExitViaHorizontal(t *testing.T) {
@@ -673,21 +655,12 @@ func TestSharedVertexExitViaHorizontal(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 5, Y: 1}, {X: 6, Y: 5}, {X: 5, Y: 5}, {X: 1, Y: 7}}) // |A| = 10
 	b := mk(Polygon{{X: 1, Y: 1}, {X: 7, Y: 0}, {X: 7, Y: 3}, {X: 6, Y: 5}}) // |B| = 16
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.05, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 22.17},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 3.83},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 6.17},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 18.33},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.05, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
@@ -712,21 +685,12 @@ func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 2, Y: 2}, {X: 7, Y: 2}, {X: 5, Y: 5}, {X: 3, Y: 5}})
 	b := mk(Polygon{{X: 0, Y: 0}, {X: 7, Y: 7}, {X: 3, Y: 4}, {X: 2, Y: 6}})
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 16.767},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 2.233},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 8.267},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 14.533},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestXorVertexOnEdgeApexMerge(t *testing.T) {
@@ -810,21 +774,12 @@ func TestUnionNotchTipOnHorizontalEdge(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 6, Y: 5}, {X: 7, Y: 3}, {X: 7, Y: 8}, {X: 3, Y: 3}}) // |A| = 6
 	b := mk(Polygon{{X: 8, Y: 5}, {X: 2, Y: 6}, {X: 3, Y: 0}, {X: 5, Y: 5}}) // |B| = 10
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 14.2879},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 1.7121},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 4.2879},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 12.5758},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
@@ -853,21 +808,12 @@ func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 0, Y: 8}, {X: 3, Y: 0}, {X: 2, Y: 4}, {X: 8, Y: 4}}) // |A| = 14
 	b := mk(Polygon{{X: 0, Y: 4}, {X: 1, Y: 1}, {X: 5, Y: 3}, {X: 4, Y: 4}}) // |B| = 9
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 22.1871},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0.8129},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 13.1871},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 21.3743},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestSharedVertexConcaveMaxThroughHorizontal(t *testing.T) {
@@ -951,21 +897,12 @@ func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 	}
 	a := mk(Polygon{{X: 0, Y: 0}, {X: 4, Y: 4}, {X: 8, Y: 5}, {X: 1, Y: 8}})
 	b := mk(Polygon{{X: 2, Y: 2}, {X: 5, Y: 2}, {X: 3, Y: 3}, {X: 0, Y: 3}})
-	checks := []struct {
-		op   string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 25.0331},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 1.4669},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 22.0331},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 23.5662},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.op)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.op, got.Area(), c.want)
-	}
+	})
 }
 
 func TestUnionDisjointDiamonds(t *testing.T) {
@@ -1229,21 +1166,12 @@ func TestCrossingSnapsOrderIndependently(t *testing.T) {
 	// (U=I+X, D=|A|-I, X=U-I all hold), NOT Clipper2.
 	a := makeQuad(-10, -10, 48, 48, 10, 40, -10, 65)
 	b := makeQuad(-3, 53, 3, -114, 3, 99, -36, 3)
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 2516.885291},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 351.114709},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 1268.885291},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 2165.770582},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestTouchingAlongHorizontalEdgeNotNested(t *testing.T) {
@@ -1259,21 +1187,12 @@ func TestTouchingAlongHorizontalEdgeNotNested(t *testing.T) {
 	// §12.11). interiorPoint now samples strictly between distinct vertex Ys.
 	a := makeQuad(8, 1, 12, 9, 6, 9, 5, 6)
 	b := makeQuad(6, 9, 12, 9, 2, 11, 4, 7)
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 43},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 31},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 43},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestInteriorPointAvoidsHorizontalEdge(t *testing.T) {
@@ -1301,21 +1220,12 @@ func TestXorCoincidentPlateauKeepsApex(t *testing.T) {
 	// D=|A|-I, X=U-I all hold), NOT Clipper2.
 	a := makeQuad(5, 9, 3, 3, 12, 9, 7, 9)
 	b := makeQuad(12, 9, 10, 9, 2, 10, 6, 3)
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 34.801471},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 18.198529},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 2.801471},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 16.602941},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestXorVertexOnEdgeApexKeepsCorner(t *testing.T) {
@@ -1332,21 +1242,12 @@ func TestXorVertexOnEdgeApexKeepsCorner(t *testing.T) {
 	// X=U-I all hold), NOT Clipper2.
 	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 1}, {X: 12, Y: 8}, {X: 7, Y: 6}, {X: 5, Y: 10}}}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 9.5, Y: 7}, {X: 8, Y: 7}, {X: 3, Y: 7}, {X: 5, Y: 2}}}}
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 28.159420},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 11.590580},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 11.909420},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 16.568841},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 }
 
 func TestSimplifyCollinearRing(t *testing.T) {
@@ -1454,21 +1355,12 @@ func TestBooleanInputHoleIslandNesting(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 4, Y: 6}}}}
 
-	checks := []struct {
-		name string
-		run  func() (MultiPolygon, error)
-		want float64
-	}{
+	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (MultiPolygon, error) { return Union(a, b) }, 68},
 		{opIntersect, func() (MultiPolygon, error) { return Intersect(a, b) }, 0},
 		{opDifference, func() (MultiPolygon, error) { return Difference(a, b) }, 64},
 		{opXor, func() (MultiPolygon, error) { return Xor(a, b) }, 68},
-	}
-	for _, c := range checks {
-		got, err := c.run()
-		require.NoError(t, err, "%s: unexpected error", c.name)
-		require.InDelta(t, c.want, got.Area(), 0.02, "%s area %v want %v", c.name, got.Area(), c.want)
-	}
+	})
 
 	// The union must keep the island as a SEPARATE top-level piece, and the
 	// square must keep its 6x6 hole — exactly two pieces, one holed, one not.
@@ -1509,30 +1401,10 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 4, Y: 9}, {X: 2, Y: 9}, {X: 4, Y: 8}, {X: 10, Y: 8}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Difference must not have collapsed (the bug dropped ~68 of 125.5).
-	require.GreaterOrEqual(t, dA, 120.0, "difference area %v collapsed (want ~%v)", dA, aA-iA)
-	// Noise-free set identities: U=A+B-I, D=A-I, X=U-I.
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.dA, 120.0, "difference area %v collapsed (want ~%v)", r.dA, r.aA-r.iA)
 }
 
 func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
@@ -1554,30 +1426,10 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 11, Y: 4}, {X: 7, Y: 12}, {X: 0, Y: 1}, {X: 4, Y: 0}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Difference must not have collapsed (the bug dropped ~64 of ~82.3).
-	require.GreaterOrEqual(t, dA, 78.0, "difference area %v collapsed (want ~%v)", dA, aA-iA)
-	// Noise-free set identities: U=A+B-I, D=A-I, X=U-I.
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.dA, 78.0, "difference area %v collapsed (want ~%v)", r.dA, r.aA-r.iA)
 }
 
 func TestBooleanHoledInputDifferenceClipApexSameSideJoin(t *testing.T) {
@@ -1631,29 +1483,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 5}, {X: 12, Y: 5}, {X: 5, Y: 10}, {X: 3.5, Y: 3.25}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~21).
-	require.GreaterOrEqual(t, iA, 18.0, "intersect area %v collapsed (want ~21)", iA)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.iA, 18.0, "intersect area %v collapsed (want ~21)", r.iA)
 }
 
 func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
@@ -1757,29 +1590,12 @@ func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 7, Y: 8}, {X: 2, Y: 7}, {X: 0, Y: 1}, {X: 10, Y: 10}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
-	require.GreaterOrEqual(t, iA, 14.0, "intersect area %v collapsed (want ~15.3)", iA)
+	r := runBooleanIdentities(t, a, b, 0.02)
+	require.GreaterOrEqual(t, r.iA, 14.0, "intersect area %v collapsed (want ~15.3)", r.iA)
 	// No phantom interior hole: the intersection is a single simple region.
 	require.True(t, len(i) == 1 && len(i[0].Holes) == 0, "intersect should be one hole-free ring, got %d pieces %v", len(i), i)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
 }
 
 func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
@@ -1988,29 +1804,10 @@ func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 7}, {X: 5, Y: 7}, {X: 11, Y: 1}, {X: 7, Y: 11}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Intersect must not have collapsed (the bug returned ~1.2 instead of ~20.8).
-	require.GreaterOrEqual(t, iA, 19.0, "intersect area %v collapsed (want ~20.8)", iA)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.iA, 19.0, "intersect area %v collapsed (want ~20.8)", r.iA)
 }
 
 func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
@@ -2033,29 +1830,10 @@ func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 3, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 11}, {X: 2, Y: 3}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~12).
-	require.GreaterOrEqual(t, iA, 10.0, "intersect area %v collapsed (want ~12)", iA)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.iA, 10.0, "intersect area %v collapsed (want ~12)", r.iA)
 }
 
 func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
@@ -2077,29 +1855,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 5, Y: 8}, {X: 7, Y: 8}, {X: 0, Y: 12}, {X: 0, Y: 6}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Intersect must not have collapsed (the bug returned 0 instead of ~19).
-	require.GreaterOrEqual(t, iA, 17.0, "intersect area %v collapsed (want ~19)", iA)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.GreaterOrEqual(t, r.iA, 17.0, "intersect area %v collapsed (want ~19)", r.iA)
 }
 
 func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
@@ -2123,29 +1882,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 	}}
 	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 1, Y: 1}, {X: 10, Y: 9}, {X: 1, Y: 9}, {X: 3, Y: 5}}}}
 
-	u, err := Union(a, b)
-	require.NoError(t, err, "union")
-	i, err := Intersect(a, b)
-	require.NoError(t, err, "intersect")
-	d, err := Difference(a, b)
-	require.NoError(t, err, "difference")
-	x, err := Xor(a, b)
-	require.NoError(t, err, "xor")
-	aA, bA := a.Area(), b.Area()
-	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	r := runBooleanIdentities(t, a, b, 0.02)
 
 	// Difference must not have over-counted (the bug emitted 152 > A.Area).
-	require.LessOrEqual(t, dA, aA+0.02, "difference area %v over-counts (want ~%v)", dA, aA-iA)
-	for _, c := range []struct {
-		name      string
-		got, want float64
-	}{
-		{identU, uA, aA + bA - iA},
-		{identD, dA, aA - iA},
-		{identX, xA, uA - iA},
-	} {
-		require.InDelta(t, c.want, c.got, 0.02, "%s: got %v want %v", c.name, c.got, c.want)
-	}
+	require.LessOrEqual(t, r.dA, r.aA+0.02, "difference area %v over-counts (want ~%v)", r.dA, r.aA-r.iA)
 }
 
 func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {

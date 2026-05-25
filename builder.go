@@ -63,8 +63,8 @@ func toClipFill(r FillRule) clip.FillRule {
 }
 
 // Polyline is an open path: a sequence of points with no implicit closing
-// edge. It is the open-subject input type and the open-result type. Open-path
-// support is a planned feature; today's closed-polygon ops never produce one.
+// edge. It is the open-subject input type ([Builder.AddOpenSubject]) and the
+// open-result type (Result.Open).
 type Polyline []Point
 
 // Result is the output of [Builder.Execute]. Closed holds the closed-polygon
@@ -104,9 +104,10 @@ type PolyTreeNode struct {
 // accumulated inputs for a fresh set. A Builder is single-goroutine, the same
 // rule as a MultiPolygon.
 type Builder struct {
-	subj MultiPolygon
-	clip MultiPolygon
-	fill FillRule
+	subj     MultiPolygon
+	subjOpen []Polyline
+	clip     MultiPolygon
+	fill     FillRule
 }
 
 // NewBuilder returns an empty Builder.
@@ -121,6 +122,16 @@ func (b *Builder) AddSubject(m ...MultiPolygon) *Builder {
 	for _, mp := range m {
 		b.subj = append(b.subj, mp...)
 	}
+	return b
+}
+
+// AddOpenSubject adds open subject polylines. Unlike closed subjects, an open
+// path has no implicit closing edge and no area; [Builder.Execute] clips it
+// against the closed operands and returns the surviving chains in Result.Open.
+// Open paths are subjects only (Clipper2 forbids open clips) and never clip one
+// another. Multiple calls aggregate. Returns the receiver for chaining.
+func (b *Builder) AddOpenSubject(p ...Polyline) *Builder {
+	b.subjOpen = append(b.subjOpen, p...)
 	return b
 }
 
@@ -146,6 +157,7 @@ func (b *Builder) Fill(r FillRule) *Builder {
 // Returns the receiver for chaining.
 func (b *Builder) Reset() *Builder {
 	b.subj = nil
+	b.subjOpen = nil
 	b.clip = nil
 	b.fill = FillNonZero
 	return b
@@ -153,14 +165,18 @@ func (b *Builder) Reset() *Builder {
 
 // Execute runs op over the accumulated subjects and clips and returns the
 // result. It does not mutate the accumulated inputs, so it may be called
-// repeatedly with different ops. Result.Open is nil (open paths are a planned
-// feature).
+// repeatedly with different ops. Result.Open holds the clipped open subjects
+// (see [Builder.AddOpenSubject]); it is nil when no open subjects were added.
 func (b *Builder) Execute(op Operation) (Result, error) {
 	closed, err := execOp(b.subj, b.clip, op, b.fill)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Closed: closed}, nil
+	res := Result{Closed: closed}
+	if len(b.subjOpen) > 0 {
+		res.Open = clipOpenPaths(b.subjOpen, op, b.subj, b.clip)
+	}
+	return res, nil
 }
 
 // ExecuteTree runs op like [Builder.Execute] but returns the result as a nested

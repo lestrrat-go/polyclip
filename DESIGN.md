@@ -70,7 +70,7 @@ The public surface is small; see the Go doc comments for full signatures.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
-Not yet implemented — planned for Clipper2 parity (§7.8): open-polyline clipping. Open-polyline offset (ribbons with end caps) is available via `OffsetPaths`; caller-selectable fill rules (incl. even-odd) via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`; fast axis-aligned rectangle clip via `RectClip`/`RectClipLines`.
+Open-polyline clipping is available via `Builder.AddOpenSubject` + `Result.Open`; open-polyline offset (ribbons with end caps) via `OffsetPaths`; caller-selectable fill rules (incl. even-odd) via `Builder.Fill`; nested-hierarchy output via `Builder.ExecuteTree` (`PolyTree`); Douglas–Peucker path reduction via `SimplifyPaths`; bevel joins via `JoinBevel`; Minkowski sum/difference via `MinkowskiSum`/`MinkowskiDiff`; fast axis-aligned rectangle clip via `RectClip`/`RectClipLines`.
 
 ---
 
@@ -307,7 +307,7 @@ state vs. Clipper2's planar API:
 | Join Miter / Round / Square  | done     | —    |
 | Join Bevel                   | done     | (a)  |
 | Fill rules incl. EvenOdd     | done     | (b)  |
-| Open-path clipping           | gap      | (c)  |
+| Open-path clipping           | done     | (c)  |
 | Open-path offset (end caps)  | done     | (c) / §7.4 |
 | Nested `PolyTree` output     | done     | (d)  |
 | Minkowski sum / difference   | done     | (e)  |
@@ -317,7 +317,8 @@ state vs. Clipper2's planar API:
 | Triangulation                | gap      | (i)  |
 
 Most are **additive API** over the existing sweep, the containment forest (§11.9),
-or `Union` — only open-path *clipping* and Z-coords touch the engine.
+or `Union` — only Z-coords would touch the engine. (Open-path clipping was
+expected to, but landed as a standalone post-sweep pass — see (c).)
 
 **(0) `Builder` accumulator API (done).** The Clipper2-style entry point the
 remaining features build on: `NewBuilder().AddSubject(…).AddClip(…).Execute(op)`
@@ -328,8 +329,8 @@ thin wrappers over the unexported `execOp`, which is now the single home for the
 per-op short-circuits, Xor-by-composition (§7.6), and per-piece Difference (§7.7).
 `Execute` is non-destructive and `Reset` clears the inputs for reuse. Landed
 behavior-preserving: differential byte-identical (random 0, degenerate 93,
-holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection (b) and `ExecuteTree`
-(d) have since landed; `AddOpenSubject` is reserved for step (c).
+holes 236, multipiece 0, idU=idD=idX=0). `Fill` selection (b), `ExecuteTree`
+(d), and `AddOpenSubject` / `Result.Open` (c) have since landed.
 
 **(a) Bevel join (done).** `JoinBevel` added to `JoinType`; at a convex corner
 `emitVertex` emits the straight chord between the two offset-edge endpoints
@@ -362,12 +363,22 @@ yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-forme
 §1/§3/§7.4 non-goal. Open paths are subjects only (a clip region must be closed).
 - *Type:* `Polyline []Point` alongside `Polygon`; a result carries both a closed
   `MultiPolygon` and `[]Polyline`.
-- *Clipping:* an open edge is tagged `open` — it participates in crossing
-  detection (so it splits at every boundary crossing) but does **not** contribute
-  to ring winding. After the sweep each open sub-segment is kept or dropped by
-  sampling the closed operands' membership at its midpoint under the op, then
-  survivors are stitched into open chains. Engine work is a per-edge `open` flag
-  plus a separate open-output collector; the closed-ring machinery is untouched.
+- *Clipping (done):* `Builder.AddOpenSubject(p …Polyline)` accumulates open
+  subjects; `Execute` clips them and returns the survivors in `Result.Open`.
+  Landed as a **standalone post-sweep pass** (`openpath.go`), not the originally
+  planned in-sweep tagged-edge approach — the engine is untouched. Each open
+  segment is split at every crossing of a relevant closed boundary ring (found by
+  segment/edge intersection), and each sub-segment is kept iff its midpoint
+  satisfies the op's keep predicate, a direct port of Clipper2's
+  `IsContributingOpen`: Intersect keeps points inside the clip region; Difference
+  and Xor keep points outside the clip region (an open path has no area, so ⊕
+  reduces to −); Union keeps points outside **both** the subject and clip regions.
+  Membership is the filled-region test (`MultiPolygon.Contains`). Survivors are
+  stitched into chains, breaking at each dropped sub-segment. Open paths never
+  clip one another (matching Clipper2). No engine/clip change → differential
+  byte-identical (random 0, degenerate 93, holes 236, multipiece 0,
+  idU=idD=idX=0). Tests: `openpath_test.go` (exact hand-computed per-op cases +
+  a randomized sampled-membership oracle over 1500 cases × 4 ops).
 - *Offset (§7.4) — done:* `OffsetPaths(lines []Polyline, d, opts)` offsets a
   polyline into a closed ribbon, |d| to each side, capped per `opts.End`
   (`EndButt` flush / `EndSquare` extended `|d|` / `EndRound` semicircle). The
@@ -380,8 +391,8 @@ yet. Tests: `builder_fill_test.go` (overlap→hole, nested→annulus, well-forme
   differential is structurally unaffected (byte-identical, gross 93/236).
   `EndPolygon` is rejected (`ErrOffsetEndType`); `EndJoined` (open path closed
   into a loop band) is not yet implemented. Tests: `offsetpaths_test.go`.
-Clipping (the sweep-touching half) is still a gap. Only the clipping half touches
-the sweep.
+
+Both halves of (c) have landed; `EndJoined` is the only remaining offset gap.
 
 **(d) Nested `PolyTree` output (done).** Root `PolyTree{Children}` /
 `PolyTreeNode{Polygon; IsHole; Children}` plus `Builder.ExecuteTree(op)`.

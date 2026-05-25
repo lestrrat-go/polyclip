@@ -299,7 +299,7 @@ state vs. Clipper2's planar API:
 
 | Clipper2 feature             | polyclip | Plan |
 |------------------------------|----------|------|
-| `Clipper` accumulator API    | done     | (0)  |
+| `Builder` accumulator API    | done     | (0)  |
 | Boolean ops (∪ ∩ − ⊕)        | done     | —    |
 | Polygon offset, closed       | done     | —    |
 | Join Miter / Round / Square  | done     | —    |
@@ -317,8 +317,8 @@ state vs. Clipper2's planar API:
 Most are **additive API** over the existing sweep, the containment forest (§11.9),
 or `Union` — only open-path *clipping* and Z-coords touch the engine.
 
-**(0) `Clipper` accumulator API (done).** The Clipper2-style entry point the
-remaining features build on: `NewClipper().AddSubject(…).AddClip(…).Execute(op)`
+**(0) `Builder` accumulator API (done).** The Clipper2-style entry point the
+remaining features build on: `NewBuilder().AddSubject(…).AddClip(…).Execute(op)`
 returning `Result{Closed, Open}`, with a root-package `Operation`
 (`OpUnion`/`OpIntersect`/`OpDifference`/`OpXor`). The accumulator is the general
 path; the named free functions (`Union`/`Intersect`/`Difference`/`Xor`) became

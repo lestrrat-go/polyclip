@@ -9,11 +9,11 @@ func mpRect(x0, y0, x1, y1 float64) MultiPolygon {
 	}}}
 }
 
-// TestClipperMatchesFreeFunctions asserts the accumulator's Execute is
+// TestBuilderMatchesFreeFunctions asserts the accumulator's Execute is
 // byte-identical to the named free functions across overlapping, disjoint,
 // identical, empty and multipiece inputs — the step-0 behavior-preserving
 // contract (DESIGN.md §7.8).
-func TestClipperMatchesFreeFunctions(t *testing.T) {
+func TestBuilderMatchesFreeFunctions(t *testing.T) {
 	overlapA := mpRect(0, 0, 4, 4)
 	overlapB := mpRect(2, 2, 6, 6)
 	disjointB := mpRect(10, 10, 12, 12)
@@ -46,7 +46,7 @@ func TestClipperMatchesFreeFunctions(t *testing.T) {
 	for _, tc := range cases {
 		for _, o := range ops {
 			want, werr := o.free(tc.a, tc.b)
-			got, gerr := NewClipper().AddSubject(tc.a).AddClip(tc.b).Execute(o.op)
+			got, gerr := NewBuilder().AddSubject(tc.a).AddClip(tc.b).Execute(o.op)
 			if (werr == nil) != (gerr == nil) {
 				t.Fatalf("%s op=%d: error mismatch free=%v clipper=%v", tc.name, o.op, werr, gerr)
 			}
@@ -63,11 +63,11 @@ func TestClipperMatchesFreeFunctions(t *testing.T) {
 	}
 }
 
-// TestClipperAccumulatesAndResets checks that multiple Add* calls aggregate
+// TestBuilderAccumulatesAndResets checks that multiple Add* calls aggregate
 // their pieces into a single subject/clip set, that Execute is non-destructive
 // (repeatable), and that Reset clears the inputs.
-func TestClipperAccumulatesAndResets(t *testing.T) {
-	c := NewClipper().
+func TestBuilderAccumulatesAndResets(t *testing.T) {
+	c := NewBuilder().
 		AddSubject(mpRect(0, 0, 2, 2)).
 		AddSubject(mpRect(0, 4, 2, 6)).
 		AddClip(mpRect(1, -1, 3, 5))
@@ -106,10 +106,10 @@ func TestClipperAccumulatesAndResets(t *testing.T) {
 	}
 }
 
-// TestClipperUnknownOperation asserts an out-of-range Operation errors rather
+// TestBuilderUnknownOperation asserts an out-of-range Operation errors rather
 // than silently producing wrong output.
-func TestClipperUnknownOperation(t *testing.T) {
-	if _, err := NewClipper().AddSubject(mpRect(0, 0, 1, 1)).Execute(Operation(99)); err == nil {
+func TestBuilderUnknownOperation(t *testing.T) {
+	if _, err := NewBuilder().AddSubject(mpRect(0, 0, 1, 1)).Execute(Operation(99)); err == nil {
 		t.Error("Execute with unknown op: want error, got nil")
 	}
 }

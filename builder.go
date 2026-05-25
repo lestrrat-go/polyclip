@@ -6,11 +6,11 @@ import (
 	"github.com/lestrrat-go/polyclip/clip"
 )
 
-// errUnknownOperation is returned by [Clipper.Execute] for an Operation value
+// errUnknownOperation is returned by [Builder.Execute] for an Operation value
 // outside the defined constants.
 var errUnknownOperation = errors.New("polyclip: unknown operation")
 
-// Operation selects the boolean operation run by [Clipper.Execute]. It maps
+// Operation selects the boolean operation run by [Builder.Execute]. It maps
 // 1:1 to the engine's clip.Operation.
 type Operation int
 
@@ -32,7 +32,7 @@ const (
 // support is a planned feature; today's closed-polygon ops never produce one.
 type Polyline []Point
 
-// Result is the output of [Clipper.Execute]. Closed holds the closed-polygon
+// Result is the output of [Builder.Execute]. Closed holds the closed-polygon
 // output (the same MultiPolygon the free functions return). Open holds any
 // surviving open-subject chains; it is nil unless open subjects were added, so
 // closed-only callers can ignore it.
@@ -41,57 +41,57 @@ type Result struct {
 	Open   []Polyline
 }
 
-// Clipper accumulates subject and clip polygons, then runs a boolean op over
-// them with [Clipper.Execute]. It is the general entry point that the named
+// Builder accumulates subject and clip polygons, then runs a boolean op over
+// them with [Builder.Execute]. It is the general entry point that the named
 // free functions ([Union], [Intersect], [Difference], [Xor]) wrap.
 //
-// A Clipper is reusable: Add* accumulate inputs, Execute is non-destructive
-// (run several ops over the same inputs), and [Clipper.Reset] clears the
-// accumulated inputs for a fresh set. A Clipper is single-goroutine, the same
+// A Builder is reusable: Add* accumulate inputs, Execute is non-destructive
+// (run several ops over the same inputs), and [Builder.Reset] clears the
+// accumulated inputs for a fresh set. A Builder is single-goroutine, the same
 // rule as a MultiPolygon.
-type Clipper struct {
+type Builder struct {
 	subj MultiPolygon
 	clip MultiPolygon
 }
 
-// NewClipper returns an empty Clipper.
-func NewClipper() *Clipper {
-	return &Clipper{}
+// NewBuilder returns an empty Builder.
+func NewBuilder() *Builder {
+	return &Builder{}
 }
 
 // AddSubject adds closed subject polygons. Multiple calls (and multiple
 // MultiPolygons per call) aggregate: the subject set is the union of every
 // piece added. Returns the receiver for chaining.
-func (c *Clipper) AddSubject(m ...MultiPolygon) *Clipper {
+func (b *Builder) AddSubject(m ...MultiPolygon) *Builder {
 	for _, mp := range m {
-		c.subj = append(c.subj, mp...)
+		b.subj = append(b.subj, mp...)
 	}
-	return c
+	return b
 }
 
-// AddClip adds closed clip polygons. Like [Clipper.AddSubject], multiple calls
+// AddClip adds closed clip polygons. Like [Builder.AddSubject], multiple calls
 // aggregate into a single clip set. Returns the receiver for chaining.
-func (c *Clipper) AddClip(m ...MultiPolygon) *Clipper {
+func (b *Builder) AddClip(m ...MultiPolygon) *Builder {
 	for _, mp := range m {
-		c.clip = append(c.clip, mp...)
+		b.clip = append(b.clip, mp...)
 	}
-	return c
+	return b
 }
 
-// Reset clears the accumulated subjects and clips so the Clipper can be reused
+// Reset clears the accumulated subjects and clips so the Builder can be reused
 // for a fresh set of inputs. Returns the receiver for chaining.
-func (c *Clipper) Reset() *Clipper {
-	c.subj = nil
-	c.clip = nil
-	return c
+func (b *Builder) Reset() *Builder {
+	b.subj = nil
+	b.clip = nil
+	return b
 }
 
 // Execute runs op over the accumulated subjects and clips and returns the
 // result. It does not mutate the accumulated inputs, so it may be called
 // repeatedly with different ops. Result.Open is nil (open paths are a planned
 // feature).
-func (c *Clipper) Execute(op Operation) (Result, error) {
-	closed, err := execOp(c.subj, c.clip, op)
+func (b *Builder) Execute(op Operation) (Result, error) {
+	closed, err := execOp(b.subj, b.clip, op)
 	if err != nil {
 		return Result{}, err
 	}

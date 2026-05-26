@@ -12,10 +12,10 @@ import (
 func TestSimplifyPathsRemovesCollinear(t *testing.T) {
 	// A unit-area-100 square with two redundant collinear midpoints on its
 	// bottom and right edges.
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0},
-		{X: 10, Y: 5}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(5, 0).Point(10, 0).
+		Point(10, 5).Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	got := SimplifyPaths(in, 0.001)
 	require.Len(t, got, 1, "got %d pieces, want 1", len(got))
 	require.Len(t, got[0].Outer, 4, "outer has %d vertices, want 4: %+v", len(got[0].Outer), got[0].Outer)
@@ -28,10 +28,10 @@ func TestSimplifyPathsEpsilonThreshold(t *testing.T) {
 	// Bottom edge has a bump at (5, 0.4): perpendicular distance 0.4 from the
 	// (0,0)-(10,0) line. eps=0.5 removes it; eps=0.3 keeps it.
 	mk := func() geom.MultiPolygon {
-		return geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-			{X: 0, Y: 0}, {X: 5, Y: 0.4}, {X: 10, Y: 0},
-			{X: 10, Y: 10}, {X: 0, Y: 10},
-		}}}
+		return geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+			Point(0, 0).Point(5, 0.4).Point(10, 0).
+			Point(10, 10).Point(0, 10).
+			MustPolygon()}}
 	}
 	removed := SimplifyPaths(mk(), 0.5)
 	require.Len(t, removed[0].Outer, 4, "eps=0.5: %d vertices, want 4 (bump removed)", len(removed[0].Outer))
@@ -42,11 +42,11 @@ func TestSimplifyPathsEpsilonThreshold(t *testing.T) {
 // TestSimplifyPathsSimplifiesHoles applies reduction to hole rings too.
 func TestSimplifyPathsSimplifiesHoles(t *testing.T) {
 	in := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []geom.Polygon{{
-			{X: 2, Y: 2}, {X: 4, Y: 2}, {X: 6, Y: 2}, // (4,2) collinear
-			{X: 6, Y: 6}, {X: 2, Y: 6},
-		}},
+		Outer: geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().
+			Point(2, 2).Point(4, 2).Point(6, 2). // (4,2) collinear
+			Point(6, 6).Point(2, 6).
+			MustPolygon()},
 	}}
 	got := SimplifyPaths(in, 0.001)
 	require.True(t, len(got) == 1 && len(got[0].Holes) == 1, "got %d pieces / %d holes, want 1/1", len(got), len(got[0].Holes))
@@ -56,9 +56,9 @@ func TestSimplifyPathsSimplifiesHoles(t *testing.T) {
 // TestSimplifyPathsKeepsSmallRings leaves rings of fewer than four vertices
 // untouched — no interior vertex can be removed without degenerating them.
 func TestSimplifyPathsKeepsSmallRings(t *testing.T) {
-	tri := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 2, Y: 3},
-	}}}
+	tri := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(4, 0).Point(2, 3).
+		MustPolygon()}}
 	got := SimplifyPaths(tri, 100) // huge epsilon
 	require.True(t, len(got) == 1 && len(got[0].Outer) == 3, "triangle changed: %+v", got)
 }
@@ -68,9 +68,9 @@ func TestSimplifyPathsKeepsSmallRings(t *testing.T) {
 func TestSimplifyPathsDropsDegenerateRing(t *testing.T) {
 	// Four near-collinear points forming a thin sliver; a large epsilon
 	// removes the interior pair, leaving < 3 vertices.
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 3, Y: 0.01}, {X: 6, Y: 0}, {X: 3, Y: -0.01},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(3, 0.01).Point(6, 0).Point(3, -0.01).
+		MustPolygon()}}
 	got := SimplifyPaths(in, 1.0)
 	require.Empty(t, got, "got %d pieces, want 0 (sliver dropped)", len(got))
 }
@@ -78,9 +78,9 @@ func TestSimplifyPathsDropsDegenerateRing(t *testing.T) {
 // TestSimplifyPathsNegativeEpsilon treats a negative epsilon as zero: only
 // exactly-collinear vertices are removed.
 func TestSimplifyPathsNegativeEpsilon(t *testing.T) {
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(5, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	got := SimplifyPaths(in, -5)
 	require.Len(t, got[0].Outer, 4, "got %d vertices, want 4 (exact collinear removed)", len(got[0].Outer))
 }

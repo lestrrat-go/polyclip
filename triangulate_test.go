@@ -32,7 +32,7 @@ func triCentroid(t Triangle) geom.Point {
 }
 
 func TestTriangulateSquare(t *testing.T) {
-	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}}}
+	m := geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(4, 0).Point(4, 4).Point(0, 4).MustPolygon()}}
 	tris := Triangulate(m)
 	require.Len(t, tris, 2, "got %d triangles, want 2", len(tris))
 	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 16.0)
@@ -42,7 +42,7 @@ func TestTriangulateSquare(t *testing.T) {
 }
 
 func TestTriangulateTriangle(t *testing.T) {
-	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 0, Y: 6}}}}
+	m := geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(6, 0).Point(0, 6).MustPolygon()}}
 	tris := Triangulate(m)
 	require.Len(t, tris, 1, "got %d triangles, want 1", len(tris))
 	require.InDelta(t, 18.0, triSumArea(tris), 1e-9, "area %v, want 18", triSumArea(tris))
@@ -50,7 +50,7 @@ func TestTriangulateTriangle(t *testing.T) {
 
 func TestTriangulateCWInputNormalized(t *testing.T) {
 	// Clockwise outer ring must be normalized to CCW output.
-	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 0}}}}
+	m := geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(0, 4).Point(4, 4).Point(4, 0).MustPolygon()}}
 	tris := Triangulate(m)
 	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want 16", triSumArea(tris))
 	for i, tri := range tris {
@@ -60,9 +60,9 @@ func TestTriangulateCWInputNormalized(t *testing.T) {
 
 func TestTriangulateConcave(t *testing.T) {
 	// An L / arrow shape with a reflex vertex.
-	m := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 6, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 6}, {X: 0, Y: 6},
-	}}}
+	m := geom.MultiPolygon{{Outer: geom.New().
+		Point(0, 0).Point(6, 0).Point(6, 2).Point(2, 2).Point(2, 6).Point(0, 6).
+		MustPolygon()}}
 	tris := Triangulate(m)
 	require.InDelta(t, m.Area(), triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), m.Area())
 	for i, tri := range tris {
@@ -85,8 +85,8 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 		{
 			name: "WithHole",
 			m: geom.MultiPolygon{{
-				Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-				Holes: []geom.Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
+				Outer: geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(),
+				Holes: []geom.Polygon{geom.New().Point(3, 3).Point(3, 7).Point(7, 7).Point(7, 3).MustPolygon()}, // CW hole
 			}},
 			wantArea:      func() *float64 { v := 100.0 - 16.0; return &v }(),
 			checkCCW:      true,
@@ -98,18 +98,18 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 			// still cover the region exactly without overlap.
 			name: "TouchingHole",
 			m: geom.MultiPolygon{{
-				Outer: geom.Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
-				Holes: []geom.Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
+				Outer: geom.New().Point(11, 8).Point(7, 8).Point(6, 8).Point(5, 8).Point(5, 2).Point(11, 2).MustPolygon(),
+				Holes: []geom.Polygon{geom.New().Point(7, 8).Point(7, 3).Point(6, 3).Point(6, 8).MustPolygon()},
 			}},
 			checkCentroid: true,
 		},
 		{
 			name: "TwoHoles",
 			m: geom.MultiPolygon{{
-				Outer: geom.Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
+				Outer: geom.New().Point(0, 0).Point(20, 0).Point(20, 10).Point(0, 10).MustPolygon(),
 				Holes: []geom.Polygon{
-					{{X: 2, Y: 2}, {X: 2, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 2}},     // CW
-					{{X: 12, Y: 3}, {X: 12, Y: 7}, {X: 16, Y: 7}, {X: 16, Y: 3}}, // CW
+					geom.New().Point(2, 2).Point(2, 6).Point(6, 6).Point(6, 2).MustPolygon(),     // CW
+					geom.New().Point(12, 3).Point(12, 7).Point(16, 7).Point(16, 3).MustPolygon(), // CW
 				},
 			}},
 			checkCentroid: true,
@@ -117,8 +117,8 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 		{
 			name: "MultiPiece",
 			m: geom.MultiPolygon{
-				{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
-				{Outer: geom.Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
+				{Outer: geom.New().Point(0, 0).Point(4, 0).Point(4, 4).Point(0, 4).MustPolygon()},
+				{Outer: geom.New().Point(10, 10).Point(16, 10).Point(13, 16).MustPolygon()},
 			},
 		},
 	}
@@ -149,7 +149,7 @@ func TestTriangulateDegenerate(t *testing.T) {
 		{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}},
 		{{Outer: geom.Polygon{{X: 0, Y: 0}}}},
 		nil,
-		{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}}}}, // collinear → zero area
+		{{Outer: geom.New().Point(0, 0).Point(2, 0).Point(4, 0).MustPolygon()}}, // collinear → zero area
 	} {
 		tris := Triangulate(m)
 		require.Empty(t, tris, "Triangulate(%v) = %d triangles, want 0", m, len(tris))
@@ -159,9 +159,9 @@ func TestTriangulateDegenerate(t *testing.T) {
 func TestTriangulateCollinearVertices(t *testing.T) {
 	// Extra collinear vertices on the edges must not break the result; the
 	// covered area stays exact and no zero-area triangles leak out.
-	m := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4}, {X: 0, Y: 4}, {X: 0, Y: 2},
-	}}}
+	m := geom.MultiPolygon{{Outer: geom.New().
+		Point(0, 0).Point(2, 0).Point(4, 0).Point(4, 2).Point(4, 4).Point(2, 4).Point(0, 4).Point(0, 2).
+		MustPolygon()}}
 	tris := Triangulate(m)
 	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 16.0)
 	for i, tri := range tris {
@@ -233,7 +233,7 @@ func TestTriangulateBooleanOutput(t *testing.T) {
 func TestTriangulateHolesOracle(t *testing.T) {
 	rng := rand.New(rand.NewSource(7777))
 	for iter := range 5000 {
-		ex := geom.ExPolygon{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 90, Y: 0}, {X: 90, Y: 90}, {X: 0, Y: 90}}}
+		ex := geom.ExPolygon{Outer: geom.New().Point(0, 0).Point(90, 0).Point(90, 90).Point(0, 90).MustPolygon()}
 		for gx := range 3 {
 			for gy := range 3 {
 				if rng.Intn(2) == 0 {
@@ -244,9 +244,9 @@ func TestTriangulateHolesOracle(t *testing.T) {
 				w := 3 + rng.Float64()*12
 				h := 3 + rng.Float64()*12
 				// Clockwise hole (library convention).
-				ex.Holes = append(ex.Holes, geom.Polygon{
-					{X: ox, Y: oy}, {X: ox, Y: oy + h}, {X: ox + w, Y: oy + h}, {X: ox + w, Y: oy},
-				})
+				ex.Holes = append(ex.Holes, geom.New().
+					Point(ox, oy).Point(ox, oy+h).Point(ox+w, oy+h).Point(ox+w, oy).
+					MustPolygon())
 			}
 		}
 		m := geom.MultiPolygon{ex}

@@ -45,7 +45,7 @@ func TestRectClip(t *testing.T) {
 		{
 			name:        "FullyInside",
 			rect:        geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
-			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}}},
+			sub:         geom.MultiPolygon{{Outer: geom.New().Point(2, 2).Point(6, 2).Point(6, 6).Point(2, 6).MustPolygon()}},
 			checkPieces: true,
 			wantPieces:  1,
 			checkArea:   true,
@@ -57,7 +57,7 @@ func TestRectClip(t *testing.T) {
 		{
 			name:        "FullyOutside",
 			rect:        geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
-			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 20, Y: 20}, {X: 30, Y: 20}, {X: 30, Y: 30}, {X: 20, Y: 30}}}},
+			sub:         geom.MultiPolygon{{Outer: geom.New().Point(20, 20).Point(30, 20).Point(30, 30).Point(20, 30).MustPolygon()}},
 			checkPieces: true,
 			wantPieces:  0,
 		},
@@ -65,7 +65,7 @@ func TestRectClip(t *testing.T) {
 			// A small rect entirely within a large solid polygon clips to the full rect.
 			name:      "RectInsideSolid",
 			rect:      geom.BBox{Min: geom.Point{X: 40, Y: 40}, Max: geom.Point{X: 60, Y: 60}},
-			sub:       geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 100, Y: 0}, {X: 100, Y: 100}, {X: 0, Y: 100}}}},
+			sub:       geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(100, 0).Point(100, 100).Point(0, 100).MustPolygon()}},
 			checkArea: true,
 			wantArea:  400,
 		},
@@ -73,14 +73,14 @@ func TestRectClip(t *testing.T) {
 			// Subject overlaps only the top-right corner region [6,10]x[6,10] of the rect.
 			name:      "CornerOverlap",
 			rect:      geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
-			sub:       geom.MultiPolygon{{Outer: geom.Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}},
+			sub:       geom.MultiPolygon{{Outer: geom.New().Point(6, 6).Point(16, 6).Point(16, 16).Point(6, 16).MustPolygon()}},
 			checkArea: true,
 			wantArea:  16,
 		},
 		{
 			name:        "EmptyRect",
 			rect:        geom.EmptyBBox(),
-			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 0, Y: 5}}}},
+			sub:         geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(5, 0).Point(5, 5).Point(0, 5).MustPolygon()}},
 			checkPieces: true,
 			wantPieces:  0,
 		},
@@ -109,8 +109,8 @@ func TestRectClip(t *testing.T) {
 func TestRectClipHolePreserved(t *testing.T) {
 	rect := geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}}
 	sub := geom.MultiPolygon{{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []geom.Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}},
+		Outer: geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(3, 3).Point(3, 7).Point(7, 7).Point(7, 3).MustPolygon()},
 	}}
 	got := RectClip(sub, rect)
 	require.True(t, len(got) == 1 && len(got[0].Holes) == 1, "got %d pieces with holes %v, want 1 piece 1 hole", len(got), got)
@@ -122,10 +122,10 @@ func TestRectClipConcaveSplitAreaParity(t *testing.T) {
 	// A U-shape the rectangle splits into two prongs: Sutherland–Hodgman keeps
 	// one seam-joined ring, but the enclosed area must still equal Intersect's.
 	rect := geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 4}}
-	u := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 1, Y: -2}, {X: 3, Y: -2}, {X: 3, Y: 8}, {X: 7, Y: 8},
-		{X: 7, Y: -2}, {X: 9, Y: -2}, {X: 9, Y: 12}, {X: 1, Y: 12},
-	}}}
+	u := geom.MultiPolygon{{Outer: geom.New().
+		Point(1, -2).Point(3, -2).Point(3, 8).Point(7, 8).
+		Point(7, -2).Point(9, -2).Point(9, 12).Point(1, 12).
+		MustPolygon()}}
 	got := RectClip(u, rect)
 	want, err := Intersect(u, rectAsPolygon(rect))
 	require.NoError(t, err)
@@ -139,11 +139,11 @@ func TestRectClipIntersectParityRandom(t *testing.T) {
 	for iter := range 2000 {
 		// Random integer triangle (convex → SH output is a single piece, so the
 		// area parity with Intersect is exact on the integer grid).
-		tri := geom.Polygon{
-			{X: randInt(-10, 20), Y: randInt(-10, 20)},
-			{X: randInt(-10, 20), Y: randInt(-10, 20)},
-			{X: randInt(-10, 20), Y: randInt(-10, 20)},
-		}
+		tri := geom.New().
+			Point(randInt(-10, 20), randInt(-10, 20)).
+			Point(randInt(-10, 20), randInt(-10, 20)).
+			Point(randInt(-10, 20), randInt(-10, 20)).
+			MustPolygon()
 		if tri.Area() < 1 {
 			continue
 		}

@@ -122,8 +122,8 @@ func TestUnionDisjoint(t *testing.T) {
 func TestUnionDisjointWithHole(t *testing.T) {
 	// A has a hole; B is far away. Hole structure must be preserved.
 	holed := geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []geom.Polygon{{{X: 8, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 8, Y: 6}}}, // CW hole
+		Outer: geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(8, 4).Point(6, 4).Point(6, 6).Point(8, 6).MustPolygon()}, // CW hole
 	}
 	a := geom.MultiPolygon{holed}
 	b := geom.MultiPolygon{sq(100, 100, 5)}
@@ -169,8 +169,8 @@ func TestInputOrientationNormalized(t *testing.T) {
 	// winding, so a CW (clockwise) input must produce the same result as the
 	// equivalent CCW input. Regression for the mixed-orientation undercount
 	// (CW subject + CCW clip gave Union 26 instead of 28).
-	ccwA := geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}
-	ccwB := geom.Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}
+	ccwA := geom.New().Point(0, 0).Point(4, 0).Point(4, 4).Point(0, 4).MustPolygon()
+	ccwB := geom.New().Point(2, 2).Point(6, 2).Point(6, 6).Point(2, 6).MustPolygon()
 	rev := func(p geom.Polygon) geom.Polygon {
 		out := make(geom.Polygon, len(p))
 		for i, pt := range p {
@@ -284,8 +284,8 @@ func TestUnionSharedVertexCrossing(t *testing.T) {
 	// on the beam boundary, not a ProperCross strictly inside the open beam).
 	// reconcileSharedVertexCrossings dispatches it. Before the fix the engine
 	// reported 75.5; the true union area is ~298.5 (DESIGN.md §12.11).
-	a := geom.Polygon{{X: 1, Y: 8}, {X: 16, Y: 11}, {X: 21, Y: 5}, {X: 29, Y: 24}}
-	b := geom.Polygon{{X: 6, Y: 9}, {X: 24, Y: 7}, {X: 19, Y: 28}, {X: 13, Y: 29}}
+	a := geom.New().Point(1, 8).Point(16, 11).Point(21, 5).Point(29, 24).MustPolygon()
+	b := geom.New().Point(6, 9).Point(24, 7).Point(19, 28).Point(13, 29).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -307,8 +307,8 @@ func TestUnionSharedVertexViaHorizontal(t *testing.T) {
 	// self-touch) and the union over-counted to 9.0. The post-flush
 	// reconcileSharedVertexCrossings pass dispatches it; the true union area is
 	// ~7.52 (DESIGN.md §12.11, track C).
-	a := geom.Polygon{{X: 8, Y: 3}, {X: 9, Y: 5}, {X: 1, Y: 4}, {X: 4, Y: 4}}
-	b := geom.Polygon{{X: 6, Y: 3}, {X: 8, Y: 3}, {X: 10, Y: 5}, {X: 5, Y: 4}}
+	a := geom.New().Point(8, 3).Point(9, 5).Point(1, 4).Point(4, 4).MustPolygon()
+	b := geom.New().Point(6, 3).Point(8, 3).Point(10, 5).Point(5, 4).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -331,8 +331,8 @@ func TestUnionOverlappingSharedVertexMismerge(t *testing.T) {
 	// the union collapsed to one malformed ring of area 14.4. handoffMaxThroughVertex
 	// dispatches the at-vertex crossing so hotness transfers to B's bound; the true
 	// union area is ~43.9 (DESIGN.md §12.11, overlapping shared-vertex mis-merge).
-	a := geom.Polygon{{X: 0, Y: 4}, {X: 7, Y: 2}, {X: 8, Y: 0}, {X: 10, Y: 4}}
-	b := geom.Polygon{{X: 10, Y: 4}, {X: 11, Y: 6}, {X: 2, Y: 12}, {X: 7, Y: 1}}
+	a := geom.New().Point(0, 4).Point(7, 2).Point(8, 0).Point(10, 4).MustPolygon()
+	b := geom.New().Point(10, 4).Point(11, 6).Point(2, 12).Point(7, 1).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -359,8 +359,8 @@ func TestUnionThroughVertexBoundLastSegment(t *testing.T) {
 	// the union to 14.75. The qualification now reads the bound's ultimate apex
 	// ((5,11), above (9,8)), which is independent of cursor position; truth ~23.23
 	// (DESIGN.md §12.11, through-vertex on a bound's last segment).
-	a := geom.Polygon{{X: 0, Y: 8}, {X: 5, Y: 3}, {X: 3, Y: 6}, {X: 9, Y: 8}}
-	b := geom.Polygon{{X: 2, Y: 9}, {X: 3, Y: 7}, {X: 9, Y: 8}, {X: 5, Y: 11}}
+	a := geom.New().Point(0, 8).Point(5, 3).Point(3, 6).Point(9, 8).MustPolygon()
+	b := geom.New().Point(2, 9).Point(3, 7).Point(9, 8).Point(5, 11).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -392,8 +392,8 @@ func TestXorHotThroughSharedApexConfluence(t *testing.T) {
 	// intermediate), so the horizontal's closeBound pairs cleanly and
 	// resolveBetweenMaxima crosses B's hot through-bound at the apex (DESIGN.md
 	// §12.11, hot-through shared-apex confluence).
-	a := geom.Polygon{{X: 0, Y: 8}, {X: 5, Y: 3}, {X: 3, Y: 6}, {X: 9, Y: 8}}
-	b := geom.Polygon{{X: 2, Y: 9}, {X: 3, Y: 7}, {X: 9, Y: 8}, {X: 5, Y: 11}}
+	a := geom.New().Point(0, 8).Point(5, 3).Point(3, 6).Point(9, 8).MustPolygon()
+	b := geom.New().Point(2, 9).Point(3, 7).Point(9, 8).Point(5, 11).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -415,8 +415,8 @@ func TestUnionSharedLocalMaxConfluence(t *testing.T) {
 	// spanning both sources is never closed at the apex and everything above the
 	// lower crossing is dropped. Pre-fix the engine returned 1.333 (≈ the
 	// intersection area); the true union is ~5.67 (DESIGN.md §12.11, track C).
-	a := geom.Polygon{{X: 9, Y: 2}, {X: 10, Y: 4}, {X: 8, Y: 6}, {X: 8, Y: 4}}
-	b := geom.Polygon{{X: 7, Y: 0}, {X: 8, Y: 3}, {X: 9, Y: 4}, {X: 8, Y: 6}}
+	a := geom.New().Point(9, 2).Point(10, 4).Point(8, 6).Point(8, 4).MustPolygon()
+	b := geom.New().Point(7, 0).Point(8, 3).Point(9, 4).Point(8, 6).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -446,8 +446,8 @@ func TestSharedCollinearHorizontalEdge(t *testing.T) {
 	// misclassifying B as non-contributing. The fix flushes top-reached
 	// horizontals before classifying local minima, matching Clipper2's
 	// DoTopOfScanbeam-before-next-InsertLocalMinima phasing (DESIGN.md §12.11).
-	a := geom.Polygon{{X: 0, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 0}}
-	b := geom.Polygon{{X: 2, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 4}}
+	a := geom.New().Point(0, 2).Point(4, 2).Point(3, 0).MustPolygon()
+	b := geom.New().Point(2, 2).Point(4, 2).Point(3, 4).MustPolygon()
 	if !a.IsCCW() {
 		a.Reverse()
 	}
@@ -482,12 +482,12 @@ func TestCoincidentHorizontalOverlapClosesRing(t *testing.T) {
 	// Repro 1: A's top (7,8)-(2,8) and B's top (6,8)-(1,8) overlap on x∈[2,6].
 	// A lies almost entirely inside B; the difference is a thin top-right
 	// triangle (6,6),(7,8),(6,8) of area ~0.99 that was dropped (got 0).
-	a1 := mk(geom.Polygon{{X: 3, Y: 4}, {X: 6, Y: 6}, {X: 7, Y: 8}, {X: 2, Y: 8}})
-	b1 := mk(geom.Polygon{{X: 3, Y: 0}, {X: 6, Y: 4}, {X: 6, Y: 8}, {X: 1, Y: 8}})
+	a1 := mk(geom.New().Point(3, 4).Point(6, 6).Point(7, 8).Point(2, 8).MustPolygon())
+	b1 := mk(geom.New().Point(3, 0).Point(6, 4).Point(6, 8).Point(1, 8).MustPolygon())
 	// Repro 2: A's top (8,3)-(3,3) and B's mid edge (4,3)-(8,3) overlap on
 	// x∈[4,8]. Union dropped B's whole upper region (got 6.75 vs ~21.74).
-	a2 := mk(geom.Polygon{{X: 1, Y: 2}, {X: 7, Y: 1}, {X: 8, Y: 3}, {X: 3, Y: 3}})
-	b2 := mk(geom.Polygon{{X: 0, Y: 2}, {X: 4, Y: 3}, {X: 8, Y: 3}, {X: 2, Y: 6}})
+	a2 := mk(geom.New().Point(1, 2).Point(7, 1).Point(8, 3).Point(3, 3).MustPolygon())
+	b2 := mk(geom.New().Point(0, 2).Point(4, 3).Point(8, 3).Point(2, 6).MustPolygon())
 	runOpAreaChecks(t, 0.05, []opAreaCheck{
 		{"r1/Union", func() (geom.MultiPolygon, error) { return Union(a1, b1) }, 26.99},
 		{"r1/Intersect", func() (geom.MultiPolygon, error) { return Intersect(a1, b1) }, 11.0},
@@ -520,8 +520,8 @@ func TestCoincidentHorizontalOppositeSideCancels(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 4, Y: 4}, {X: 5, Y: 4}, {X: 7, Y: 3}, {X: 1, Y: 7}})
-	b := mk(geom.Polygon{{X: 0, Y: 2}, {X: 3, Y: 2}, {X: 5, Y: 4}, {X: 2, Y: 4}})
+	a := mk(geom.New().Point(4, 4).Point(5, 4).Point(7, 3).Point(1, 7).MustPolygon())
+	b := mk(geom.New().Point(0, 2).Point(3, 2).Point(5, 4).Point(2, 4).MustPolygon())
 	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 8.5},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 0},
@@ -542,8 +542,8 @@ func TestCoincidentHorizontalExitReSpawns(t *testing.T) {
 	// NOT fire, or A's right bound never re-spawns and A's whole upper body is
 	// dropped (pre-fix Difference collapsed to 0.042 vs ~5.44). The discriminator
 	// is continuesCollinearHorizontal (DESIGN.md §12.11).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 4, Y: 3}, {X: 2, Y: 6}, {X: 7, Y: 6}, {X: 0, Y: 8}}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 3}, {X: 3, Y: 6}, {X: 0, Y: 6}, {X: 3, Y: 4}}}}
+	a := geom.MultiPolygon{{Outer: geom.New().Point(4, 3).Point(2, 6).Point(7, 6).Point(0, 8).MustPolygon()}}
+	b := geom.MultiPolygon{{Outer: geom.New().Point(5, 3).Point(3, 6).Point(0, 6).Point(3, 4).MustPolygon()}}
 	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 10.441667},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 0.558333},
@@ -561,8 +561,8 @@ func TestCoincidentHorizontalCornerExitReSpawns(t *testing.T) {
 	// 2.80). respawnHandoffAtOverlap detects the ending(hot)/continuing(cold)
 	// handoff and falls through to the one-hot transfer so A re-spawns
 	// (DESIGN.md §12.11). Xor is a separate, unrelated class and is not asserted.
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 7, Y: 6}, {X: 8, Y: 6}, {X: 8, Y: 8}, {X: 1, Y: 3}}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 1, Y: 2}, {X: 2, Y: 0}, {X: 8, Y: 6}, {X: 1, Y: 6}}}}
+	a := geom.MultiPolygon{{Outer: geom.New().Point(7, 6).Point(8, 6).Point(8, 8).Point(1, 3).MustPolygon()}}
+	b := geom.MultiPolygon{{Outer: geom.New().Point(1, 2).Point(2, 0).Point(8, 6).Point(1, 6).MustPolygon()}}
 	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 25.8},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 2.7},
@@ -581,8 +581,8 @@ func TestCoincidentHorizontalBothContinueNoSkip(t *testing.T) {
 	// rings along y=5) and dropped everything above, collapsing Union 16.52→4.69
 	// and Intersect 5.98→1.81. The skip now requires at least one IsBoundLast
 	// (DESIGN.md §12.11). Difference/Xor were already correct (Xor never skips).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 3}, {X: 6, Y: 5}, {X: 8, Y: 5}, {X: 2, Y: 8}}}} // |A| = 16
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 4}, {X: 8, Y: 5}, {X: 7, Y: 5}, {X: 2, Y: 6}}}} // |B| = 6.5
+	a := geom.MultiPolygon{{Outer: geom.New().Point(0, 3).Point(6, 5).Point(8, 5).Point(2, 8).MustPolygon()}} // |A| = 16
+	b := geom.MultiPolygon{{Outer: geom.New().Point(0, 4).Point(8, 5).Point(7, 5).Point(2, 6).MustPolygon()}} // |B| = 6.5
 	runOpAreaChecks(t, 0.01, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 16.5228},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 5.9772},
@@ -602,8 +602,8 @@ func TestSharedVertexCollinearHorizontalSimplified(t *testing.T) {
 	// redundant vertex (a geometric no-op), and the sweep then handles the clean
 	// shared-apex correctly. A and B only touch along y=5 (I = 0), so the exact
 	// truth is U=|A|+|B|, D=|A|, X=|A|+|B| (DESIGN.md §12.11).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 0, Y: 5}, {X: 3, Y: 5}, {X: -1, Y: 6}}}} // |A| = 4
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 2, Y: 5}, {X: 1, Y: 5}, {X: 1, Y: 1}, {X: 3, Y: 5}}}}  // |B| = 4, (2,5) collinear
+	a := geom.MultiPolygon{{Outer: geom.New().Point(0, 0).Point(0, 5).Point(3, 5).Point(-1, 6).MustPolygon()}} // |A| = 4
+	b := geom.MultiPolygon{{Outer: geom.New().Point(2, 5).Point(1, 5).Point(1, 1).Point(3, 5).MustPolygon()}}  // |B| = 4, (2,5) collinear
 	runOpAreaChecks(t, 1e-9, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 8},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 0},
@@ -622,8 +622,8 @@ func TestBooleanSharedVertexNotNested(t *testing.T) {
 	// and A was wrongly demoted to a HOLE of B — collapsing Union from 54 to 18.
 	// The fix samples a genuine interior point of the inner ring instead
 	// (DESIGN.md §12.11, shared-vertex nesting).
-	a := geom.Polygon{{X: 12, Y: 8}, {X: 9, Y: 3}, {X: 0, Y: 6}, {X: 9, Y: 0}}  // |A| = 18
-	b := geom.Polygon{{X: 8, Y: 4}, {X: 12, Y: 8}, {X: 7, Y: 10}, {X: 0, Y: 8}} // |B| = 36
+	a := geom.New().Point(12, 8).Point(9, 3).Point(0, 6).Point(9, 0).MustPolygon()  // |A| = 18
+	b := geom.New().Point(8, 4).Point(12, 8).Point(7, 10).Point(0, 8).MustPolygon() // |B| = 36
 	mpA := geom.MultiPolygon{{Outer: a}}
 	mpB := geom.MultiPolygon{{Outer: b}}
 
@@ -654,8 +654,8 @@ func TestSharedVertexExitViaHorizontal(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 5, Y: 1}, {X: 6, Y: 5}, {X: 5, Y: 5}, {X: 1, Y: 7}}) // |A| = 10
-	b := mk(geom.Polygon{{X: 1, Y: 1}, {X: 7, Y: 0}, {X: 7, Y: 3}, {X: 6, Y: 5}}) // |B| = 16
+	a := mk(geom.New().Point(5, 1).Point(6, 5).Point(5, 5).Point(1, 7).MustPolygon()) // |A| = 10
+	b := mk(geom.New().Point(1, 1).Point(7, 0).Point(7, 3).Point(6, 5).MustPolygon()) // |B| = 16
 	runOpAreaChecks(t, 0.05, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 22.17},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 3.83},
@@ -684,8 +684,8 @@ func TestXorVertexOnEdgeSameSideTangle(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 2, Y: 2}, {X: 7, Y: 2}, {X: 5, Y: 5}, {X: 3, Y: 5}})
-	b := mk(geom.Polygon{{X: 0, Y: 0}, {X: 7, Y: 7}, {X: 3, Y: 4}, {X: 2, Y: 6}})
+	a := mk(geom.New().Point(2, 2).Point(7, 2).Point(5, 5).Point(3, 5).MustPolygon())
+	b := mk(geom.New().Point(0, 0).Point(7, 7).Point(3, 4).Point(2, 6).MustPolygon())
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 16.767},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 2.233},
@@ -721,12 +721,12 @@ func TestXorVertexOnEdgeApexMerge(t *testing.T) {
 			// A's vertex (6,6) lies on B's edge (8,7)-(4,5); the apex triangle
 			// (8,7),(6,6),(5.333,4.333) was collapsing to a spike.
 			"midvtx",
-			geom.Polygon{{X: 4, Y: 1}, {X: 6, Y: 6}, {X: 3, Y: 6}, {X: 0, Y: 6}}, geom.Polygon{{X: 2, Y: 4}, {X: 3, Y: 2}, {X: 8, Y: 7}, {X: 4, Y: 5}},
+			geom.New().Point(4, 1).Point(6, 6).Point(3, 6).Point(0, 6).MustPolygon(), geom.New().Point(2, 4).Point(3, 2).Point(8, 7).Point(4, 5).MustPolygon(),
 			16.3889, 6.1111, 8.8889, 10.2778,
 		},
 		{
 			"sharedvtx",
-			geom.Polygon{{X: 4, Y: 1}, {X: 7, Y: 3}, {X: 5, Y: 4}, {X: 4, Y: 3}}, geom.Polygon{{X: 3, Y: 4}, {X: 5, Y: 4}, {X: 7, Y: 2}, {X: 8, Y: 8}},
+			geom.New().Point(4, 1).Point(7, 3).Point(5, 4).Point(4, 3).MustPolygon(), geom.New().Point(3, 4).Point(5, 4).Point(7, 2).Point(8, 8).MustPolygon(),
 			14.8000, 0.7000, 3.8000, 14.1000,
 		},
 	}
@@ -773,8 +773,8 @@ func TestUnionNotchTipOnHorizontalEdge(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 6, Y: 5}, {X: 7, Y: 3}, {X: 7, Y: 8}, {X: 3, Y: 3}}) // |A| = 6
-	b := mk(geom.Polygon{{X: 8, Y: 5}, {X: 2, Y: 6}, {X: 3, Y: 0}, {X: 5, Y: 5}}) // |B| = 10
+	a := mk(geom.New().Point(6, 5).Point(7, 3).Point(7, 8).Point(3, 3).MustPolygon()) // |A| = 6
+	b := mk(geom.New().Point(8, 5).Point(2, 6).Point(3, 0).Point(5, 5).MustPolygon()) // |B| = 10
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 14.2879},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 1.7121},
@@ -807,8 +807,8 @@ func TestXorCoincidentMaxPlateauOverContinuingHorizontal(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 0, Y: 8}, {X: 3, Y: 0}, {X: 2, Y: 4}, {X: 8, Y: 4}}) // |A| = 14
-	b := mk(geom.Polygon{{X: 0, Y: 4}, {X: 1, Y: 1}, {X: 5, Y: 3}, {X: 4, Y: 4}}) // |B| = 9
+	a := mk(geom.New().Point(0, 8).Point(3, 0).Point(2, 4).Point(8, 4).MustPolygon()) // |A| = 14
+	b := mk(geom.New().Point(0, 4).Point(1, 1).Point(5, 3).Point(4, 4).MustPolygon()) // |B| = 9
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 22.1871},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 0.8129},
@@ -852,14 +852,14 @@ func TestSharedVertexConcaveMaxThroughHorizontal(t *testing.T) {
 	}{
 		{
 			"family1",
-			geom.Polygon{{X: 3, Y: 3}, {X: 7, Y: 6}, {X: 6, Y: 6}, {X: 1, Y: 8}}, // |A| = 12
-			geom.Polygon{{X: 7, Y: 7}, {X: 4, Y: 5}, {X: 7, Y: 6}, {X: 8, Y: 4}}, // |B| = 2, shared vtx (7,6)
+			geom.New().Point(3, 3).Point(7, 6).Point(6, 6).Point(1, 8).MustPolygon(), // |A| = 12
+			geom.New().Point(7, 7).Point(4, 5).Point(7, 6).Point(8, 4).MustPolygon(), // |B| = 2, shared vtx (7,6)
 			13.2188, 0.7812, 11.2188, 12.4375,
 		},
 		{
 			"family2",
-			geom.Polygon{{X: 6, Y: 5}, {X: 3, Y: 4}, {X: 1, Y: 7}, {X: 4, Y: 0}}, // |A| = 9
-			geom.Polygon{{X: 4, Y: 5}, {X: 0, Y: 7}, {X: 3, Y: 2}, {X: 6, Y: 5}}, // |B| = 10, shared vtx (6,5)
+			geom.New().Point(6, 5).Point(3, 4).Point(1, 7).Point(4, 0).MustPolygon(), // |A| = 9
+			geom.New().Point(4, 5).Point(0, 7).Point(3, 2).Point(6, 5).MustPolygon(), // |B| = 10, shared vtx (6,5)
 			14.4068, 4.5932, 4.4068, 9.8136,
 		},
 	}
@@ -896,8 +896,8 @@ func TestIntersectVertexOnEdgeSelfClose(t *testing.T) {
 		}
 		return geom.MultiPolygon{{Outer: p}}
 	}
-	a := mk(geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 4}, {X: 8, Y: 5}, {X: 1, Y: 8}})
-	b := mk(geom.Polygon{{X: 2, Y: 2}, {X: 5, Y: 2}, {X: 3, Y: 3}, {X: 0, Y: 3}})
+	a := mk(geom.New().Point(0, 0).Point(4, 4).Point(8, 5).Point(1, 8).MustPolygon())
+	b := mk(geom.New().Point(2, 2).Point(5, 2).Point(3, 3).Point(0, 3).MustPolygon())
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 25.0331},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 1.4669},
@@ -1068,12 +1068,12 @@ func TestSplitOverlapsCollinearSpikeNoHang(t *testing.T) {
 	// overlap endpoints directly from the exact input endpoints. Originally
 	// FuzzDifference/a84b6e584bd0aa6b. Guard: the op merely completes (the
 	// package test timeout catches a regression hang) and stays area-bounded.
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: -10, Y: -10}, {X: 67, Y: 67}, {X: 10, Y: 10}, {X: -99, Y: 10},
-	}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: -3, Y: -3}, {X: 3, Y: -3}, {X: 3, Y: 76}, {X: -3, Y: 3},
-	}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(-10, -10).Point(67, 67).Point(10, 10).Point(-99, 10).
+		MustPolygon()}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(-3, -3).Point(3, -3).Point(3, 76).Point(-3, 3).
+		MustPolygon()}}
 	for _, tc := range []struct {
 		name string
 		fn   func(geom.MultiPolygon, geom.MultiPolygon) (geom.MultiPolygon, error)
@@ -1201,7 +1201,7 @@ func TestInteriorPointAvoidsHorizontalEdge(t *testing.T) {
 	// vertex-mean Y coincides with a horizontal edge. For this quad the mean
 	// Y is 9 — exactly the (6,9)-(12,9) top edge — and the old code returned
 	// (7.5,9), a point ON that edge.
-	p := geom.Polygon{{X: 12, Y: 9}, {X: 6, Y: 9}, {X: 4, Y: 7}, {X: 2, Y: 11}}
+	p := geom.New().Point(12, 9).Point(6, 9).Point(4, 7).Point(2, 11).MustPolygon()
 	pt, ok := interiorPoint(p)
 	require.True(t, ok, "interiorPoint returned !ok for a valid quad")
 	require.False(t, geom.PointOnRingBoundary(p, pt), "interiorPoint %v lies on the ring boundary", pt)
@@ -1241,8 +1241,8 @@ func TestXorVertexOnEdgeApexKeepsCorner(t *testing.T) {
 	// self-touching detour, preserving the continuing back edge's tip (DESIGN.md
 	// §12.11). Values validated against a Monte-Carlo oracle (U=I+X, D=|A|-I,
 	// X=U-I all hold), NOT Clipper2.
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 1, Y: 1}, {X: 12, Y: 8}, {X: 7, Y: 6}, {X: 5, Y: 10}}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 9.5, Y: 7}, {X: 8, Y: 7}, {X: 3, Y: 7}, {X: 5, Y: 2}}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(1, 1).Point(12, 8).Point(7, 6).Point(5, 10).MustPolygon()}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(9.5, 7).Point(8, 7).Point(3, 7).Point(5, 2).MustPolygon()}}
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 28.159420},
 		{opIntersect, func() (geom.MultiPolygon, error) { return Intersect(a, b) }, 11.590580},
@@ -1299,9 +1299,9 @@ func TestBooleanNearScanlineCrossingNoDoubleDispatch(t *testing.T) {
 	// Each input is checked against the op's area invariant (the bound the fuzz
 	// corpus reported violated).
 	q := func(c ...float64) geom.MultiPolygon {
-		return geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-			{X: c[0], Y: c[1]}, {X: c[2], Y: c[3]}, {X: c[4], Y: c[5]}, {X: c[6], Y: c[7]},
-		}}}
+		return geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+			Point(c[0], c[1]).Point(c[2], c[3]).Point(c[4], c[5]).Point(c[6], c[7]).
+			MustPolygon()}}
 	}
 	cases := []struct {
 		name string
@@ -1351,10 +1351,10 @@ func TestBooleanInputHoleIslandNesting(t *testing.T) {
 	// hole (Union/Xor 96 instead of 68). It now builds the containment forest
 	// over ALL rings (DESIGN.md §11.9). Values are exact (axis-aligned).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []geom.Polygon{{{X: 2, Y: 2}, {X: 2, Y: 8}, {X: 8, Y: 8}, {X: 8, Y: 2}}},
+		Outer: geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(2, 2).Point(2, 8).Point(8, 8).Point(8, 2).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 4, Y: 4}, {X: 6, Y: 4}, {X: 6, Y: 6}, {X: 4, Y: 6}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(4, 4).Point(6, 4).Point(6, 6).Point(4, 6).MustPolygon()}}
 
 	runOpAreaChecks(t, 0.02, []opAreaCheck{
 		{opUnion, func() (geom.MultiPolygon, error) { return Union(a, b) }, 68},
@@ -1397,10 +1397,10 @@ func TestBooleanHoledInputCoincidentPlateau(t *testing.T) {
 	// truly tops out at the apex, or borders the other source there (DESIGN.md
 	// §12.11). The four set identities must hold to within MC/grid tolerance.
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 9, Y: 9}, {X: 3, Y: 3}, {X: 3, Y: 9}, {X: 7, Y: 9}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(9, 9).Point(3, 3).Point(3, 9).Point(7, 9).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 4, Y: 9}, {X: 2, Y: 9}, {X: 4, Y: 8}, {X: 10, Y: 8}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(4, 9).Point(2, 9).Point(4, 8).Point(10, 8).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1422,10 +1422,10 @@ func TestBooleanHoledInputFlatHoleTopThroughClip(t *testing.T) {
 	// pairs the two and joins the rings (DESIGN.md §12.11). Tilting the hole top
 	// off-horizontal already worked; this asserts the flat-top variant matches.
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 8, Y: 4}, {X: 5, Y: 5}, {X: 3, Y: 7}, {X: 6, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(8, 4).Point(5, 5).Point(3, 7).Point(6, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 11, Y: 4}, {X: 7, Y: 12}, {X: 0, Y: 1}, {X: 4, Y: 0}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(11, 4).Point(7, 12).Point(0, 1).Point(4, 0).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1449,10 +1449,10 @@ func TestBooleanHoledInputDifferenceClipApexSameSideJoin(t *testing.T) {
 	// (7,9)/(9,10) (tracked in memory as the next target); this test guards the
 	// catastrophic-collapse fix via a lower bound, not the exact identity.
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 6, Y: 6}, {X: 6, Y: 9}, {X: 9, Y: 9}, {X: 7, Y: 3}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(6, 6).Point(6, 9).Point(9, 9).Point(7, 3).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 5, Y: 12}, {X: 4, Y: 0}, {X: 9, Y: 10}, {X: 5, Y: 8}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(5, 12).Point(4, 0).Point(9, 10).Point(5, 8).MustPolygon()}}
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
 	d, err := Difference(a, b)
@@ -1479,10 +1479,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipContinuingEdge(t *testing.T) 
 	// coincident pair when the hot bound passes THROUGH the overlap (apex strictly
 	// above) while the cold bound ends there (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 4}, {X: 3, Y: 3}, {X: 5, Y: 5}, {X: 8, Y: 5}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 4).Point(3, 3).Point(5, 5).Point(8, 5).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 12, Y: 5}, {X: 5, Y: 10}, {X: 3.5, Y: 3.25}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(5, 5).Point(12, 5).Point(5, 10).Point(3.5, 3.25).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1502,10 +1502,10 @@ func TestBooleanHoledInputDifferenceCoincidentBothHotExit(t *testing.T) {
 	// ~130.5. sameSideBothHotOneEnds now also skips a both-hot one-continues/one-ends
 	// coincident pair (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 4, Y: 7}, {X: 4, Y: 8}, {X: 7, Y: 8}, {X: 3, Y: 6}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(4, 7).Point(4, 8).Point(7, 8).Point(3, 6).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 4, Y: 8}, {X: 7, Y: 8}, {X: 2, Y: 10}, {X: 2, Y: 2}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(4, 8).Point(7, 8).Point(2, 10).Point(2, 2).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -1541,10 +1541,10 @@ func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
 	// shared horizontal), so doHorizontal's plateau closes it correctly. The deg1
 	// sibling below (two quads sharing a top edge) must NOT defer and stays correct.
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 3, Y: 3}, {X: 3, Y: 8}, {X: 3, Y: 7}, {X: 8, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(3, 3).Point(3, 8).Point(3, 7).Point(8, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 5.5, Y: 5}, {X: 2, Y: 5}, {X: 8, Y: 1}, {X: 10, Y: 2}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(5.5, 5).Point(2, 5).Point(8, 1).Point(10, 2).MustPolygon()}}
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
 	u, _ := Union(a, b)
@@ -1566,8 +1566,8 @@ func TestBooleanHoledInputIntersectClipApexThroughHole(t *testing.T) {
 
 	// Sibling that must NOT trigger the cross-source defer: two quads sharing a top
 	// edge (no holes). Difference must stay correct (the defer here would drop area).
-	a2 := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 4, Y: 2}, {X: 12, Y: 8}, {X: 8, Y: 8}, {X: 6, Y: 8}}}}
-	b2 := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 8, Y: 8}, {X: 5, Y: 11}, {X: 1, Y: 1}, {X: 12, Y: 8}}}}
+	a2 := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(4, 2).Point(12, 8).Point(8, 8).Point(6, 8).MustPolygon()}}
+	b2 := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(8, 8).Point(5, 11).Point(1, 1).Point(12, 8).MustPolygon()}}
 	d2, err := Difference(a2, b2)
 	require.NoError(t, err, "difference")
 	i2, _ := Intersect(a2, b2)
@@ -1586,10 +1586,10 @@ func TestBooleanHoledInputIntersectHoleNotchPlateauDefer(t *testing.T) {
 	// (DESIGN.md §12.11); the coincident-plateau confluence (coupled edge horizontal
 	// / topping out / on the apex column) is excluded so it still closes normally.
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 9, Y: 7}, {X: 7, Y: 6}, {X: 5, Y: 5}, {X: 4, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(9, 7).Point(7, 6).Point(5, 5).Point(4, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 7, Y: 8}, {X: 2, Y: 7}, {X: 0, Y: 1}, {X: 10, Y: 10}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(7, 8).Point(2, 7).Point(0, 1).Point(10, 10).MustPolygon()}}
 
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
@@ -1616,10 +1616,10 @@ func TestBooleanHoledInputIntersectHoleExitReheat(t *testing.T) {
 		b    geom.Polygon
 		want float64
 	}{
-		{"poke-up", geom.Polygon{{X: 9, Y: 9}, {X: 5, Y: 6}, {X: 5, Y: 7}, {X: 4, Y: 9}}, geom.Polygon{{X: 0, Y: 11}, {X: 9, Y: 0}, {X: 6, Y: 9}, {X: 2, Y: 9}}, 15.456},
-		{"poke-down", geom.Polygon{{X: 3, Y: 3}, {X: 6, Y: 6}, {X: 8, Y: 6}, {X: 8, Y: 4}}, geom.Polygon{{X: 0, Y: 10}, {X: 6, Y: 0}, {X: 7.5, Y: 6}, {X: 6, Y: 6}}, 16.92},
+		{"poke-up", geom.New().Point(9, 9).Point(5, 6).Point(5, 7).Point(4, 9).MustPolygon(), geom.New().Point(0, 11).Point(9, 0).Point(6, 9).Point(2, 9).MustPolygon(), 15.456},
+		{"poke-down", geom.New().Point(3, 3).Point(6, 6).Point(8, 6).Point(8, 4).MustPolygon(), geom.New().Point(0, 10).Point(6, 0).Point(7.5, 6).Point(6, 6).MustPolygon(), 16.92},
 	}
-	outer := geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}}
+	outer := geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon()
 	for _, tc := range cases {
 		a := geom.MultiPolygon{geom.ExPolygon{Outer: outer, Holes: []geom.Polygon{tc.hole}}}
 		b := geom.MultiPolygon{geom.ExPolygon{Outer: tc.b}}
@@ -1663,10 +1663,10 @@ func TestBooleanHoledInputDifferenceHoleClipVoidMerge(t *testing.T) {
 	// instead of ~118.1. closeBound now closes such a hot edge via its coupled edge
 	// (Case A/B) instead of dropping it (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 8, Y: 8}, {X: 6, Y: 8}, {X: 4, Y: 3}, {X: 3, Y: 8}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(8, 8).Point(6, 8).Point(4, 3).Point(3, 8).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 3, Y: 8}, {X: 5, Y: 8}, {X: 12, Y: 6}, {X: 10, Y: 11}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(3, 8).Point(5, 8).Point(12, 6).Point(10, 11).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -1706,10 +1706,10 @@ func TestBooleanHoledInputDifferenceHoleTopPlateauVoidMerge(t *testing.T) {
 	// not covered by B). differenceNotchPlateauJoin now joins the hot partner's ring
 	// to the clip ring at the horizontal's near end (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 9}, {X: 9, Y: 9}, {X: 9, Y: 6}, {X: 9, Y: 3}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 9).Point(9, 9).Point(9, 6).Point(9, 3).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 10, Y: 0}, {X: 9, Y: 9}, {X: 2, Y: 0}, {X: 5, Y: 2}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(10, 0).Point(9, 9).Point(2, 0).Point(5, 2).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -1751,15 +1751,15 @@ func TestBooleanHoledInputXorHoleClipApexFigure8(t *testing.T) {
 		hole geom.Polygon
 		b    geom.Polygon
 	}{
-		{"shared-edge", geom.Polygon{{X: 5, Y: 9}, {X: 8, Y: 9}, {X: 6, Y: 4}, {X: 5, Y: 4}},
-			geom.Polygon{{X: 8, Y: 9}, {X: 6, Y: 4}, {X: 10, Y: 12}, {X: 3, Y: 8}}},
-		{"shared-vertex", geom.Polygon{{X: 7, Y: 8}, {X: 9, Y: 3}, {X: 3, Y: 4}, {X: 6, Y: 8}},
-			geom.Polygon{{X: 1, Y: 2}, {X: 7, Y: 8}, {X: 10, Y: 2}, {X: 6, Y: 11}}},
+		{"shared-edge", geom.New().Point(5, 9).Point(8, 9).Point(6, 4).Point(5, 4).MustPolygon(),
+			geom.New().Point(8, 9).Point(6, 4).Point(10, 12).Point(3, 8).MustPolygon()},
+		{"shared-vertex", geom.New().Point(7, 8).Point(9, 3).Point(3, 4).Point(6, 8).MustPolygon(),
+			geom.New().Point(1, 2).Point(7, 8).Point(10, 2).Point(6, 11).MustPolygon()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := geom.MultiPolygon{geom.ExPolygon{
-				Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
+				Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
 				Holes: []geom.Polygon{tc.hole},
 			}}
 			b := geom.MultiPolygon{geom.ExPolygon{Outer: tc.b}}
@@ -1800,10 +1800,10 @@ func TestBooleanHoledInputHoleNotchApexReconnection(t *testing.T) {
 	// collapsed to a tiny sliver, so Intersect returned ~1.2 instead of ~20.85 and
 	// all three U/D/X identities broke (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 7, Y: 7}, {X: 5, Y: 4}, {X: 5, Y: 7}, {X: 3, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(7, 7).Point(5, 4).Point(5, 7).Point(3, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 3, Y: 7}, {X: 5, Y: 7}, {X: 11, Y: 1}, {X: 7, Y: 11}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(3, 7).Point(5, 7).Point(11, 1).Point(7, 11).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1826,10 +1826,10 @@ func TestBooleanHoledInputHoleTopDeadEndsOnClipThroughVertex(t *testing.T) {
 	// dead-ending on the hot bound that just climbed off a coincident horizontal
 	// (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 5}, {X: 3, Y: 9}, {X: 5, Y: 9}, {X: 9, Y: 9}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 5).Point(3, 9).Point(5, 9).Point(9, 9).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 3, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 11}, {X: 2, Y: 3}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(3, 9).Point(5, 9).Point(0, 11).Point(2, 3).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1851,10 +1851,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithSlopedClipBound(t *testing.T) {
 	// the hot bound passes THROUGH the overlap (apex strictly above) regardless of
 	// whether its continuation is horizontal or sloped (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 3, Y: 9}, {X: 5, Y: 8}, {X: 7, Y: 8}, {X: 7, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(3, 9).Point(5, 8).Point(7, 8).Point(7, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 5, Y: 8}, {X: 7, Y: 8}, {X: 0, Y: 12}, {X: 0, Y: 6}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(5, 8).Point(7, 8).Point(0, 12).Point(0, 6).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1878,10 +1878,10 @@ func TestBooleanHoledInputHoleTopCoincidentWithClipTop(t *testing.T) {
 	// (Difference 152 instead of 116). collinearContinuationBlocksSkip now blocks
 	// the skip only when the continuing bound is COLD (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 4}, {X: 5, Y: 9}, {X: 9, Y: 9}, {X: 5, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 4).Point(5, 9).Point(9, 9).Point(5, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 1, Y: 1}, {X: 10, Y: 9}, {X: 1, Y: 9}, {X: 3, Y: 5}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(1, 1).Point(10, 9).Point(1, 9).Point(3, 5).MustPolygon()}}
 
 	r := runBooleanIdentities(t, a, b, 0.02)
 
@@ -1897,8 +1897,8 @@ func TestBooleanDifferenceIdenticalRotatedCancels(t *testing.T) {
 	// assembleResult's containment forest treats two equal-area coincident
 	// rings as outer+hole via an orientation tie-break (DESIGN.md §11.9); a
 	// strict larger-area rule alone left both as filled outers (area doubled).
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 7, Y: 11}, {X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 7, Y: 8}, {X: 5, Y: 3}, {X: 12, Y: 2}, {X: 7, Y: 11}}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(7, 11).Point(7, 8).Point(5, 3).Point(12, 2).MustPolygon()}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(7, 8).Point(5, 3).Point(12, 2).Point(7, 11).MustPolygon()}}
 	d, err := Difference(a, b)
 	require.NoError(t, err, "difference")
 	require.LessOrEqual(t, d.Area(), 0.02, "Difference area %v want 0", d.Area())
@@ -1919,10 +1919,10 @@ func TestBooleanHoledInputDifferenceClipApexAtHoleVertex(t *testing.T) {
 	// continuing (spawned) ring's sides so the pair is opposite-side and splices
 	// via the standard JoinOutrecPaths (DESIGN.md §12.11, clip-apex/hole-vertex).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 8}, {X: 8, Y: 8}, {X: 6, Y: 4}, {X: 6, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 8).Point(8, 8).Point(6, 4).Point(6, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 0, Y: 7}, {X: 1, Y: 7}, {X: 12, Y: 2}, {X: 8, Y: 8}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(0, 7).Point(1, 7).Point(12, 2).Point(8, 8).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -1952,10 +1952,10 @@ func TestBooleanHoledInputUnionHoleTopCoincidentWithFillingClip(t *testing.T) {
 	// hole bound at the shared apex and closes the ring when that makes the hole
 	// top non-contributing (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 9, Y: 6}, {X: 7, Y: 5}, {X: 3, Y: 7}, {X: 8, Y: 7}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(9, 6).Point(7, 5).Point(3, 7).Point(8, 7).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 3, Y: 3}, {X: 8, Y: 7}, {X: 3, Y: 7}, {X: 3, Y: 1}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(3, 3).Point(8, 7).Point(3, 7).Point(3, 1).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -1986,10 +1986,10 @@ func TestBooleanHoledInputUnionHoleTopCoincidentMaxPlateau(t *testing.T) {
 	// cross-source max-plateau and its coupled cross-source edge tops at ae's near
 	// endpoint (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 5, Y: 9}, {X: 9, Y: 9}, {X: 9, Y: 4}, {X: 4, Y: 6}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(5, 9).Point(9, 9).Point(9, 4).Point(4, 6).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 6, Y: 9}, {X: 5, Y: 9}, {X: 0, Y: 2}, {X: 8, Y: 9}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(6, 9).Point(5, 9).Point(0, 2).Point(8, 9).MustPolygon()}}
 
 	u, err := Union(a, b)
 	require.NoError(t, err, "union")
@@ -2018,10 +2018,10 @@ func TestBooleanHoledInputIntersectHoleBiteThroughApex(t *testing.T) {
 	// instead of 11.5, breaking the U/D identities. intersectNotchPlateau now joins
 	// the notch to the continuing clip ring at the hole apex (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 7, Y: 8}, {X: 9, Y: 3}, {X: 3, Y: 4}, {X: 6, Y: 8}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(7, 8).Point(9, 3).Point(3, 4).Point(6, 8).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 1, Y: 2}, {X: 7, Y: 8}, {X: 10, Y: 2}, {X: 6, Y: 11}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(1, 2).Point(7, 8).Point(10, 2).Point(6, 11).MustPolygon()}}
 
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
@@ -2050,10 +2050,10 @@ func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
 	// with an edge of ae's own source (a doubled interior boundary); the ring closes
 	// at the shared vertex and B-left goes cold (DESIGN.md §12.11).
 	a := geom.MultiPolygon{geom.ExPolygon{
-		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 12}, {X: 0, Y: 12}},
-		Holes: []geom.Polygon{{{X: 9, Y: 6}, {X: 8, Y: 3}, {X: 3, Y: 6}, {X: 6, Y: 6}}},
+		Outer: geom.New().Point(0, 0).Point(12, 0).Point(12, 12).Point(0, 12).MustPolygon(),
+		Holes: []geom.Polygon{geom.New().Point(9, 6).Point(8, 3).Point(3, 6).Point(6, 6).MustPolygon()},
 	}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 3, Y: 6}, {X: 6, Y: 4}, {X: 8, Y: 11}, {X: 6, Y: 6}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().Point(3, 6).Point(6, 4).Point(8, 11).Point(6, 6).MustPolygon()}}
 
 	i, err := Intersect(a, b)
 	require.NoError(t, err, "intersect")
@@ -2082,10 +2082,10 @@ func TestBooleanHoledInputIntersectHoleTopCoincidentClipTop(t *testing.T) {
 func TestDifferenceMultipieceSubject(t *testing.T) {
 	t.Run("minimal repro", func(t *testing.T) {
 		a := geom.MultiPolygon{
-			{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2}, {X: 0, Y: 2}}}, // lower, area 4
-			{Outer: geom.Polygon{{X: 0, Y: 3}, {X: 3, Y: 3}, {X: 3, Y: 5}, {X: 0, Y: 5}}}, // upper, area 6
+			{Outer: geom.New().Point(0, 0).Point(2, 0).Point(2, 2).Point(0, 2).MustPolygon()}, // lower, area 4
+			{Outer: geom.New().Point(0, 3).Point(3, 3).Point(3, 5).Point(0, 5).MustPolygon()}, // upper, area 6
 		}
-		b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 1, Y: -1}, {X: 2, Y: -1}, {X: 2, Y: 2}, {X: 1, Y: 2}}}}
+		b := geom.MultiPolygon{{Outer: geom.New().Point(1, -1).Point(2, -1).Point(2, 2).Point(1, 2).MustPolygon()}}
 		got, err := Difference(a, b)
 		require.NoError(t, err, "difference")
 		// lower carved to [0,1]x[0,2] (area 2) + upper unchanged (area 6) = 8.
@@ -2096,10 +2096,10 @@ func TestDifferenceMultipieceSubject(t *testing.T) {
 		// From the differential: B carves the lower piece and the upper piece
 		// (area 15) was being dropped to a 3-area tangle.
 		a := geom.MultiPolygon{
-			{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 1}, {X: 0, Y: 1}}}, // lower, area 2
-			{Outer: geom.Polygon{{X: 1, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 5}, {X: 1, Y: 5}}}, // upper, area 15
+			{Outer: geom.New().Point(0, 0).Point(2, 0).Point(2, 1).Point(0, 1).MustPolygon()}, // lower, area 2
+			{Outer: geom.New().Point(1, 2).Point(6, 2).Point(6, 5).Point(1, 5).MustPolygon()}, // upper, area 15
 		}
-		b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 1, Y: -2}, {X: 2, Y: -2}, {X: 2, Y: 1}, {X: 1, Y: 1}}}}
+		b := geom.MultiPolygon{{Outer: geom.New().Point(1, -2).Point(2, -2).Point(2, 1).Point(1, 1).MustPolygon()}}
 		got, err := Difference(a, b)
 		require.NoError(t, err, "difference")
 		// lower ∩ B = [1,2]x[0,1] (area 1); lower∖B = 1; upper untouched = 15.

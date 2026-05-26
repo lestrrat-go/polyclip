@@ -48,10 +48,10 @@ func TestOffsetDumbbellSplits(t *testing.T) {
 func TestOffsetUNotchCloses(t *testing.T) {
 	// U opening upward: outer wall 12 wide, 10 tall, with a 2-wide slot from
 	// the top down to y=4 between x=5 and x=7.
-	u := geom.Polygon{
-		{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 10}, {X: 7, Y: 10},
-		{X: 7, Y: 4}, {X: 5, Y: 4}, {X: 5, Y: 10}, {X: 0, Y: 10},
-	}
+	u := geom.New().
+		Point(0, 0).Point(12, 0).Point(12, 10).Point(7, 10).
+		Point(7, 4).Point(5, 4).Point(5, 10).Point(0, 10).
+		MustPolygon()
 	in := geom.MultiPolygon{geom.ExPolygon{Outer: u}}
 	// Slot half-width is 1, so d=-1.5 (>1) closes it.
 	got, err := Offset(in, -1.5, OffsetOptions{Join: JoinMiter})

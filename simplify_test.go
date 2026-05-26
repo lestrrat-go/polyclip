@@ -30,9 +30,9 @@ func TestSimplifySimpleSquareUnchanged(t *testing.T) {
 // are filled, so the result is two triangles meeting at the crossing point.
 func TestSimplifyBowtieSplits(t *testing.T) {
 	// Vertices traversed 0→1→2→3: the two diagonals cross at (2,2).
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(4, 0).Point(0, 4).Point(4, 4).
+		MustPolygon()}}
 	got, err := Simplify(in)
 	require.NoError(t, err)
 	require.Len(t, got, 2, "got %d pieces, want 2 triangles", len(got))
@@ -47,9 +47,9 @@ func TestSimplifyBowtieSplits(t *testing.T) {
 // itself cannot do (the idempotency short-circuit leaves it unchanged).
 func TestSimplifyResolvesSelfIntersecting(t *testing.T) {
 	// A self-intersecting arrowhead whose strokes cross each other.
-	star := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 6}, {X: 0, Y: 4}, {X: 10, Y: 0}, {X: 0, Y: 6},
-	}}}
+	star := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(10, 6).Point(0, 4).Point(10, 0).Point(0, 6).
+		MustPolygon()}}
 	require.NotEmpty(t, star.Validate(), "test setup: input should be self-intersecting")
 
 	// Union with itself short-circuits and leaves it dirty (unchanged).

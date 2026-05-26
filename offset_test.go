@@ -14,9 +14,9 @@ func TestOffsetEmpty(t *testing.T) {
 }
 
 func TestOffsetZero(t *testing.T) {
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	got, err := Offset(in, 0, OffsetOptions{})
 	require.NoError(t, err)
 	require.InDelta(t, in.Area(), got.Area(), 0.01, "Offset(_, 0) changed area: %v vs %v", got.Area(), in.Area())
@@ -80,9 +80,9 @@ func TestOffsetSquareOutward(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-				{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-			}}}
+			in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+				Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+				MustPolygon()}}
 			got, err := Offset(in, 2, tc.opts)
 			require.NoError(t, err)
 			if tc.wantPieces > 0 {
@@ -99,9 +99,9 @@ func TestOffsetSquareOutward(t *testing.T) {
 
 func TestOffsetSquareInward(t *testing.T) {
 	// 10x10 square offset INWARD by 2: 6x6 square (area 36).
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	got, err := Offset(in, -2, OffsetOptions{Join: JoinMiter})
 	require.NoError(t, err)
 	require.Len(t, got, 1, "expected 1 piece, got %d", len(got))
@@ -112,9 +112,9 @@ func TestOffsetSquareInward(t *testing.T) {
 func TestOffsetSquareCollapses(t *testing.T) {
 	// 10x10 square offset inward by 6 — collapses (smallest half-extent
 	// is 5, so d=-6 should produce empty).
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	_, err := Offset(in, -6, OffsetOptions{Join: JoinMiter})
 	require.Equal(t, ErrOffsetEmpty, err, "Offset(square, -6) err = %v, want ErrOffsetEmpty", err)
 }

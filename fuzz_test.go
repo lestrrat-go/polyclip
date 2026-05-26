@@ -24,12 +24,12 @@ import (
 const fuzzAreaEps = 1e-6
 
 func makeQuad(x1, y1, x2, y2, x3, y3, x4, y4 int16) geom.MultiPolygon {
-	return geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: float64(x1), Y: float64(y1)},
-		{X: float64(x2), Y: float64(y2)},
-		{X: float64(x3), Y: float64(y3)},
-		{X: float64(x4), Y: float64(y4)},
-	}}}
+	return geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(float64(x1), float64(y1)).
+		Point(float64(x2), float64(y2)).
+		Point(float64(x3), float64(y3)).
+		Point(float64(x4), float64(y4)).
+		MustPolygon()}}
 }
 
 func nonDegenerate(m geom.MultiPolygon) bool {

@@ -8,21 +8,21 @@ import (
 )
 
 func square(cx, cy, half float64) Polygon {
-	return Polygon{
-		{X: cx - half, Y: cy - half},
-		{X: cx + half, Y: cy - half},
-		{X: cx + half, Y: cy + half},
-		{X: cx - half, Y: cy + half},
-	}
+	return New().
+		Point(cx-half, cy-half).
+		Point(cx+half, cy-half).
+		Point(cx+half, cy+half).
+		Point(cx-half, cy+half).
+		MustPolygon()
 }
 
 func TestPolygonSignedArea(t *testing.T) {
 	ccw := square(0, 0, 5) // CCW in (Y-up) convention
 	require.Equal(t, 100.0, ccw.SignedArea(), "ccw SignedArea: got %v want 100", ccw.SignedArea())
-	cw := Polygon{{X: -5, Y: -5}, {X: -5, Y: 5}, {X: 5, Y: 5}, {X: 5, Y: -5}} // CW
+	cw := New().Point(-5, -5).Point(-5, 5).Point(5, 5).Point(5, -5).MustPolygon() // CW
 	require.Equal(t, -100.0, cw.SignedArea(), "cw SignedArea: got %v want -100", cw.SignedArea())
 	// Triangle.
-	tri := Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 0, Y: 3}}
+	tri := New().Point(0, 0).Point(4, 0).Point(0, 3).MustPolygon()
 	require.Equal(t, 6.0, tri.SignedArea(), "tri SignedArea: got %v want 6", tri.SignedArea())
 	// Degenerate.
 	require.Equal(t, 0.0, (Polygon{}).SignedArea(), "empty SignedArea: want 0")
@@ -30,14 +30,14 @@ func TestPolygonSignedArea(t *testing.T) {
 }
 
 func TestPolygonArea(t *testing.T) {
-	for _, p := range []Polygon{square(0, 0, 5), {{X: -5, Y: -5}, {X: -5, Y: 5}, {X: 5, Y: 5}, {X: 5, Y: -5}}} {
+	for _, p := range []Polygon{square(0, 0, 5), New().Point(-5, -5).Point(-5, 5).Point(5, 5).Point(5, -5).MustPolygon()} {
 		require.Equal(t, 100.0, p.Area(), "Area: got %v want 100", p.Area())
 	}
 }
 
 func TestPolygonIsCCW(t *testing.T) {
 	require.True(t, square(0, 0, 1).IsCCW(), "square (Y-up) should be CCW")
-	cw := Polygon{{X: -1, Y: -1}, {X: -1, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: -1}}
+	cw := New().Point(-1, -1).Point(-1, 1).Point(1, 1).Point(1, -1).MustPolygon()
 	require.False(t, cw.IsCCW(), "cw should not be CCW")
 }
 
@@ -49,13 +49,13 @@ func TestPolygonReverse(t *testing.T) {
 		require.Equal(t, want[i], p[i], "Reverse[%d]: got %v want %v", i, p[i], want[i])
 	}
 	// Odd length.
-	q := Polygon{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 0, Y: 1}}
+	q := New().Point(0, 0).Point(1, 0).Point(0, 1).MustPolygon()
 	q.Reverse()
-	require.Equal(t, Polygon{{X: 0, Y: 1}, {X: 1, Y: 0}, {X: 0, Y: 0}}, q, "Reverse odd: %v", q)
+	require.Equal(t, New().Point(0, 1).Point(1, 0).Point(0, 0).MustPolygon(), q, "Reverse odd: %v", q)
 }
 
 func TestPolygonBoundingBox(t *testing.T) {
-	p := Polygon{{X: 1, Y: -2}, {X: 4, Y: 3}, {X: -1, Y: 5}}
+	p := New().Point(1, -2).Point(4, 3).Point(-1, 5).MustPolygon()
 	want := BBox{Min: Point{X: -1, Y: -2}, Max: Point{X: 4, Y: 5}}
 	require.Equal(t, want, p.BoundingBox(), "BoundingBox: got %+v want %+v", p.BoundingBox(), want)
 	require.True(t, (Polygon{}).BoundingBox().Empty(), "empty Polygon BoundingBox should be empty")
@@ -140,13 +140,13 @@ func TestMultiPolygonContains(t *testing.T) {
 }
 
 func TestCleanRemovesConsecutiveDuplicates(t *testing.T) {
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 0, Y: 0}, // exact duplicate
-		{X: 10, Y: 0},
-		{X: 10, Y: 0.0001}, // within tol
-		{X: 10, Y: 10},
-		{X: 0, Y: 10},
-	}}}
+	in := MultiPolygon{ExPolygon{Outer: New().
+		Point(0, 0).Point(0, 0). // exact duplicate
+		Point(10, 0).
+		Point(10, 0.0001). // within tol
+		Point(10, 10).
+		Point(0, 10).
+		MustPolygon()}}
 	got := in.Clean(0.001, 0)
 	require.Len(t, got, 1, "len=%d want 1", len(got))
 	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4: %+v", len(got[0].Outer), got[0].Outer)
@@ -154,10 +154,10 @@ func TestCleanRemovesConsecutiveDuplicates(t *testing.T) {
 
 func TestCleanRemovesCollinear(t *testing.T) {
 	// Square with three extra collinear vertices on the bottom edge.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 5, Y: 0}, {X: 8, Y: 0}, {X: 10, Y: 0},
-		{X: 10, Y: 10}, {X: 0, Y: 10},
-	}}}
+	in := MultiPolygon{ExPolygon{Outer: New().
+		Point(0, 0).Point(2, 0).Point(5, 0).Point(8, 0).Point(10, 0).
+		Point(10, 10).Point(0, 10).
+		MustPolygon()}}
 	got := in.Clean(1e-9, 0)
 	require.Len(t, got, 1, "len=%d want 1", len(got))
 	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4 (square): %+v", len(got[0].Outer), got[0].Outer)
@@ -166,17 +166,17 @@ func TestCleanRemovesCollinear(t *testing.T) {
 func TestCleanWrapAroundDuplicate(t *testing.T) {
 	// Closing duplicate (first vertex repeated at end) — common when callers
 	// store rings as closed paths.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}, {X: 0, Y: 0},
-	}}}
+	in := MultiPolygon{ExPolygon{Outer: New().
+		Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).Point(0, 0).
+		MustPolygon()}}
 	got := in.Clean(0, 0)
 	require.Len(t, got[0].Outer, 4, "vertex count=%d want 4 (closing duplicate dropped)", len(got[0].Outer))
 }
 
 func TestCleanDropsTinyRing(t *testing.T) {
 	in := MultiPolygon{
-		ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}},                     // area 100
-		ExPolygon{Outer: Polygon{{X: 100, Y: 100}, {X: 100.1, Y: 100}, {X: 100.1, Y: 100.1}, {X: 100, Y: 100.1}}}, // area 0.01
+		ExPolygon{Outer: New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon()},                     // area 100
+		ExPolygon{Outer: New().Point(100, 100).Point(100.1, 100).Point(100.1, 100.1).Point(100, 100.1).MustPolygon()}, // area 0.01
 	}
 	got := in.Clean(0, 1.0)
 	require.Len(t, got, 1, "len=%d want 1 (tiny piece dropped)", len(got))
@@ -184,10 +184,10 @@ func TestCleanDropsTinyRing(t *testing.T) {
 
 func TestCleanDropsTinyHole(t *testing.T) {
 	in := MultiPolygon{ExPolygon{
-		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}, // 100
+		Outer: New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustPolygon(), // 100
 		Holes: []Polygon{
-			{{X: 4, Y: 4}, {X: 4, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 4}},             // CW hole, area 4
-			{{X: 2, Y: 2}, {X: 2, Y: 2.01}, {X: 2.01, Y: 2.01}, {X: 2.01, Y: 2}}, // tiny CW hole, ~0.0001
+			New().Point(4, 4).Point(4, 6).Point(6, 6).Point(6, 4).MustPolygon(),             // CW hole, area 4
+			New().Point(2, 2).Point(2, 2.01).Point(2.01, 2.01).Point(2.01, 2).MustPolygon(), // tiny CW hole, ~0.0001
 		},
 	}}
 	got := in.Clean(0, 1.0)
@@ -197,9 +197,9 @@ func TestCleanDropsTinyHole(t *testing.T) {
 
 func TestCleanCollapseDegenerate(t *testing.T) {
 	// All vertices collinear → ring collapses to nothing.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
-		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0}, {X: 5, Y: 0},
-	}}}
+	in := MultiPolygon{ExPolygon{Outer: New().
+		Point(0, 0).Point(5, 0).Point(10, 0).Point(5, 0).
+		MustPolygon()}}
 	got := in.Clean(1e-9, 0)
 	require.Empty(t, got, "degenerate ring not dropped: %+v", got)
 }
@@ -210,7 +210,7 @@ func TestSignedAreaSign(t *testing.T) {
 	for k := range 8 {
 		theta := float64(k) * math.Pi / 4
 		c, s := math.Cos(theta), math.Sin(theta)
-		base := Polygon{{X: -1, Y: -1}, {X: 1, Y: -1}, {X: 1, Y: 1}, {X: -1, Y: 1}}
+		base := New().Point(-1, -1).Point(1, -1).Point(1, 1).Point(-1, 1).MustPolygon()
 		var rot Polygon
 		for _, p := range base {
 			rot = append(rot, Point{X: c*p.X - s*p.Y, Y: s*p.X + c*p.Y})

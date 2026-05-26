@@ -11,15 +11,15 @@ import (
 // infinite loop found by the §7.5 reachability harness: Difference of two
 // axis-aligned skyline polygons spins forever in the horizontal-join merge.
 func TestHorizJoinHangRepro(t *testing.T) {
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 7, Y: 0}, {X: 7, Y: 6}, {X: 6, Y: 6}, {X: 5, Y: 6},
-		{X: 5, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 3, Y: 4}, {X: 2, Y: 4},
-		{X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 3}, {X: 0, Y: 3},
-	}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 1, Y: 1}, {X: 4, Y: 1}, {X: 4, Y: 2}, {X: 3, Y: 2},
-		{X: 3, Y: 4}, {X: 2, Y: 4}, {X: 1, Y: 4},
-	}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(7, 0).Point(7, 6).Point(6, 6).Point(5, 6).
+		Point(5, 2).Point(4, 2).Point(3, 2).Point(3, 4).Point(2, 4).
+		Point(2, 6).Point(1, 6).Point(1, 3).Point(0, 3).
+		MustPolygon()}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(1, 1).Point(4, 1).Point(4, 2).Point(3, 2).
+		Point(3, 4).Point(2, 4).Point(1, 4).
+		MustPolygon()}}
 	require.Empty(t, a.Validate(), "A invalid: %v", a.Validate())
 	require.Empty(t, b.Validate(), "B invalid: %v", b.Validate())
 	got, err := Difference(a, b)

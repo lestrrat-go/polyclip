@@ -31,16 +31,16 @@ func TestSelfUnionPositiveRobustDegenerate(t *testing.T) {
 			// Reconcile non-convergence spin/OOM in the ang=0.21 frame.
 			name: "spin",
 			rings: []geom.Polygon{
-				{{X: 0, Y: 0}, {X: 3, Y: 0}, {X: 3, Y: 1}, {X: 2, Y: 1}, {X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 1}, {X: 0, Y: 1}},
-				{{X: 0, Y: -3}, {X: 1, Y: -3}, {X: 1, Y: 2}, {X: 0, Y: 2}},
+				geom.New().Point(0, 0).Point(3, 0).Point(3, 1).Point(2, 1).Point(2, 6).Point(1, 6).Point(1, 1).Point(0, 1).MustPolygon(),
+				geom.New().Point(0, -3).Point(1, -3).Point(1, 2).Point(0, 2).MustPolygon(),
 			},
 		},
 		{
 			// doHorizontal nil-deref panic in the ang=0 (axis-aligned) frame.
 			name: "panic",
 			rings: []geom.Polygon{
-				{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 6}, {X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 2}, {X: 0, Y: 2}},
-				{{X: 3, Y: 2}, {X: 9, Y: 2}, {X: 9, Y: 3}, {X: 8, Y: 3}, {X: 8, Y: 4}, {X: 7, Y: 4}, {X: 7, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 4}, {X: 5, Y: 4}, {X: 5, Y: 5}, {X: 4, Y: 5}, {X: 4, Y: 7}, {X: 3, Y: 7}},
+				geom.New().Point(0, 0).Point(5, 0).Point(5, 4).Point(4, 4).Point(4, 1).Point(3, 1).Point(3, 6).Point(2, 6).Point(1, 6).Point(1, 2).Point(0, 2).MustPolygon(),
+				geom.New().Point(3, 2).Point(9, 2).Point(9, 3).Point(8, 3).Point(8, 4).Point(7, 4).Point(7, 6).Point(6, 6).Point(6, 4).Point(5, 4).Point(5, 5).Point(4, 5).Point(4, 7).Point(3, 7).MustPolygon(),
 			},
 		},
 	}

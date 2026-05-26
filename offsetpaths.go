@@ -36,6 +36,11 @@ func OffsetPaths(lines []geom.Polyline, d float64, opts OffsetOptions) (geom.Mul
 	if len(lines) == 0 {
 		return nil, ErrOffsetEmpty
 	}
+	// An open path has no inside, so "inward" vs "outward" is undefined: the
+	// ribbon is symmetric about the path, thickened |d| on each side. Hence the
+	// sign of d carries no meaning here (unlike Offset, where it picks
+	// inflate/erode) and we take its magnitude as the half-width. A negative d
+	// is normalized rather than rejected, matching Clipper2's OffsetOpenPath.
 	w := math.Abs(d)
 	if w == 0 {
 		return nil, ErrOffsetEmpty

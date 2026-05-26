@@ -58,6 +58,11 @@ func (z *zTracker) applyCrossings(cs []clip.ZCrossing, scale fixed.Scale) {
 		if _, ok := z.table[c.P]; ok {
 			continue
 		}
+		// Stored verbatim, including a NaN/Inf the callback might return. The
+		// engine never reads Z (it sweeps on integer X/Y only), so a bad value
+		// cannot corrupt geometry — it just rides along on the user's own
+		// auxiliary channel. Sanitizing here would also be asymmetric with
+		// recordInput, which passes input-vertex Z through unchecked too.
 		z.table[c.P] = z.za.AssignZ(
 			unsnapPoint(c.E1Bot, scale), unsnapPoint(c.E1Top, scale),
 			unsnapPoint(c.E2Bot, scale), unsnapPoint(c.E2Top, scale),

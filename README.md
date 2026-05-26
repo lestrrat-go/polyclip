@@ -70,7 +70,7 @@ import "github.com/lestrrat-go/polyclip/geom"
 // A square with a triangular hole, plus a second disjoint piece.
 m := geom.New().
 	Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
-	Hole(geom.Polygon{{3, 3}, {6, 3}, {5, 6}}).
+	Hole(geom.New().Point(3, 3).Point(6, 3).Point(5, 6).MustPolygon()).
 	NextPiece().
 	Point(20, 0).Point(24, 0).Point(22, 4).
 	MustBuild()
@@ -82,8 +82,9 @@ piece's outer ring, `Hole` attaches one or more `Polygon` rings as holes
 (pre-built, literal, or spread from a `[]Polygon`), `NextPiece` starts a
 disjoint piece, and `Build`/`MustBuild` normalizes winding (outer CCW, holes
 CW). A ring can itself be built fluently and extracted with `MustPolygon` —
-`geom.New().Point(…)…​.MustPolygon()` — then passed to `Hole`. You can also
-construct the value types directly as literals — see below.
+`geom.New().Point(…)…​.MustPolygon()` — then passed to `Hole`, as the hole above
+shows. The value types are plain structs, so composite literals work too where
+they read more clearly.
 
 ### Boolean ops
 
@@ -93,8 +94,8 @@ import (
 	"github.com/lestrrat-go/polyclip/geom"
 )
 
-a := geom.MultiPolygon{{Outer: geom.Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
-b := geom.MultiPolygon{{Outer: geom.Polygon{{5, 5}, {15, 5}, {15, 15}, {5, 15}}}}
+a := geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustBuild()
+b := geom.New().Point(5, 5).Point(15, 5).Point(15, 15).Point(5, 15).MustBuild()
 
 u, err := polyclip.Union(a, b)        // a ∪ b
 i, err := polyclip.Intersect(a, b)    // a ∩ b

@@ -62,6 +62,29 @@ Requires Go 1.26 or later.
 
 ## Quick taste
 
+### Building shapes
+
+```go
+import "github.com/lestrrat-go/polyclip/geom"
+
+// A square with a triangular hole, plus a second disjoint piece.
+m := geom.New().
+	Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
+	Hole(geom.Polygon{{3, 3}, {6, 3}, {5, 6}}).
+	NextPiece().
+	Point(20, 0).Point(24, 0).Point(22, 4).
+	MustBuild()
+_ = m
+```
+
+`geom.New()` builds a `MultiPolygon` fluently: `Point` extends the current
+piece's outer ring, `Hole` attaches one or more `Polygon` rings as holes
+(pre-built, literal, or spread from a `[]Polygon`), `NextPiece` starts a
+disjoint piece, and `Build`/`MustBuild` normalizes winding (outer CCW, holes
+CW). A ring can itself be built fluently and extracted with `MustPolygon` —
+`geom.New().Point(…)…​.MustPolygon()` — then passed to `Hole`. You can also
+construct the value types directly as literals — see below.
+
 ### Boolean ops
 
 ```go
@@ -91,7 +114,7 @@ _, _ = out, err
 ### Builder (fill rules, open paths, nested output)
 
 ```go
-res, err := polyclip.NewBuilder().
+res, err := polyclip.New().
 	AddSubject(a).
 	AddClip(b).
 	Fill(polyclip.FillEvenOdd).

@@ -73,6 +73,7 @@ The public surface is small; see the Go doc comments for full signatures.
 - **Boolean ops** (`boolean.go`): `Union`, `Intersect`, `Difference`, `Xor` — each `(a, b geom.MultiPolygon) (geom.MultiPolygon, error)`; `UnionAll(...geom.MultiPolygon)` for tournament-reduced multi-union.
 - **Offset** (`offset.go`): `Offset(m, d, opts)` with `OffsetOptions{Join, MiterLimit, ArcTol}` and `JoinType` ∈ {miter, round, square}.
 - **Geometry utilities** (package `geom`): `SignedArea`, `Area`, `IsCCW`, `Reverse`, `BoundingBox`, `Contains` (even-odd, boundary inside); `MultiPolygon.Clean(vertexTol, minArea)`; `MultiPolygon.Validate() []ValidationIssue`.
+- **Shape builder** (package `geom`): `geom.New()` returns a fluent `*geom.Builder` — `Point`/`Point3` extend the current piece's outer ring, `Hole(...Polygon)` attaches holes (pre-built, literal, or a spread `[]Polygon`), `NextPiece` starts a disjoint piece, and `Build`/`MustBuild` normalize winding and emit a `MultiPolygon`. `Polygon`/`MustPolygon` extract a fluently-built single ring (e.g. to pass to `Hole`).
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 
@@ -335,7 +336,7 @@ behind an off-by-default flag. Open-path clipping (c) was expected to need engin
 changes too but is designed as a standalone post-sweep pass instead.
 
 **(0) `Builder` accumulator API.** The entry point the other
-features build on: `NewBuilder().AddSubject(…).AddClip(…).Execute(op)` returning
+features build on: `New().AddSubject(…).AddClip(…).Execute(op)` returning
 `Result{Closed, Open}`, with a root-package `Operation`
 (`OpUnion`/`OpIntersect`/`OpDifference`/`OpXor`). The accumulator is the general
 path; the named free functions (`Union`/`Intersect`/`Difference`/`Xor`) are thin

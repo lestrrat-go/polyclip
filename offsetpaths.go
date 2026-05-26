@@ -27,14 +27,16 @@ var ErrOffsetEndType = errors.New("polyclip: invalid open-path end type")
 // opts.End must be one of [EndButt] (the default), [EndSquare], [EndRound], or
 // [EndJoined]; [EndPolygon] returns [ErrOffsetEndType]. [EndJoined] closes each
 // path into a loop and bands it on both sides (see [EndJoined]). If every path
-// is too short or the result is empty, OffsetPaths returns [ErrOffsetEmpty].
+// is too short, d is zero, or the result is otherwise empty, OffsetPaths
+// returns an empty MultiPolygon and a nil error — an empty result is a valid
+// outcome, not a failure. The only error returned is [ErrOffsetEndType].
 func OffsetPaths(lines []geom.Polyline, d float64, opts OffsetOptions) (geom.MultiPolygon, error) {
 	if opts.End == EndPolygon {
 		// EndPolygon is the closed-input behaviour of Offset; not a cap.
 		return nil, ErrOffsetEndType
 	}
 	if len(lines) == 0 {
-		return nil, ErrOffsetEmpty
+		return geom.MultiPolygon{}, nil
 	}
 	// An open path has no inside, so "inward" vs "outward" is undefined: the
 	// ribbon is symmetric about the path, thickened |d| on each side. Hence the
@@ -43,7 +45,7 @@ func OffsetPaths(lines []geom.Polyline, d float64, opts OffsetOptions) (geom.Mul
 	// is normalized rather than rejected, matching Clipper2's OffsetOpenPath.
 	w := math.Abs(d)
 	if w == 0 {
-		return nil, ErrOffsetEmpty
+		return geom.MultiPolygon{}, nil // zero-width ribbon has no area
 	}
 	if opts.MiterLimit <= 0 {
 		opts.MiterLimit = 2.0
@@ -64,9 +66,8 @@ func OffsetPaths(lines []geom.Polyline, d float64, opts OffsetOptions) (geom.Mul
 		}
 		result = append(result, resolveOffsetPiece([]geom.Polygon{ring})...)
 	}
-	if len(result) == 0 {
-		return nil, ErrOffsetEmpty
-	}
+	// result is initialized non-nil above, so an all-empty run returns an empty
+	// (not nil) MultiPolygon with a nil error.
 	return result, nil
 }
 

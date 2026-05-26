@@ -37,8 +37,9 @@ Erosion can shrink a feature out of existence. A hole narrower than `2·|d|`
 closes up entirely, and an inward offset removes it. An outer ring smaller than
 the offset can wear away to nothing, in which case that whole piece drops out
 of the result. If *every* piece vanishes this way — for instance, an inward
-offset larger than the entire shape — the operation reports `ErrOffsetEmpty`
-rather than returning a meaningless empty shape silently.
+offset larger than the entire shape — the operation returns an empty
+`MultiPolygon` with a nil error. An empty result is a valid outcome (the same
+way intersecting two disjoint shapes yields nothing), not a failure.
 
 ## Corner joins
 

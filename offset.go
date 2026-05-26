@@ -1,7 +1,6 @@
 package polyclip
 
 import (
-	"errors"
 	"math"
 
 	"github.com/lestrrat-go/polyclip/geom"
@@ -65,11 +64,6 @@ type OffsetOptions struct {
 	ArcTol     float64  // max chord deviation for round joins, in user units. Default abs(d) * 0.01.
 }
 
-// ErrOffsetEmpty is returned by [Offset] when the input is empty or
-// every ring vanishes under the requested offset (e.g. inward offset
-// larger than the smallest feature).
-var ErrOffsetEmpty = errors.New("polyclip: offset produced empty result")
-
 // Offset returns the Minkowski sum of m with a disk of radius d when
 // d > 0 (outward offset / inflation), or the Minkowski erosion when
 // d < 0 (inward offset / deflation). Per DESIGN.md §4.3 the algorithm
@@ -85,7 +79,10 @@ var ErrOffsetEmpty = errors.New("polyclip: offset produced empty result")
 // ring is re-resolved by a positive-fill self-union that splits or merges it
 // into the correct simple pieces. A piece is emitted only where the offset
 // region is non-empty; an over-shrunk piece collapses and is dropped, and if
-// everything collapses Offset returns [ErrOffsetEmpty].
+// everything collapses (or the input is empty) Offset returns an empty
+// MultiPolygon and a nil error — an empty result is a valid outcome, not a
+// failure. The error return is reserved for future use and is currently
+// always nil.
 //
 // Hole orientation: outer rings are CCW, holes are CW (the standard
 // polyclip convention). A positive d inflates outer rings and shrinks
@@ -97,7 +94,7 @@ var ErrOffsetEmpty = errors.New("polyclip: offset produced empty result")
 // limit 2.0.
 func Offset(m geom.MultiPolygon, d float64, opts OffsetOptions) (geom.MultiPolygon, error) {
 	if len(m) == 0 {
-		return nil, ErrOffsetEmpty
+		return geom.MultiPolygon{}, nil
 	}
 	if d == 0 {
 		return cloneMulti(m), nil
@@ -145,9 +142,8 @@ func Offset(m geom.MultiPolygon, d float64, opts OffsetOptions) (geom.MultiPolyg
 			result = append(result, piece)
 		}
 	}
-	if len(result) == 0 {
-		return nil, ErrOffsetEmpty
-	}
+	// result is initialized non-nil above, so a full collapse returns an empty
+	// (not nil) MultiPolygon with a nil error.
 	return result, nil
 }
 

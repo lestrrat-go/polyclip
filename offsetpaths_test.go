@@ -118,9 +118,10 @@ func TestOffsetPathsMultiple(t *testing.T) {
 }
 
 func TestOffsetPathsErrors(t *testing.T) {
-	// Each case feeds invalid/edge input to OffsetPaths and asserts the exact
-	// sentinel error it must return. The cases differ in the input paths, the
-	// offset distance, and which ErrOffset* sentinel they expect.
+	// Each case feeds invalid/edge input to OffsetPaths. A non-nil wantErr is the
+	// exact sentinel the case must return; a nil wantErr means the input is a
+	// valid-but-empty case (nil paths, too-short paths, zero width), which must
+	// return an empty MultiPolygon and a nil error rather than a sentinel.
 	cases := []struct {
 		name    string
 		lines   []geom.Polyline
@@ -142,8 +143,8 @@ func TestOffsetPathsErrors(t *testing.T) {
 			lines:   nil,
 			dist:    2,
 			opts:    OffsetOptions{End: EndButt},
-			wantErr: ErrOffsetEmpty,
-			msg:     "OffsetPaths(nil) err = %v, want ErrOffsetEmpty",
+			wantErr: nil,
+			msg:     "OffsetPaths(nil) err = %v, want nil",
 		},
 		{
 			// A single-point path (and a zero-length repeat) has no direction; skipped.
@@ -151,22 +152,27 @@ func TestOffsetPathsErrors(t *testing.T) {
 			lines:   []geom.Polyline{{{X: 5, Y: 5}}, {{X: 1, Y: 1}, {X: 1, Y: 1}}},
 			dist:    2,
 			opts:    OffsetOptions{End: EndButt},
-			wantErr: ErrOffsetEmpty,
-			msg:     "OffsetPaths(short) err = %v, want ErrOffsetEmpty",
+			wantErr: nil,
+			msg:     "OffsetPaths(short) err = %v, want nil",
 		},
 		{
 			name:    "ZeroWidth",
 			lines:   []geom.Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
 			dist:    0,
 			opts:    OffsetOptions{End: EndButt},
-			wantErr: ErrOffsetEmpty,
-			msg:     "OffsetPaths(d=0) err = %v, want ErrOffsetEmpty",
+			wantErr: nil,
+			msg:     "OffsetPaths(d=0) err = %v, want nil",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := OffsetPaths(tc.lines, tc.dist, tc.opts)
-			require.Equal(t, tc.wantErr, err, tc.msg, err)
+			got, err := OffsetPaths(tc.lines, tc.dist, tc.opts)
+			if tc.wantErr != nil {
+				require.Equal(t, tc.wantErr, err, tc.msg, err)
+				return
+			}
+			require.NoError(t, err, tc.msg, err)
+			require.Empty(t, got, "%s: result = %v, want empty", tc.name, got)
 		})
 	}
 }

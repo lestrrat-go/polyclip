@@ -10,8 +10,9 @@ import (
 )
 
 func TestOffsetEmpty(t *testing.T) {
-	_, err := Offset(geom.MultiPolygon{}, 5, OffsetOptions{})
-	require.Equal(t, ErrOffsetEmpty, err, "Offset(empty) err = %v, want ErrOffsetEmpty", err)
+	got, err := Offset(geom.MultiPolygon{}, 5, OffsetOptions{})
+	require.NoError(t, err, "Offset(empty) err = %v, want nil", err)
+	require.Empty(t, got, "Offset(empty) = %v, want empty", got)
 }
 
 func TestOffsetZero(t *testing.T) {
@@ -116,8 +117,9 @@ func TestOffsetSquareCollapses(t *testing.T) {
 	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
 		Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).
 		MustPolygon()}}
-	_, err := Offset(in, -6, OffsetOptions{Join: JoinMiter})
-	require.Equal(t, ErrOffsetEmpty, err, "Offset(square, -6) err = %v, want ErrOffsetEmpty", err)
+	got, err := Offset(in, -6, OffsetOptions{Join: JoinMiter})
+	require.NoError(t, err, "Offset(square, -6) err = %v, want nil", err)
+	require.Empty(t, got, "Offset(square, -6) = %v, want empty (collapsed)", got)
 }
 
 func TestOffsetRoundTrip(t *testing.T) {
@@ -214,10 +216,10 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 		in := geom.MultiPolygon{geom.ExPolygon{Outer: poly}}
 		d := 3.0 + rng.Float64()*5
 		got, err := Offset(in, -d, OffsetOptions{Join: JoinRound, ArcTol: 0.1})
-		if err == ErrOffsetEmpty {
+		require.NoError(t, err, "trial %d", trial)
+		if len(got) == 0 {
 			continue // collapsed entirely — acceptable if input is small
 		}
-		require.NoError(t, err, "trial %d", trial)
 		band := 0.15 * d // skip points within this distance of the decision boundary
 		bb := poly.BoundingBox()
 		mism, checked := 0, 0

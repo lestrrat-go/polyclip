@@ -116,7 +116,7 @@ Offset walks each input ring once and emits an offset ring directly, vertex by v
 
 Holes are offset by `-d`. The raw ring is emitted unconditionally — when an inward offset overshoots the inradius it self-intersects (a pinched neck, a closing notch, an inside-out collapse) rather than being rejected.
 
-**Topology resolution (§7.1).** Per input `ExPolygon`, the raw offset rings (outer by `d`, holes by `-d`) are checked for self/mutual intersection (`ringsIntersect`). If none, topology is unchanged and the rings are returned directly (exact, no engine pass). If they intersect, the piece is re-resolved by a **positive-fill self-union**: feed the rings to the scanline engine (`clip.SweepFill` with `clip.FillPositive`), which keeps exactly the strictly-positively-wound region — the outer winds `+1` inside, CW holes `−1` — so a pinched ring splits into islands and the negatively-wound overshoot folds drop. An inward result piece is additionally validated against the erosion definition (`insetDeepEnough`: an interior point must be ≥ `|d|` from the input boundary), which rejects the convex "inside-out" collapse whose ring is simple and positively oriented yet sits where the offset is empty. If everything collapses, `Offset` returns `ErrOffsetEmpty`.
+**Topology resolution (§7.1).** Per input `ExPolygon`, the raw offset rings (outer by `d`, holes by `-d`) are checked for self/mutual intersection (`ringsIntersect`). If none, topology is unchanged and the rings are returned directly (exact, no engine pass). If they intersect, the piece is re-resolved by a **positive-fill self-union**: feed the rings to the scanline engine (`clip.SweepFill` with `clip.FillPositive`), which keeps exactly the strictly-positively-wound region — the outer winds `+1` inside, CW holes `−1` — so a pinched ring splits into islands and the negatively-wound overshoot folds drop. An inward result piece is additionally validated against the erosion definition (`insetDeepEnough`: an interior point must be ≥ `|d|` from the input boundary), which rejects the convex "inside-out" collapse whose ring is simple and positively oriented yet sits where the offset is empty. If everything collapses, `Offset` returns an empty `MultiPolygon` with a nil error.
 
 **Degeneracy robustness.** The sweep is exact on transversal self-intersections but resolves a *snapped* degenerate configuration (same-source collinear coincident edges from parallel walls a multiple of `2|d|` apart, or a near-pinch crossing) differently — sometimes wrongly — per coordinate frame. Axis-aligned and thin-neck inward offsets hit this. So the self-union is run in several rotated frames (`selfUnionResolveAngles`) and the **most-agreed-upon** result (same piece count and area, within 2%) is kept; the correct resolution recurs across frames while each degenerate misresolution is scattered. Angle 0 (no rotation, exact coordinates) is preferred within the agreeing majority, so non-degenerate offsets keep exact output. (The boolean engine's own same-source coincident-edge gap is the deeper root cause; see §7.2.)
 
@@ -563,19 +563,14 @@ not a bug — current behaviour is correct. Ordered by impact. Profiled on
    Douglas–Peucker vertex decimation. The names give no hint which is which.
    Pre-1.0: consider renaming `SimplifyPaths` (e.g. `ReducePaths`/`Decimate`), or
    lead each doc with an explicit "not the other one" line.
-4. **Empty-input convention is asymmetric.** `Offset(empty,…)` returns
-   `nil, ErrOffsetEmpty`, but `Union(empty,empty)` returns `MultiPolygon{}, nil`.
-   The same sentinel also conflates "you passed nothing" with "the shape
-   collapsed under inward offset"; the collapse signal is useful, the
-   empty-input-as-error part is the wart.
-5. **Result aliasing footgun in the boolean short-circuits (`execOp`,
+4. **Result aliasing footgun in the boolean short-circuits (`execOp`,
    `boolean.go`).** `Union(a,empty)` returns the caller's own `a` slice (the
    disjoint-bbox path splices inputs), so mutating the result mutates the input.
    The code already knows this — `buildPolyTree` copies defensively with the
    comment that short-circuits "can return the caller's own polygons, which
    Reverse must not mutate". Document on the public functions, or return a shallow
    copy.
-6. **Minor type asymmetry.** `MinkowskiSum`/`MinkowskiDiff` take `path []Point`
+5. **Minor type asymmetry.** `MinkowskiSum`/`MinkowskiDiff` take `path []Point`
    while `OffsetPaths` takes `[]Polyline`, and `Polyline` *is* `[]Point`. Typing
    the path parameter as `Polyline` would make the open-path intent explicit.
 

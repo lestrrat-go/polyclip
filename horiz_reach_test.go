@@ -19,28 +19,28 @@ import (
 // ClassifyHorizontals would reject as HorizClassMid).
 func skyline(x0, y0 int, heights []int) geom.Polygon {
 	m := len(heights)
-	ring := geom.Polygon{}
+	b := geom.New()
 	// bottom-left up the left wall, then the top profile left-to-right is built
 	// by walking columns; assemble CCW: bottom edge first.
-	ring = append(ring, geom.Point{X: float64(x0), Y: float64(y0)})
-	ring = append(ring, geom.Point{X: float64(x0 + m), Y: float64(y0)})
+	b.Point(float64(x0), float64(y0))
+	b.Point(float64(x0+m), float64(y0))
 	// right wall up to last column top
 	cur := heights[m-1]
-	ring = append(ring, geom.Point{X: float64(x0 + m), Y: float64(y0 + cur)})
+	b.Point(float64(x0+m), float64(y0+cur))
 	// walk columns right-to-left along the top profile
 	for i := m - 1; i >= 0; i-- {
 		h := heights[i]
 		if h != cur {
 			// vertical step at x = x0+i+1
-			ring = append(ring, geom.Point{X: float64(x0 + i + 1), Y: float64(y0 + h)})
+			b.Point(float64(x0+i+1), float64(y0+h))
 			cur = h
 		}
 		// horizontal top of column i to its left boundary x=x0+i
-		ring = append(ring, geom.Point{X: float64(x0 + i), Y: float64(y0 + h)})
+		b.Point(float64(x0+i), float64(y0+h))
 	}
 	// down the left wall back to start (the last point added is (x0, heights[0]))
 	// closing edge to (x0,y0) is implicit.
-	return ring
+	return b.MustPolygon()
 }
 
 func randSkyline(rng *rand.Rand, x0, y0, m, maxH int) geom.Polygon {

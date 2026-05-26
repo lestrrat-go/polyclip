@@ -56,12 +56,12 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 	//   (10,10) A's vertex inside B   -> input Z 1
 	//   (10,5)  crossing A-right×B-bottom -> assigned 10*100+5 = 1005
 	//   (5,10)  crossing A-top×B-left     -> assigned 5*100+10 = 510
-	a := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 0, Y: 0, Z: 1}, {X: 10, Y: 0, Z: 1}, {X: 10, Y: 10, Z: 1}, {X: 0, Y: 10, Z: 1},
-	}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
-	}}}
+	a := geom.New().
+		Point3(0, 0, 1).Point3(10, 0, 1).Point3(10, 10, 1).Point3(0, 10, 1).
+		MustBuild()
+	b := geom.New().
+		Point3(5, 5, 2).Point3(15, 5, 2).Point3(15, 15, 2).Point3(5, 15, 2).
+		MustBuild()
 
 	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(coordZ{}).Execute(OpIntersect)
 	require.NoError(t, err)
@@ -81,12 +81,12 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 func TestBuilderZDisabledIsZero(t *testing.T) {
 	// Without an assigner, output Z is zero even when inputs carry Z (the engine
 	// ignores Z; the free functions never touch it).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 0, Y: 0, Z: 1}, {X: 10, Y: 0, Z: 1}, {X: 10, Y: 10, Z: 1}, {X: 0, Y: 10, Z: 1},
-	}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
-	}}}
+	a := geom.New().
+		Point3(0, 0, 1).Point3(10, 0, 1).Point3(10, 10, 1).Point3(0, 10, 1).
+		MustBuild()
+	b := geom.New().
+		Point3(5, 5, 2).Point3(15, 5, 2).Point3(15, 15, 2).Point3(5, 15, 2).
+		MustBuild()
 	res, err := New().AddSubject(a).AddClip(b).Execute(OpIntersect)
 	require.NoError(t, err)
 	for _, ex := range res.Closed {
@@ -100,8 +100,8 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 	// Every corner of the intersection rectangle that is a genuine crossing gets
 	// the constant; the two corners that are input vertices keep Z 0 (inputs here
 	// carry no Z).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustBuild()
+	b := geom.New().Point(5, 5).Point(15, 5).Point(15, 15).Point(5, 15).MustBuild()
 	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(constZ(7)).Execute(OpIntersect)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
@@ -113,8 +113,8 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 func TestBuilderZAssignerEndpoints(t *testing.T) {
 	// The assigner is called once per genuine crossing with that crossing's
 	// point; the two crossings of the overlapping squares are (10,5) and (5,10).
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustBuild()
+	b := geom.New().Point(5, 5).Point(15, 5).Point(15, 15).Point(5, 15).MustBuild()
 	rec := &recordZ{}
 	_, err := New().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect)
 	require.NoError(t, err)
@@ -132,8 +132,8 @@ func TestBuilderZAssignerEndpoints(t *testing.T) {
 func TestBuilderZXorComposition(t *testing.T) {
 	// Xor is computed by composition (Union, Intersect, Difference). Z tracking
 	// must still flow through: the same crossing points appear and get assigned.
-	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustBuild()
+	b := geom.New().Point(5, 5).Point(15, 5).Point(15, 15).Point(5, 15).MustBuild()
 	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(constZ(9)).Execute(OpXor)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {

@@ -9,9 +9,9 @@ import (
 
 // mpRect is a unit-test helper building a CCW axis-aligned rectangle MultiPolygon.
 func mpRect(x0, y0, x1, y1 float64) geom.MultiPolygon {
-	return geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x1, Y: y1}, {X: x0, Y: y1},
-	}}}
+	return geom.New().
+		Point(x0, y0).Point(x1, y0).Point(x1, y1).Point(x0, y1).
+		MustBuild()
 }
 
 // TestBuilderMatchesFreeFunctions asserts the accumulator's Execute is

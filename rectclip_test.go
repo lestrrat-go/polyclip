@@ -10,12 +10,12 @@ import (
 )
 
 func rectAsPolygon(r geom.BBox) geom.MultiPolygon {
-	return geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: r.Min.X, Y: r.Min.Y},
-		{X: r.Max.X, Y: r.Min.Y},
-		{X: r.Max.X, Y: r.Max.Y},
-		{X: r.Min.X, Y: r.Max.Y},
-	}}}
+	return geom.New().
+		Point(r.Min.X, r.Min.Y).
+		Point(r.Max.X, r.Min.Y).
+		Point(r.Max.X, r.Max.Y).
+		Point(r.Min.X, r.Max.Y).
+		MustBuild()
 }
 
 func mpArea(m geom.MultiPolygon) float64 {

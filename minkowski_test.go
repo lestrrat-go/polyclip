@@ -8,7 +8,7 @@ import (
 )
 
 // square2 is a 2x2 axis-aligned pattern anchored at the origin corner.
-var square2 = geom.Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2}, {X: 0, Y: 2}}
+var square2 = geom.New().Point(0, 0).Point(2, 0).Point(2, 2).Point(0, 2).MustPolygon()
 
 // TestMinkowskiSumOpenSegment sweeps the pattern along a single horizontal
 // open segment: the 2x2 square translated from (0,0) to (10,0) fills the

@@ -271,7 +271,8 @@ func randomSimplePolygon(rng *rand.Rand) geom.Polygon {
 		angles[i] = rng.Float64() * 2 * math.Pi
 	}
 	sortFloat(angles)
-	ring := make(geom.Polygon, 0, n)
+	b := geom.New()
+	count := 0
 	for i, ang := range angles {
 		if i > 0 && ang-angles[i-1] < 1e-3 {
 			continue
@@ -280,12 +281,13 @@ func randomSimplePolygon(rng *rand.Rand) geom.Polygon {
 		// star-shaped, hence simple, polygon. Do not round: rounding can
 		// nudge a vertex across an edge and break simplicity.
 		r := 1 + rng.Float64()*9
-		ring = append(ring, geom.Point{X: 20 + r*math.Cos(ang), Y: 20 + r*math.Sin(ang)})
+		b.Point(20+r*math.Cos(ang), 20+r*math.Sin(ang))
+		count++
 	}
-	if len(ring) < 3 {
+	if count < 3 {
 		return nil
 	}
-	return ring
+	return b.MustPolygon()
 }
 
 func randomRectMultiPolygon(rng *rand.Rand) geom.MultiPolygon {
@@ -293,9 +295,9 @@ func randomRectMultiPolygon(rng *rand.Rand) geom.MultiPolygon {
 	y0 := float64(rng.Intn(8))
 	w := float64(1 + rng.Intn(8))
 	h := float64(1 + rng.Intn(8))
-	return geom.MultiPolygon{{Outer: geom.Polygon{
-		{X: x0, Y: y0}, {X: x0 + w, Y: y0}, {X: x0 + w, Y: y0 + h}, {X: x0, Y: y0 + h},
-	}}}
+	return geom.New().
+		Point(x0, y0).Point(x0+w, y0).Point(x0+w, y0+h).Point(x0, y0+h).
+		MustBuild()
 }
 
 // isSimplePolygon reports whether ring has no pair of non-adjacent edges that

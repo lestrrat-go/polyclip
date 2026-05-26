@@ -80,12 +80,12 @@ func runBooleanIdentities(t *testing.T, a, b geom.MultiPolygon, tol float64) boo
 }
 
 func sq(cx, cy, half float64) geom.ExPolygon {
-	return geom.ExPolygon{Outer: geom.Polygon{
-		{X: cx - half, Y: cy - half},
-		{X: cx + half, Y: cy - half},
-		{X: cx + half, Y: cy + half},
-		{X: cx - half, Y: cy + half},
-	}}
+	return geom.New().
+		Point(cx-half, cy-half).
+		Point(cx+half, cy-half).
+		Point(cx+half, cy+half).
+		Point(cx-half, cy+half).
+		MustBuild()[0]
 }
 
 func TestUnionEmptyBoth(t *testing.T) {
@@ -256,9 +256,9 @@ func TestUnionNestedAxialSquares(t *testing.T) {
 // diamond returns a CCW unit-ish diamond ExPolygon with no horizontal edges,
 // suitable for exercising the engine path.
 func diamond(cx, cy, r float64) geom.ExPolygon {
-	return geom.ExPolygon{Outer: geom.Polygon{
-		{X: cx, Y: cy - r}, {X: cx + r, Y: cy}, {X: cx, Y: cy + r}, {X: cx - r, Y: cy},
-	}}
+	return geom.New().
+		Point(cx, cy-r).Point(cx+r, cy).Point(cx, cy+r).Point(cx-r, cy).
+		MustBuild()[0]
 }
 
 func TestUnionOverlappingDiamonds(t *testing.T) {

@@ -18,12 +18,12 @@ import (
 // source ring at a coincident horizontal apex when the other source does not
 // fill above it (clip/sweep.go closeBound self-closure, DESIGN.md §7.6).
 func TestHorizIdentityRepro(t *testing.T) {
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 0, Y: 1},
-	}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 1, Y: -1}, {X: 3, Y: -1}, {X: 3, Y: 3}, {X: 2, Y: 3}, {X: 2, Y: 1}, {X: 1, Y: 1},
-	}}}
+	a := geom.New().
+		Point(0, 0).Point(2, 0).Point(2, 1).Point(1, 1).Point(0, 1).
+		MustBuild()
+	b := geom.New().
+		Point(1, -1).Point(3, -1).Point(3, 3).Point(2, 3).Point(2, 1).Point(1, 1).
+		MustBuild()
 	u, _ := Union(a, b)
 	i, _ := Intersect(a, b)
 	d, _ := Difference(a, b)

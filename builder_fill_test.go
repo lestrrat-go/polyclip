@@ -9,9 +9,9 @@ import (
 
 // exRect builds a CCW axis-aligned rectangle as a single ExPolygon.
 func exRect(x0, y0, x1, y1 float64) geom.ExPolygon {
-	return geom.ExPolygon{Outer: geom.Polygon{
-		{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x1, Y: y1}, {X: x0, Y: y1},
-	}}
+	return geom.New().
+		Point(x0, y0).Point(x1, y0).Point(x1, y1).Point(x0, y1).
+		MustBuild()[0]
 }
 
 // countHoles returns the total number of holes across every piece.

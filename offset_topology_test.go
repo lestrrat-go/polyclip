@@ -11,21 +11,21 @@ import (
 
 // dumbbellShape: two 10×10 pads joined by a thin neck (y in [4,6]).
 func dumbbellShape() geom.Polygon {
-	return geom.Polygon{
-		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 4}, {X: 20, Y: 4},
-		{X: 20, Y: 0}, {X: 30, Y: 0}, {X: 30, Y: 10}, {X: 20, Y: 10},
-		{X: 20, Y: 6}, {X: 10, Y: 6}, {X: 10, Y: 10}, {X: 0, Y: 10},
-	}
+	return geom.New().
+		Point(0, 0).Point(10, 0).Point(10, 4).Point(20, 4).
+		Point(20, 0).Point(30, 0).Point(30, 10).Point(20, 10).
+		Point(20, 6).Point(10, 6).Point(10, 10).Point(0, 10).
+		MustPolygon()
 }
 
 func rotatePoly(p geom.Polygon, deg float64) geom.Polygon {
 	a := deg * math.Pi / 180
 	ca, sa := math.Cos(a), math.Sin(a)
-	out := make(geom.Polygon, len(p))
-	for i, v := range p {
-		out[i] = geom.Point{X: v.X*ca - v.Y*sa, Y: v.X*sa + v.Y*ca}
+	b := geom.New()
+	for _, v := range p {
+		b.Point(v.X*ca-v.Y*sa, v.X*sa+v.Y*ca)
 	}
-	return out
+	return b.MustPolygon()
 }
 
 // TestOffsetDumbbellSplits checks that an inward offset past the neck width
@@ -117,13 +117,13 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 // with n vertices at random radii in [rMin,rMax] around the origin — always
 // simple, frequently concave.
 func randomStarPolygon(rng *rand.Rand, n int, rMin, rMax float64) geom.Polygon {
-	pts := make(geom.Polygon, n)
+	b := geom.New()
 	for i := range n {
 		ang := 2 * math.Pi * float64(i) / float64(n)
 		r := rMin + rng.Float64()*(rMax-rMin)
-		pts[i] = geom.Point{X: r * math.Cos(ang), Y: r * math.Sin(ang)}
+		b.Point(r*math.Cos(ang), r*math.Sin(ang))
 	}
-	return pts
+	return b.MustPolygon()
 }
 
 // distToBoundary returns the minimum distance from p to any edge of ring.

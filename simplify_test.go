@@ -17,9 +17,7 @@ func TestSimplifyEmpty(t *testing.T) {
 // TestSimplifySimpleSquareUnchanged passes a simple, already-clean square
 // through Simplify and gets back one piece of the same area.
 func TestSimplifySimpleSquareUnchanged(t *testing.T) {
-	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
-		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4},
-	}}}
+	in := geom.New().Point(0, 0).Point(4, 0).Point(4, 4).Point(0, 4).MustBuild()
 	got, err := Simplify(in)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "got %d pieces, want 1", len(got))

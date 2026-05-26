@@ -137,10 +137,10 @@ func TestOffsetRoundTrip(t *testing.T) {
 // regularPolygon builds a CCW regular polygon with n sides centred at
 // (cx, cy) with circumradius r.
 func regularPolygon(cx, cy, r float64, n int) geom.Polygon {
-	pts := make(geom.Polygon, n)
+	b := geom.New()
 	for i := range n {
 		ang := 2 * math.Pi * float64(i) / float64(n)
-		pts[i] = geom.Point{X: cx + r*math.Cos(ang), Y: cy + r*math.Sin(ang)}
+		b.Point(cx+r*math.Cos(ang), cy+r*math.Sin(ang))
 	}
-	return pts
+	return b.MustPolygon()
 }

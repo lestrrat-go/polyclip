@@ -8,37 +8,40 @@ import (
 )
 
 func circle(cx, cy, r float64, n int) geom.Polygon {
-	p := make(geom.Polygon, n)
+	b := geom.New()
 	for i := range n {
 		a := 2 * math.Pi * float64(i) / float64(n)
-		p[i] = geom.Point{X: cx + r*math.Cos(a), Y: cy + r*math.Sin(a)}
+		b.Point(cx+r*math.Cos(a), cy+r*math.Sin(a))
 	}
-	return p
+	return b.MustPolygon()
 }
 
 func gear(cx, cy, rIn, rOut float64, teeth int) geom.Polygon {
 	n := teeth * 2
-	p := make(geom.Polygon, n)
+	b := geom.New()
 	for i := range n {
 		a := 2 * math.Pi * float64(i) / float64(n)
 		r := rIn
 		if i%2 == 0 {
 			r = rOut
 		}
-		p[i] = geom.Point{X: cx + r*math.Cos(a), Y: cy + r*math.Sin(a)}
+		b.Point(cx+r*math.Cos(a), cy+r*math.Sin(a))
 	}
-	return p
+	return b.MustPolygon()
 }
 
 func manyDisjoint(k, vtx int) geom.MultiPolygon {
-	m := make(geom.MultiPolygon, 0, k*k)
+	b := geom.New()
 	for i := range k {
 		for j := range k {
+			b.NextPiece()
 			c := circle(float64(i)*10, float64(j)*10, 3, vtx)
-			m = append(m, geom.ExPolygon{Outer: c})
+			for _, p := range c {
+				b.Point(p.X, p.Y)
+			}
 		}
 	}
-	return m
+	return b.MustBuild()
 }
 
 func benchOp(b *testing.B, op func(a, c geom.MultiPolygon) (geom.MultiPolygon, error), a, c geom.MultiPolygon) {
@@ -76,12 +79,12 @@ func BenchmarkUnionManyPieces(b *testing.B) {
 
 // rect is an axis-aligned CCW rectangle on the integer grid.
 func rect(x0, y0, w, h int) geom.Polygon {
-	return geom.Polygon{
-		{X: float64(x0), Y: float64(y0)},
-		{X: float64(x0 + w), Y: float64(y0)},
-		{X: float64(x0 + w), Y: float64(y0 + h)},
-		{X: float64(x0), Y: float64(y0 + h)},
-	}
+	return geom.New().
+		Point(float64(x0), float64(y0)).
+		Point(float64(x0+w), float64(y0)).
+		Point(float64(x0+w), float64(y0+h)).
+		Point(float64(x0), float64(y0+h)).
+		MustPolygon()
 }
 
 // brickWall builds a rows*cols staggered grid of bricks. Alternating rows are
@@ -89,17 +92,20 @@ func rect(x0, y0, w, h int) geom.Polygon {
 // of the bricks above/below — a dense source of T-junctions, plus collinear
 // overlaps along every shared row boundary.
 func brickWall(rows, cols, w, h int) geom.MultiPolygon {
-	m := make(geom.MultiPolygon, 0, rows*cols)
+	b := geom.New()
 	for r := range rows {
 		off := 0
 		if r%2 == 1 {
 			off = w / 2
 		}
 		for c := range cols {
-			m = append(m, geom.ExPolygon{Outer: rect(c*w+off, r*h, w, h)})
+			b.NextPiece()
+			for _, p := range rect(c*w+off, r*h, w, h) {
+				b.Point(p.X, p.Y)
+			}
 		}
 	}
-	return m
+	return b.MustBuild()
 }
 
 // SplitTJunctions + SplitOverlaps stress: staggered grid. The split loops'

@@ -216,8 +216,8 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 // crossing flows through the normal IntersectEdges path. Expected single
 // merged piece of area 184 (100 + 100 − 16 overlap).
 func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}}
+	a := geom.New().Point(0, 0).Point(10, 0).Point(10, 10).Point(0, 10).MustBuild()
+	b := geom.New().Point(6, 6).Point(16, 6).Point(16, 16).Point(6, 16).MustBuild()
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 184.0 // 100 + 100 − 16 overlap [6,10]×[6,10]
@@ -241,8 +241,8 @@ func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
 // between-edges via IntersectEdges, mirroring Clipper2's DoMaxima
 // (engine.cpp:2729). Expected area 130: pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5).
 func TestUnionCoincidentHorizConfluence(t *testing.T) {
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -5, Y: -5}, {X: 5, Y: -5}, {X: -2, Y: 5}, {X: -5, Y: 5}}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}, {X: -2, Y: 5}}}}
+	a := geom.New().Point(-5, -5).Point(5, -5).Point(-2, 5).Point(-5, 5).MustBuild()
+	b := geom.New().Point(-2, -5).Point(8, -5).Point(8, 5).Point(-2, 5).MustBuild()
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 130.0
@@ -265,8 +265,8 @@ func TestUnionCoincidentHorizConfluence(t *testing.T) {
 //
 // Expected area 254.5454…: |a|+|b| − overlap = 155 + 100 − 5/11.
 func TestUnionSlantCoincidentBottom(t *testing.T) {
-	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -5, Y: -5}, {X: 16, Y: -5}, {X: 5, Y: 5}, {X: -5, Y: 5}}}}
-	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 15, Y: -5}, {X: 25, Y: -5}, {X: 25, Y: 5}, {X: 15, Y: 5}}}}
+	a := geom.New().Point(-5, -5).Point(16, -5).Point(5, 5).Point(-5, 5).MustBuild()
+	b := geom.New().Point(15, -5).Point(25, -5).Point(25, 5).Point(15, 5).MustBuild()
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 255.0 - 5.0/11.0

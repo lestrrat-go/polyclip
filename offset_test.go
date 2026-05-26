@@ -4,16 +4,17 @@ import (
 	"math"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOffsetEmpty(t *testing.T) {
-	_, err := Offset(MultiPolygon{}, 5, OffsetOptions{})
+	_, err := Offset(geom.MultiPolygon{}, 5, OffsetOptions{})
 	require.Equal(t, ErrOffsetEmpty, err, "Offset(empty) err = %v, want ErrOffsetEmpty", err)
 }
 
 func TestOffsetZero(t *testing.T) {
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got, err := Offset(in, 0, OffsetOptions{})
@@ -79,7 +80,7 @@ func TestOffsetSquareOutward(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			in := MultiPolygon{ExPolygon{Outer: Polygon{
+			in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 				{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 			}}}
 			got, err := Offset(in, 2, tc.opts)
@@ -98,7 +99,7 @@ func TestOffsetSquareOutward(t *testing.T) {
 
 func TestOffsetSquareInward(t *testing.T) {
 	// 10x10 square offset INWARD by 2: 6x6 square (area 36).
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got, err := Offset(in, -2, OffsetOptions{Join: JoinMiter})
@@ -111,7 +112,7 @@ func TestOffsetSquareInward(t *testing.T) {
 func TestOffsetSquareCollapses(t *testing.T) {
 	// 10x10 square offset inward by 6 — collapses (smallest half-extent
 	// is 5, so d=-6 should produce empty).
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	_, err := Offset(in, -6, OffsetOptions{Join: JoinMiter})
@@ -122,7 +123,7 @@ func TestOffsetRoundTrip(t *testing.T) {
 	// Offset out by d then in by -d should approximately recover the
 	// original for a convex polygon. Use a regular hexagon to exercise
 	// non-axial edges with round joins.
-	in := MultiPolygon{ExPolygon{Outer: regularPolygon(0, 0, 10, 6)}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: regularPolygon(0, 0, 10, 6)}}
 	d := 2.0
 	out, err := Offset(in, d, OffsetOptions{Join: JoinRound, ArcTol: 0.05})
 	require.NoError(t, err)
@@ -135,11 +136,11 @@ func TestOffsetRoundTrip(t *testing.T) {
 
 // regularPolygon builds a CCW regular polygon with n sides centred at
 // (cx, cy) with circumradius r.
-func regularPolygon(cx, cy, r float64, n int) Polygon {
-	pts := make(Polygon, n)
+func regularPolygon(cx, cy, r float64, n int) geom.Polygon {
+	pts := make(geom.Polygon, n)
 	for i := range n {
 		ang := 2 * math.Pi * float64(i) / float64(n)
-		pts[i] = Point{X: cx + r*math.Cos(ang), Y: cy + r*math.Sin(ang)}
+		pts[i] = geom.Point{X: cx + r*math.Cos(ang), Y: cy + r*math.Sin(ang)}
 	}
 	return pts
 }

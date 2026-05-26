@@ -31,13 +31,15 @@ The target workload is 3D-printer slicing, where nearly every quality feature ne
 ```
 github.com/lestrrat-go/polyclip
 ├── polyclip.go            package doc, top-level conveniences
-├── point.go               Point, BBox
-├── polygon.go             Polygon, ExPolygon, MultiPolygon; winding, area, contains
 ├── boolean.go             Union, Intersect, Difference, Xor, UnionAll (public API)
 ├── offset.go              Offset, JoinType, EndType, OffsetOptions (public API)
 ├── offsetpaths.go         OffsetPaths — open-polyline ribbon offset with end caps
-├── validate.go            Validate, Clean
-├── clip/                  scanline boolean engine (subpackage)
+├── builder.go             Builder, Result, PolyTree, ZAssigner (advanced public API)
+├── geom/                  geometry value types (subpackage, no engine dependency)
+│   ├── point.go           Point, BBox
+│   ├── polygon.go         Polygon, ExPolygon, MultiPolygon, Polyline; winding, area, contains, Clean
+│   └── validate.go        Validate, IssueKind, ValidationIssue; structural diagnostics
+├── internal/clip/         scanline boolean engine
 │   ├── segment.go         fixed-point directed-edge type, source tag
 │   ├── preprocess.go      snap, dedup, overlap/T-junction splitting
 │   ├── bounds.go          local-minima / bound construction, ring tracing
@@ -50,12 +52,16 @@ github.com/lestrrat-go/polyclip
 │   ├── horizontal.go      horizontal classification
 │   ├── horzjoin.go        deferred horizontal joins
 │   └── invariants.go      post-condition checks
-├── fixed/                 fixed-point arithmetic (coord.go, mul.go)
+├── internal/fixed/        fixed-point arithmetic (coord.go, mul.go)
 ├── tools/differential/    Monte-Carlo differential harness (correctness oracle)
 └── examples/{union,offset}/
 ```
 
-The `clip/` and `fixed/` subpackages are internal in spirit but exported within the module so tests can address them. Only the top-level `polyclip` package is stable public API.
+The `internal/clip` and `internal/fixed` packages hold the engine and are not
+importable outside the module. The `geom` subpackage holds the public geometry
+value types and carries no dependency on the engine; together with the
+top-level `polyclip` package (which holds the operations) it forms the stable
+public API.
 
 ---
 
@@ -63,10 +69,10 @@ The `clip/` and `fixed/` subpackages are internal in spirit but exported within 
 
 The public surface is small; see the Go doc comments for full signatures.
 
-- **Core types** (`polygon.go`, `point.go`): `Point{X,Y float64}`, `BBox`, `Polygon []Point` (implicit closing edge; outer rings CCW, holes CW by convention but either is accepted and normalized), `ExPolygon{Outer, Holes}`, `MultiPolygon []ExPolygon`.
-- **Boolean ops** (`boolean.go`): `Union`, `Intersect`, `Difference`, `Xor` — each `(a, b MultiPolygon) (MultiPolygon, error)`; `UnionAll(...MultiPolygon)` for tournament-reduced multi-union.
+- **Core types** (package `geom`): `geom.Point{X,Y float64}`, `geom.BBox`, `geom.Polygon []geom.Point` (implicit closing edge; outer rings CCW, holes CW by convention but either is accepted and normalized), `geom.ExPolygon{Outer, Holes}`, `geom.MultiPolygon []geom.ExPolygon`, and `geom.Polyline` for open paths. These value types live in package `geom`; the operations below live in the top-level `polyclip` package and consume them.
+- **Boolean ops** (`boolean.go`): `Union`, `Intersect`, `Difference`, `Xor` — each `(a, b geom.MultiPolygon) (geom.MultiPolygon, error)`; `UnionAll(...geom.MultiPolygon)` for tournament-reduced multi-union.
 - **Offset** (`offset.go`): `Offset(m, d, opts)` with `OffsetOptions{Join, MiterLimit, ArcTol}` and `JoinType` ∈ {miter, round, square}.
-- **Utilities** (`polygon.go`, `validate.go`): `SignedArea`, `Area`, `IsCCW`, `Reverse`, `BoundingBox`, `Contains` (even-odd, boundary inside); `Clean(vertexTol, minArea)`; `Validate() []ValidationIssue`.
+- **Geometry utilities** (package `geom`): `SignedArea`, `Area`, `IsCCW`, `Reverse`, `BoundingBox`, `Contains` (even-odd, boundary inside); `MultiPolygon.Clean(vertexTol, minArea)`; `MultiPolygon.Validate() []ValidationIssue`.
 
 `error` is returned only for caller-fixable problems (e.g. a bounding box too large for the fixed-point grid, §5.1, or an offset that collapses to empty). `Validate()` issues are diagnostics, not errors.
 

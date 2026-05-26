@@ -4,11 +4,13 @@ import (
 	"math"
 	"slices"
 	"sort"
+
+	"github.com/lestrrat-go/polyclip/geom"
 )
 
 // Triangle is a single triangle of a triangulation: its three corners wound
 // counter-clockwise.
-type Triangle [3]Point
+type Triangle [3]geom.Point
 
 // Triangulate decomposes m into a flat list of triangles covering exactly the
 // same region. Each [ExPolygon] is triangulated independently and the results
@@ -30,7 +32,7 @@ type Triangle [3]Point
 // intersecting input, or raw output whose holes may pinch against the outer
 // boundary, through [Simplify] first. Rings with fewer than three vertices
 // contribute nothing.
-func Triangulate(m MultiPolygon) []Triangle {
+func Triangulate(m geom.MultiPolygon) []Triangle {
 	var out []Triangle
 	for i := range m {
 		out = appendExPolygonTriangles(out, m[i])
@@ -40,12 +42,12 @@ func Triangulate(m MultiPolygon) []Triangle {
 
 // tnode is one vertex of a doubly-linked polygon ring used during ear clipping.
 type tnode struct {
-	pt         Point
+	pt         geom.Point
 	prev, next *tnode
 	steiner    bool
 }
 
-func appendExPolygonTriangles(out []Triangle, ex ExPolygon) []Triangle {
+func appendExPolygonTriangles(out []Triangle, ex geom.ExPolygon) []Triangle {
 	if len(ex.Outer) < 3 {
 		return out
 	}
@@ -64,7 +66,7 @@ func appendExPolygonTriangles(out []Triangle, ex ExPolygon) []Triangle {
 // requested winding (the algorithm wants outer rings CCW and holes CW, the same
 // convention as the rest of the library). Returns the last inserted node, or
 // nil if the ring is empty.
-func buildRing(ring Polygon, wantCCW bool) *tnode {
+func buildRing(ring geom.Polygon, wantCCW bool) *tnode {
 	if len(ring) == 0 {
 		return nil
 	}
@@ -86,7 +88,7 @@ func buildRing(ring Polygon, wantCCW bool) *tnode {
 	return last
 }
 
-func insertNode(pt Point, last *tnode) *tnode {
+func insertNode(pt geom.Point, last *tnode) *tnode {
 	n := &tnode{pt: pt}
 	if last == nil {
 		n.prev = n
@@ -244,7 +246,7 @@ func filterPoints(start, end *tnode) *tnode {
 // eliminateHoles connects every hole to the outer ring with a bridge, returning
 // the merged outer ring. Holes are processed left-to-right by their leftmost
 // vertex (earcut order).
-func eliminateHoles(holes []Polygon, outerNode *tnode) *tnode {
+func eliminateHoles(holes []geom.Polygon, outerNode *tnode) *tnode {
 	queue := make([]*tnode, 0, len(holes))
 	for _, h := range holes {
 		if len(h) < 3 {
@@ -338,16 +340,16 @@ func findHoleBridge(hole, outerNode *tnode) *tnode {
 	tanMin := math.Inf(1)
 	p = m
 	for {
-		var c1, c3 Point
+		var c1, c3 geom.Point
 		if hy < my {
-			c1 = Point{X: hx, Y: hy}
-			c3 = Point{X: qx, Y: hy}
+			c1 = geom.Point{X: hx, Y: hy}
+			c3 = geom.Point{X: qx, Y: hy}
 		} else {
-			c1 = Point{X: qx, Y: hy}
-			c3 = Point{X: hx, Y: hy}
+			c1 = geom.Point{X: qx, Y: hy}
+			c3 = geom.Point{X: hx, Y: hy}
 		}
 		if hx >= p.pt.X && p.pt.X >= mx && hx != p.pt.X &&
-			pointInTri(c1, Point{X: mx, Y: my}, c3, p.pt) {
+			pointInTri(c1, geom.Point{X: mx, Y: my}, c3, p.pt) {
 			tan := math.Abs(hy-p.pt.Y) / (hx - p.pt.X)
 			if locallyInside(p, hole) &&
 				(tan < tanMin || (tan == tanMin && (p.pt.X > m.pt.X ||
@@ -419,7 +421,7 @@ func intersectsPolygon(a, b *tnode) bool {
 
 // intersects reports whether segments p1q1 and p2q2 intersect, including
 // collinear-overlap and endpoint-touch cases.
-func intersects(p1, q1, p2, q2 Point) bool {
+func intersects(p1, q1, p2, q2 geom.Point) bool {
 	o1 := sign(nodeArea(p1, q1, p2))
 	o2 := sign(nodeArea(p1, q1, q2))
 	o3 := sign(nodeArea(p2, q2, p1))
@@ -443,7 +445,7 @@ func intersects(p1, q1, p2, q2 Point) bool {
 }
 
 // onSeg reports whether q lies on segment pr, assuming the three are collinear.
-func onSeg(p, q, r Point) bool {
+func onSeg(p, q, r geom.Point) bool {
 	return q.X <= max(p.X, r.X) && q.X >= min(p.X, r.X) &&
 		q.Y <= max(p.Y, r.Y) && q.Y >= min(p.Y, r.Y)
 }
@@ -492,13 +494,13 @@ func emitTriangle(out []Triangle, a, b, c *tnode) []Triangle {
 
 // nodeArea is the signed area term earcut works in: positive when p,q,r turn
 // clockwise, negative counter-clockwise (the opposite sign of orient).
-func nodeArea(p, q, r Point) float64 {
+func nodeArea(p, q, r geom.Point) float64 {
 	return (q.Y-p.Y)*(r.X-q.X) - (q.X-p.X)*(r.Y-q.Y)
 }
 
 // pointInTri reports whether p lies in the clockwise triangle a,b,c, boundary
 // included.
-func pointInTri(a, b, c, p Point) bool {
+func pointInTri(a, b, c, p geom.Point) bool {
 	return (c.X-p.X)*(a.Y-p.Y)-(a.X-p.X)*(c.Y-p.Y) >= 0 &&
 		(a.X-p.X)*(b.Y-p.Y)-(b.X-p.X)*(a.Y-p.Y) >= 0 &&
 		(b.X-p.X)*(c.Y-p.Y)-(c.X-p.X)*(b.Y-p.Y) >= 0

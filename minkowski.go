@@ -1,5 +1,7 @@
 package polyclip
 
+import "github.com/lestrrat-go/polyclip/geom"
+
 // MinkowskiSum returns the Minkowski sum of pattern and path: the region swept
 // by placing a copy of pattern at every point of path. It is built by emitting,
 // for each consecutive pair of path vertices, the quadrilateral strip between
@@ -13,7 +15,7 @@ package polyclip
 //
 // This is a faithful port of Clipper2's MinkowskiSum and produces the same
 // output for the same inputs.
-func MinkowskiSum(pattern Polygon, path []Point, closed bool) (MultiPolygon, error) {
+func MinkowskiSum(pattern geom.Polygon, path []geom.Point, closed bool) (geom.MultiPolygon, error) {
 	return minkowski(pattern, path, true, closed)
 }
 
@@ -22,7 +24,7 @@ func MinkowskiSum(pattern Polygon, path []Point, closed bool) (MultiPolygon, err
 // (each placement is path vertex minus pattern vertex). It is a faithful port
 // of Clipper2's MinkowskiDiff. See [MinkowskiSum] for the closed/open and empty
 // semantics.
-func MinkowskiDiff(pattern Polygon, path []Point, closed bool) (MultiPolygon, error) {
+func MinkowskiDiff(pattern geom.Polygon, path []geom.Point, closed bool) (geom.MultiPolygon, error) {
 	return minkowski(pattern, path, false, closed)
 }
 
@@ -30,21 +32,21 @@ func MinkowskiDiff(pattern Polygon, path []Point, closed bool) (MultiPolygon, er
 // When isSum is true each placement is path[i]+pattern[k]; otherwise it is the
 // reflected path[i]-pattern[k]. Each quad is normalized to positive (CCW)
 // winding before the union so the non-zero rule fills it consistently.
-func minkowski(pattern Polygon, path []Point, isSum, closed bool) (MultiPolygon, error) {
+func minkowski(pattern geom.Polygon, path []geom.Point, isSum, closed bool) (geom.MultiPolygon, error) {
 	patLen, pathLen := len(pattern), len(path)
 	if patLen == 0 || pathLen == 0 {
-		return MultiPolygon{}, nil
+		return geom.MultiPolygon{}, nil
 	}
 
 	// tmp[i] is pattern placed (or reflected) at path[i].
-	tmp := make([][]Point, pathLen)
+	tmp := make([][]geom.Point, pathLen)
 	for i, p := range path {
-		placed := make([]Point, patLen)
+		placed := make([]geom.Point, patLen)
 		for k, pt := range pattern {
 			if isSum {
-				placed[k] = Point{X: p.X + pt.X, Y: p.Y + pt.Y}
+				placed[k] = geom.Point{X: p.X + pt.X, Y: p.Y + pt.Y}
 			} else {
-				placed[k] = Point{X: p.X - pt.X, Y: p.Y - pt.Y}
+				placed[k] = geom.Point{X: p.X - pt.X, Y: p.Y - pt.Y}
 			}
 		}
 		tmp[i] = placed
@@ -59,15 +61,15 @@ func minkowski(pattern Polygon, path []Point, isSum, closed bool) (MultiPolygon,
 		delta = 0
 		g = pathLen - 1
 	}
-	quads := make([]MultiPolygon, 0, (pathLen-delta)*patLen)
+	quads := make([]geom.MultiPolygon, 0, (pathLen-delta)*patLen)
 	h := patLen - 1
 	for i := delta; i < pathLen; i++ {
 		for j := range patLen {
-			quad := Polygon{tmp[g][h], tmp[i][h], tmp[i][j], tmp[g][j]}
+			quad := geom.Polygon{tmp[g][h], tmp[i][h], tmp[i][j], tmp[g][j]}
 			if !quad.IsCCW() {
 				quad.Reverse()
 			}
-			quads = append(quads, MultiPolygon{{Outer: quad}})
+			quads = append(quads, geom.MultiPolygon{{Outer: quad}})
 			h = j
 		}
 		g = i

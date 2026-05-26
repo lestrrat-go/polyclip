@@ -9,13 +9,14 @@ import (
 	"math"
 
 	"github.com/lestrrat-go/polyclip"
+	"github.com/lestrrat-go/polyclip/geom"
 )
 
-func pt(x, y float64) polyclip.Point { return polyclip.Point{X: x, Y: y} }
+func pt(x, y float64) geom.Point { return geom.Point{X: x, Y: y} }
 
 func main() {
-	square := polyclip.MultiPolygon{{
-		Outer: polyclip.Polygon{pt(0, 0), pt(10, 0), pt(10, 10), pt(0, 10)},
+	square := geom.MultiPolygon{{
+		Outer: geom.Polygon{pt(0, 0), pt(10, 0), pt(10, 10), pt(0, 10)},
 	}}
 	fmt.Printf("Input: 10x10 CCW square (area %v)\n\n", square.Area())
 

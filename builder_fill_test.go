@@ -3,18 +3,19 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // exRect builds a CCW axis-aligned rectangle as a single ExPolygon.
-func exRect(x0, y0, x1, y1 float64) ExPolygon {
-	return ExPolygon{Outer: Polygon{
+func exRect(x0, y0, x1, y1 float64) geom.ExPolygon {
+	return geom.ExPolygon{Outer: geom.Polygon{
 		{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x1, Y: y1}, {X: x0, Y: y1},
 	}}
 }
 
 // countHoles returns the total number of holes across every piece.
-func countHoles(m MultiPolygon) int {
+func countHoles(m geom.MultiPolygon) int {
 	n := 0
 	for _, ex := range m {
 		n += len(ex.Holes)
@@ -28,7 +29,7 @@ func countHoles(m MultiPolygon) int {
 // 6, with one hole of area 1. The NonZero resolution of the same self-overlap
 // (via Simplify) fills the overlap: area 7, no hole.
 func TestEvenOddUnionOverlappingSquares(t *testing.T) {
-	subj := MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
+	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
 	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestEvenOddUnionOverlappingSquares(t *testing.T) {
 // doubly-covered inner region a hole → an annulus of area 16−4 = 12 with one
 // hole. NonZero fills the whole outer (area 16, no hole).
 func TestEvenOddNestedSquaresAnnulus(t *testing.T) {
-	subj := MultiPolygon{exRect(0, 0, 4, 4), exRect(1, 1, 3, 3)}
+	subj := geom.MultiPolygon{exRect(0, 0, 4, 4), exRect(1, 1, 3, 3)}
 
 	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
 	require.NoError(t, err)
@@ -64,7 +65,7 @@ func TestEvenOddNestedSquaresAnnulus(t *testing.T) {
 // must re-resolve the self-overlapping subject (it cannot return it verbatim
 // like the NonZero short-circuit). Same overlapping pair → area 6 with a hole.
 func TestEvenOddDifferenceEmptyClipResolves(t *testing.T) {
-	subj := MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
+	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
 	got, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpDifference)
 	require.NoError(t, err)
@@ -76,8 +77,8 @@ func TestEvenOddDifferenceEmptyClipResolves(t *testing.T) {
 // the even-odd and non-zero rules agree. Across all four ops on two distinct
 // overlapping squares the result areas match under either rule.
 func TestEvenOddWellFormedEqualsNonZero(t *testing.T) {
-	a := MultiPolygon{exRect(0, 0, 2, 2)}
-	b := MultiPolygon{exRect(1, 1, 3, 3)}
+	a := geom.MultiPolygon{exRect(0, 0, 2, 2)}
+	b := geom.MultiPolygon{exRect(1, 1, 3, 3)}
 
 	for _, op := range []Operation{OpUnion, OpIntersect, OpDifference, OpXor} {
 		eo, err := NewBuilder().AddSubject(a).AddClip(b).Fill(FillEvenOdd).Execute(op)
@@ -91,8 +92,8 @@ func TestEvenOddWellFormedEqualsNonZero(t *testing.T) {
 // TestBuilderFillDefaultIsNonZero: a Builder with no Fill call matches both an
 // explicit FillNonZero and the named free function, byte-for-byte.
 func TestBuilderFillDefaultIsNonZero(t *testing.T) {
-	a := MultiPolygon{exRect(0, 0, 4, 4)}
-	b := MultiPolygon{exRect(2, 2, 6, 6)}
+	a := geom.MultiPolygon{exRect(0, 0, 4, 4)}
+	b := geom.MultiPolygon{exRect(2, 2, 6, 6)}
 
 	def, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpUnion)
 	require.NoError(t, err)
@@ -106,7 +107,7 @@ func TestBuilderFillDefaultIsNonZero(t *testing.T) {
 
 // TestResetClearsFill: Reset restores the default fill rule.
 func TestResetClearsFill(t *testing.T) {
-	subj := MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
+	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
 	b := NewBuilder().AddSubject(subj).Fill(FillEvenOdd)
 	eo, err := b.Execute(OpUnion)

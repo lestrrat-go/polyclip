@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
@@ -94,7 +95,7 @@ var ErrOffsetEmpty = errors.New("polyclip: offset produced empty result")
 // Use [OffsetOptions.Join] to pick the convex-corner geometry; see
 // [JoinType] for choices. Default join is [JoinMiter] with miter
 // limit 2.0.
-func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error) {
+func Offset(m geom.MultiPolygon, d float64, opts OffsetOptions) (geom.MultiPolygon, error) {
 	if len(m) == 0 {
 		return nil, ErrOffsetEmpty
 	}
@@ -108,7 +109,7 @@ func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error)
 		opts.ArcTol = math.Abs(d) * 0.01
 	}
 
-	result := MultiPolygon{}
+	result := geom.MultiPolygon{}
 	for _, ex := range m {
 		// Build the raw offset rings for this piece: the outer offset by d,
 		// each hole by -d. Right-hand normal of a CCW ring points outward, so
@@ -120,7 +121,7 @@ func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error)
 		// resolveOffsetPiece re-resolves the topology (splitting a pinched ring
 		// into islands, dropping inside-out collapses) via a positive-fill
 		// self-union (DESIGN.md §7.1).
-		rings := make([]Polygon, 0, 1+len(ex.Holes))
+		rings := make([]geom.Polygon, 0, 1+len(ex.Holes))
 		if outer := offsetRing(ex.Outer, d, opts); len(outer) >= 3 {
 			rings = append(rings, outer)
 		}
@@ -155,14 +156,14 @@ func Offset(m MultiPolygon, d float64, opts OffsetOptions) (MultiPolygon, error)
 // of orig (its outer and holes). This is the erosion criterion used to reject
 // the inside-out collapse of an over-shrunk convex ring. The tolerance absorbs
 // round-join chord deviation (chords sit up to arcTol inside the true arc).
-func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool {
+func insetDeepEnough(piece geom.ExPolygon, orig geom.ExPolygon, dist, arcTol float64) bool {
 	pt, ok := interiorPoint(piece.Outer)
 	if !ok {
 		return false
 	}
 	tol := arcTol + dist*1e-6
 	minDist := math.Inf(1)
-	scan := func(ring Polygon) {
+	scan := func(ring geom.Polygon) {
 		n := len(ring)
 		for i := range n {
 			if e := pointSegDist(pt, ring[i], ring[(i+1)%n]); e < minDist {
@@ -178,7 +179,7 @@ func insetDeepEnough(piece ExPolygon, orig ExPolygon, dist, arcTol float64) bool
 }
 
 // pointSegDist returns the Euclidean distance from p to segment ab.
-func pointSegDist(p, a, b Point) float64 {
+func pointSegDist(p, a, b geom.Point) float64 {
 	d := b.Sub(a)
 	l2 := d.Dot(d)
 	if l2 == 0 {
@@ -186,7 +187,7 @@ func pointSegDist(p, a, b Point) float64 {
 	}
 	t := p.Sub(a).Dot(d) / l2
 	t = max(0, min(1, t))
-	proj := Point{X: a.X + t*d.X, Y: a.Y + t*d.Y}
+	proj := geom.Point{X: a.X + t*d.X, Y: a.Y + t*d.Y}
 	return p.Sub(proj).Len()
 }
 
@@ -202,7 +203,7 @@ func pointSegDist(p, a, b Point) float64 {
 // offset past the inradius). Otherwise the rings are re-resolved by a
 // positive-fill self-union (DESIGN.md §7.1): the sweep splits a pinched ring
 // into islands and drops the negatively-wound overshoot folds.
-func resolveOffsetPiece(rings []Polygon) MultiPolygon {
+func resolveOffsetPiece(rings []geom.Polygon) geom.MultiPolygon {
 	if len(rings) == 0 {
 		return nil
 	}
@@ -212,13 +213,13 @@ func resolveOffsetPiece(rings []Polygon) MultiPolygon {
 		if rings[0].SignedArea() <= 0 {
 			return nil
 		}
-		piece := ExPolygon{Outer: rings[0]}
+		piece := geom.ExPolygon{Outer: rings[0]}
 		for _, h := range rings[1:] {
 			if h.SignedArea() < 0 { // a real hole stayed CW
 				piece.Holes = append(piece.Holes, h)
 			}
 		}
-		return MultiPolygon{piece}
+		return geom.MultiPolygon{piece}
 	}
 	return selfUnionPositive(rings)
 }
@@ -238,13 +239,13 @@ func resolveOffsetPiece(rings []Polygon) MultiPolygon {
 //
 // Degenerate edges (zero-length) are skipped; if two consecutive
 // vertices coincide, the prior edge's normal is reused.
-func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
+func offsetRing(ring geom.Polygon, d float64, opts OffsetOptions) geom.Polygon {
 	n := len(ring)
 	if n < 3 {
 		return nil
 	}
 	// Right-hand unit normals per edge ring[i]→ring[(i+1)%n].
-	normals := make([]Point, n)
+	normals := make([]geom.Point, n)
 	have := make([]bool, n)
 	for i := range n {
 		a, b := ring[i], ring[(i+1)%n]
@@ -253,12 +254,12 @@ func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
 		if l == 0 {
 			continue
 		}
-		normals[i] = Point{X: d.Y / l, Y: -d.X / l}
+		normals[i] = geom.Point{X: d.Y / l, Y: -d.X / l}
 		have[i] = true
 	}
 	// Carry the most recent valid normal forward and backward to fill any
 	// degenerate-edge gaps.
-	last := Point{}
+	last := geom.Point{}
 	for i := range n {
 		if have[i] {
 			last = normals[i]
@@ -273,7 +274,7 @@ func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
 		}
 	}
 
-	out := make(Polygon, 0, n+4)
+	out := make(geom.Polygon, 0, n+4)
 	for i := range n {
 		v := ring[i]
 		prevN := normals[(i-1+n)%n]
@@ -292,9 +293,9 @@ func offsetRing(ring Polygon, d float64, opts OffsetOptions) Polygon {
 // emitVertex appends the offset-ring points for input vertex v with
 // adjacent right-hand unit normals prevN (of edge prev→v) and nextN (of
 // edge v→next). See offsetRing for the full classification.
-func emitVertex(out *Polygon, v, prevN, nextN Point, d float64, opts OffsetOptions) {
-	a := Point{X: v.X + d*prevN.X, Y: v.Y + d*prevN.Y} // end of prev offset at v
-	c := Point{X: v.X + d*nextN.X, Y: v.Y + d*nextN.Y} // start of next offset at v
+func emitVertex(out *geom.Polygon, v, prevN, nextN geom.Point, d float64, opts OffsetOptions) {
+	a := geom.Point{X: v.X + d*prevN.X, Y: v.Y + d*prevN.Y} // end of prev offset at v
+	c := geom.Point{X: v.X + d*nextN.X, Y: v.Y + d*nextN.Y} // start of next offset at v
 	// cross of the two normals (pn × nn). For CCW input rings with d>0,
 	// positive cross = left turn = convex corner (offset wedge on the
 	// outside). Sign-flipped by d for the unified rule.
@@ -332,27 +333,27 @@ func emitVertex(out *Polygon, v, prevN, nextN Point, d float64, opts OffsetOptio
 // When emitAlways is true (concave-offset / reflex case), always emit
 // something — either the apex or, when the apex is degenerate, the two
 // perpendicular endpoints a and c.
-func appendMiterApex(out *Polygon, v, prevN, nextN Point, d float64, emitAlways bool) {
+func appendMiterApex(out *geom.Polygon, v, prevN, nextN geom.Point, d float64, emitAlways bool) {
 	bx := prevN.X + nextN.X
 	by := prevN.Y + nextN.Y
 	denom := 1 + prevN.X*nextN.X + prevN.Y*nextN.Y
 	if denom < 1e-12 {
 		// Anti-parallel normals — fall back to two perpendicular points.
 		if emitAlways {
-			a := Point{X: v.X + d*prevN.X, Y: v.Y + d*prevN.Y}
-			c := Point{X: v.X + d*nextN.X, Y: v.Y + d*nextN.Y}
+			a := geom.Point{X: v.X + d*prevN.X, Y: v.Y + d*prevN.Y}
+			c := geom.Point{X: v.X + d*nextN.X, Y: v.Y + d*nextN.Y}
 			*out = append(*out, a, c)
 		}
 		return
 	}
 	q := d / denom
-	*out = append(*out, Point{X: v.X + bx*q, Y: v.Y + by*q})
+	*out = append(*out, geom.Point{X: v.X + bx*q, Y: v.Y + by*q})
 }
 
 // appendMiter emits a miter join: the apex of the two offset edges'
 // intersection, unless the miter length exceeds miterLimit·|d|, in
 // which case it falls back to a chamfer (two perpendicular points a, c).
-func appendMiter(out *Polygon, v, a, c, prevN, nextN Point, d, miterLimit float64) {
+func appendMiter(out *geom.Polygon, v, a, c, prevN, nextN geom.Point, d, miterLimit float64) {
 	bx := prevN.X + nextN.X
 	by := prevN.Y + nextN.Y
 	denom := 1 + prevN.X*nextN.X + prevN.Y*nextN.Y
@@ -368,20 +369,20 @@ func appendMiter(out *Polygon, v, a, c, prevN, nextN Point, d, miterLimit float6
 		*out = append(*out, a, c)
 		return
 	}
-	*out = append(*out, Point{X: v.X + tx, Y: v.Y + ty})
+	*out = append(*out, geom.Point{X: v.X + tx, Y: v.Y + ty})
 }
 
 // appendSquareJoin emits a 45° chamfer at v: each offset endpoint is
 // extended by |d| along its edge's tangent (away from v), giving a
 // pentagon-style square corner. The result is two output points
 // (a_ext, c_ext) inserted between adjacent offset edges.
-func appendSquareJoin(out *Polygon, _, a, c, prevN, nextN Point, d float64) {
+func appendSquareJoin(out *geom.Polygon, _, a, c, prevN, nextN geom.Point, d float64) {
 	// Tangent of prev edge in its direction (perpendicular to right-hand
 	// normal): (-pny, pnx). At endpoint a, extending in this tangent moves
 	// AWAY from v.
 	absD := math.Abs(d)
-	aExt := Point{X: a.X + absD*(-prevN.Y), Y: a.Y + absD*prevN.X}
-	cExt := Point{X: c.X - absD*(-nextN.Y), Y: c.Y - absD*nextN.X}
+	aExt := geom.Point{X: a.X + absD*(-prevN.Y), Y: a.Y + absD*prevN.X}
+	cExt := geom.Point{X: c.X - absD*(-nextN.Y), Y: c.Y - absD*nextN.X}
 	*out = append(*out, a, aExt, cExt, c)
 }
 
@@ -390,7 +391,7 @@ func appendSquareJoin(out *Polygon, _, a, c, prevN, nextN Point, d float64) {
 // direction that fills the wedge gap: CCW for d>0, CW for d<0. Chord
 // deviation per segment stays within arcTol; minimum 2 segments so
 // the arc is non-degenerate.
-func appendRoundJoin(out *Polygon, v, a, c Point, d, arcTol float64) {
+func appendRoundJoin(out *geom.Polygon, v, a, c geom.Point, d, arcTol float64) {
 	startAng := math.Atan2(a.Y-v.Y, a.X-v.X)
 	endAng := math.Atan2(c.Y-v.Y, c.X-v.X)
 	sweep := endAng - startAng
@@ -419,7 +420,7 @@ func appendRoundJoin(out *Polygon, v, a, c Point, d, arcTol float64) {
 	step := sweep / float64(segs)
 	for i := 1; i < segs; i++ {
 		ang := startAng + step*float64(i)
-		*out = append(*out, Point{X: v.X + r*math.Cos(ang), Y: v.Y + r*math.Sin(ang)})
+		*out = append(*out, geom.Point{X: v.X + r*math.Cos(ang), Y: v.Y + r*math.Sin(ang)})
 	}
 	*out = append(*out, c)
 }
@@ -430,9 +431,9 @@ func appendRoundJoin(out *Polygon, v, a, c Point, d, arcTol float64) {
 // a pinched neck, a closing notch, an inside-out collapse, or two rings that
 // now touch — and the piece must be re-resolved by [selfUnionPositive].
 // Offset rings are short, so the O(n²) edge-pair scan is cheap.
-func ringsIntersect(rings []Polygon) bool {
+func ringsIntersect(rings []geom.Polygon) bool {
 	type edge struct {
-		a, b Point
+		a, b geom.Point
 		ring int
 		idx  int
 	}
@@ -466,7 +467,7 @@ func ringsIntersect(rings []Polygon) bool {
 // point other than a single shared endpoint — i.e. they cross transversally
 // or overlap collinearly, or one endpoint lies in the open interior of the
 // other segment. A bare touch at a single common endpoint returns false.
-func segmentsProperlyIntersect(p1, p2, p3, p4 Point) bool {
+func segmentsProperlyIntersect(p1, p2, p3, p4 geom.Point) bool {
 	d1 := orient(p3, p4, p1)
 	d2 := orient(p3, p4, p2)
 	d3 := orient(p1, p2, p3)
@@ -493,13 +494,13 @@ func segmentsProperlyIntersect(p1, p2, p3, p4 Point) bool {
 
 // orient returns the sign of the cross product (b-a)×(c-a): >0 left turn, <0
 // right turn, 0 collinear.
-func orient(a, b, c Point) float64 {
+func orient(a, b, c geom.Point) float64 {
 	return b.Sub(a).Cross(c.Sub(a))
 }
 
 // onSegmentInterior reports whether collinear point p lies strictly inside
 // segment ab (not at either endpoint).
-func onSegmentInterior(a, b, p Point) bool {
+func onSegmentInterior(a, b, p geom.Point) bool {
 	if p == a || p == b {
 		return false
 	}
@@ -537,12 +538,12 @@ var selfUnionResolveAngles = []float64{
 // agreeing majority the un-rotated (angle 0) result is preferred so a
 // non-degenerate offset keeps its exact coordinates. Returns nil if every
 // attempt fails or the region is empty.
-func selfUnionPositive(rings []Polygon) MultiPolygon {
+func selfUnionPositive(rings []geom.Polygon) geom.MultiPolygon {
 	bb := bboxOf(rings)
 	cx, cy := (bb.Min.X+bb.Max.X)/2, (bb.Min.Y+bb.Max.Y)/2
 
 	type cand struct {
-		res    MultiPolygon
+		res    geom.MultiPolygon
 		area   float64
 		pieces int
 		zero   bool // produced at angle 0 (exact coordinates)
@@ -601,7 +602,7 @@ func selfUnionPositive(rings []Polygon) MultiPolygon {
 // is consistent with the nil/err frame-failure paths the vote already tolerates;
 // each frame builds an independent sweep, so a recovered panic leaves no shared
 // state behind.
-func selfUnionAt(rings []Polygon, cx, cy, ang float64) (out MultiPolygon) {
+func selfUnionAt(rings []geom.Polygon, cx, cy, ang float64) (out geom.MultiPolygon) {
 	defer func() {
 		if recover() != nil {
 			out = nil
@@ -611,9 +612,9 @@ func selfUnionAt(rings []Polygon, cx, cy, ang float64) (out MultiPolygon) {
 	ca, sa := 1.0, 0.0
 	if ang != 0 {
 		ca, sa = math.Cos(ang), math.Sin(ang)
-		work = make([]Polygon, len(rings))
+		work = make([]geom.Polygon, len(rings))
 		for i, r := range rings {
-			rr := make(Polygon, len(r))
+			rr := make(geom.Polygon, len(r))
 			for j, p := range r {
 				rr[j] = rotateAbout(p, cx, cy, ca, sa)
 			}
@@ -653,19 +654,19 @@ func selfUnionAt(rings []Polygon, cx, cy, ang float64) (out MultiPolygon) {
 
 // rotateAbout rotates p about (cx,cy) by the rotation with cosine ca and sine
 // sa (negate sa to invert).
-func rotateAbout(p Point, cx, cy, ca, sa float64) Point {
+func rotateAbout(p geom.Point, cx, cy, ca, sa float64) geom.Point {
 	dx, dy := p.X-cx, p.Y-cy
-	return Point{X: cx + dx*ca - dy*sa, Y: cy + dx*sa + dy*ca}
+	return geom.Point{X: cx + dx*ca - dy*sa, Y: cy + dx*sa + dy*ca}
 }
 
 // bboxOf returns the bounding box of all vertices across rings.
-func bboxOf(rings []Polygon) BBox {
-	var bb BBox
+func bboxOf(rings []geom.Polygon) geom.BBox {
+	var bb geom.BBox
 	first := true
 	for _, r := range rings {
 		for _, p := range r {
 			if first {
-				bb = BBox{Min: p, Max: p}
+				bb = geom.BBox{Min: p, Max: p}
 				first = false
 				continue
 			}
@@ -682,7 +683,7 @@ func bboxOf(rings []Polygon) BBox {
 // segments in input order — unlike boolean.appendRing it does NOT normalize
 // orientation, since the offset self-union relies on the natural traversal
 // direction to set the winding sign.
-func appendOffsetRingSegs(dst *[]clip.Segment, ring Polygon, scale fixed.Scale) {
+func appendOffsetRingSegs(dst *[]clip.Segment, ring geom.Polygon, scale fixed.Scale) {
 	n := len(ring)
 	if n < 3 {
 		return
@@ -711,17 +712,17 @@ func appendOffsetRingSegs(dst *[]clip.Segment, ring Polygon, scale fixed.Scale) 
 	}
 }
 
-func cloneMulti(m MultiPolygon) MultiPolygon {
-	out := make(MultiPolygon, len(m))
+func cloneMulti(m geom.MultiPolygon) geom.MultiPolygon {
+	out := make(geom.MultiPolygon, len(m))
 	for i, ex := range m {
-		outer := make(Polygon, len(ex.Outer))
+		outer := make(geom.Polygon, len(ex.Outer))
 		copy(outer, ex.Outer)
-		holes := make([]Polygon, len(ex.Holes))
+		holes := make([]geom.Polygon, len(ex.Holes))
 		for j, h := range ex.Holes {
-			holes[j] = make(Polygon, len(h))
+			holes[j] = make(geom.Polygon, len(h))
 			copy(holes[j], h)
 		}
-		out[i] = ExPolygon{Outer: outer, Holes: holes}
+		out[i] = geom.ExPolygon{Outer: outer, Holes: holes}
 	}
 	return out
 }

@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,15 +24,15 @@ func triSumArea(ts []Triangle) float64 {
 }
 
 // triCentroid returns the centroid of a triangle.
-func triCentroid(t Triangle) Point {
-	return Point{
+func triCentroid(t Triangle) geom.Point {
+	return geom.Point{
 		X: (t[0].X + t[1].X + t[2].X) / 3,
 		Y: (t[0].Y + t[1].Y + t[2].Y) / 3,
 	}
 }
 
 func TestTriangulateSquare(t *testing.T) {
-	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}}}
+	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}}}
 	tris := Triangulate(m)
 	require.Len(t, tris, 2, "got %d triangles, want 2", len(tris))
 	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want %v", triSumArea(tris), 16.0)
@@ -41,7 +42,7 @@ func TestTriangulateSquare(t *testing.T) {
 }
 
 func TestTriangulateTriangle(t *testing.T) {
-	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 0, Y: 6}}}}
+	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 0, Y: 6}}}}
 	tris := Triangulate(m)
 	require.Len(t, tris, 1, "got %d triangles, want 1", len(tris))
 	require.InDelta(t, 18.0, triSumArea(tris), 1e-9, "area %v, want 18", triSumArea(tris))
@@ -49,7 +50,7 @@ func TestTriangulateTriangle(t *testing.T) {
 
 func TestTriangulateCWInputNormalized(t *testing.T) {
 	// Clockwise outer ring must be normalized to CCW output.
-	m := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 0}}}}
+	m := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 0}}}}
 	tris := Triangulate(m)
 	require.InDelta(t, 16.0, triSumArea(tris), 1e-9, "area %v, want 16", triSumArea(tris))
 	for i, tri := range tris {
@@ -59,7 +60,7 @@ func TestTriangulateCWInputNormalized(t *testing.T) {
 
 func TestTriangulateConcave(t *testing.T) {
 	// An L / arrow shape with a reflex vertex.
-	m := MultiPolygon{{Outer: Polygon{
+	m := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 6, Y: 0}, {X: 6, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 6}, {X: 0, Y: 6},
 	}}}
 	tris := Triangulate(m)
@@ -73,7 +74,7 @@ func TestTriangulateConcave(t *testing.T) {
 func TestTriangulateHolesAndPieces(t *testing.T) {
 	cases := []struct {
 		name string
-		m    MultiPolygon
+		m    geom.MultiPolygon
 		// wantArea, when set, overrides the default expected area of m.Area().
 		wantArea *float64
 		// checkCCW asserts each triangle is wound counter-clockwise.
@@ -83,9 +84,9 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 	}{
 		{
 			name: "WithHole",
-			m: MultiPolygon{{
-				Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-				Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
+			m: geom.MultiPolygon{{
+				Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+				Holes: []geom.Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}}, // CW hole
 			}},
 			wantArea:      func() *float64 { v := 100.0 - 16.0; return &v }(),
 			checkCCW:      true,
@@ -96,17 +97,17 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 			// real (non-normalized) boolean-engine output. The robust fallbacks must
 			// still cover the region exactly without overlap.
 			name: "TouchingHole",
-			m: MultiPolygon{{
-				Outer: Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
-				Holes: []Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
+			m: geom.MultiPolygon{{
+				Outer: geom.Polygon{{X: 11, Y: 8}, {X: 7, Y: 8}, {X: 6, Y: 8}, {X: 5, Y: 8}, {X: 5, Y: 2}, {X: 11, Y: 2}},
+				Holes: []geom.Polygon{{{X: 7, Y: 8}, {X: 7, Y: 3}, {X: 6, Y: 3}, {X: 6, Y: 8}}},
 			}},
 			checkCentroid: true,
 		},
 		{
 			name: "TwoHoles",
-			m: MultiPolygon{{
-				Outer: Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
-				Holes: []Polygon{
+			m: geom.MultiPolygon{{
+				Outer: geom.Polygon{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 10}, {X: 0, Y: 10}},
+				Holes: []geom.Polygon{
 					{{X: 2, Y: 2}, {X: 2, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 2}},     // CW
 					{{X: 12, Y: 3}, {X: 12, Y: 7}, {X: 16, Y: 7}, {X: 16, Y: 3}}, // CW
 				},
@@ -115,9 +116,9 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 		},
 		{
 			name: "MultiPiece",
-			m: MultiPolygon{
-				{Outer: Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
-				{Outer: Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
+			m: geom.MultiPolygon{
+				{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4}}},
+				{Outer: geom.Polygon{{X: 10, Y: 10}, {X: 16, Y: 10}, {X: 13, Y: 16}}},
 			},
 		},
 	}
@@ -144,11 +145,11 @@ func TestTriangulateHolesAndPieces(t *testing.T) {
 
 func TestTriangulateDegenerate(t *testing.T) {
 	// Fewer than three vertices, or collinear sliver: no triangles.
-	for _, m := range []MultiPolygon{
-		{{Outer: Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}},
-		{{Outer: Polygon{{X: 0, Y: 0}}}},
+	for _, m := range []geom.MultiPolygon{
+		{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 1, Y: 1}}}},
+		{{Outer: geom.Polygon{{X: 0, Y: 0}}}},
 		nil,
-		{{Outer: Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}}}}, // collinear → zero area
+		{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}}}}, // collinear → zero area
 	} {
 		tris := Triangulate(m)
 		require.Empty(t, tris, "Triangulate(%v) = %d triangles, want 0", m, len(tris))
@@ -158,7 +159,7 @@ func TestTriangulateDegenerate(t *testing.T) {
 func TestTriangulateCollinearVertices(t *testing.T) {
 	// Extra collinear vertices on the edges must not break the result; the
 	// covered area stays exact and no zero-area triangles leak out.
-	m := MultiPolygon{{Outer: Polygon{
+	m := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4}, {X: 0, Y: 4}, {X: 0, Y: 2},
 	}}}
 	tris := Triangulate(m)
@@ -178,7 +179,7 @@ func TestTriangulateAreaOracle(t *testing.T) {
 		if ring == nil || !isSimplePolygon(ring) {
 			continue
 		}
-		m := MultiPolygon{{Outer: ring}}
+		m := geom.MultiPolygon{{Outer: ring}}
 		want := m.Area()
 		if want < 1 {
 			continue
@@ -232,7 +233,7 @@ func TestTriangulateBooleanOutput(t *testing.T) {
 func TestTriangulateHolesOracle(t *testing.T) {
 	rng := rand.New(rand.NewSource(7777))
 	for iter := range 5000 {
-		ex := ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 90, Y: 0}, {X: 90, Y: 90}, {X: 0, Y: 90}}}
+		ex := geom.ExPolygon{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 90, Y: 0}, {X: 90, Y: 90}, {X: 0, Y: 90}}}
 		for gx := range 3 {
 			for gy := range 3 {
 				if rng.Intn(2) == 0 {
@@ -243,12 +244,12 @@ func TestTriangulateHolesOracle(t *testing.T) {
 				w := 3 + rng.Float64()*12
 				h := 3 + rng.Float64()*12
 				// Clockwise hole (library convention).
-				ex.Holes = append(ex.Holes, Polygon{
+				ex.Holes = append(ex.Holes, geom.Polygon{
 					{X: ox, Y: oy}, {X: ox, Y: oy + h}, {X: ox + w, Y: oy + h}, {X: ox + w, Y: oy},
 				})
 			}
 		}
-		m := MultiPolygon{ex}
+		m := geom.MultiPolygon{ex}
 		want := m.Area()
 		tris := Triangulate(m)
 		got := triSumArea(tris)
@@ -263,14 +264,14 @@ func TestTriangulateHolesOracle(t *testing.T) {
 // randomSimplePolygon builds a star-shaped (hence simple) polygon by sampling
 // random radii at sorted angles around a centre — a cheap way to get varied
 // concave but non-self-intersecting rings.
-func randomSimplePolygon(rng *rand.Rand) Polygon {
+func randomSimplePolygon(rng *rand.Rand) geom.Polygon {
 	n := 3 + rng.Intn(10)
 	angles := make([]float64, n)
 	for i := range angles {
 		angles[i] = rng.Float64() * 2 * math.Pi
 	}
 	sortFloat(angles)
-	ring := make(Polygon, 0, n)
+	ring := make(geom.Polygon, 0, n)
 	for i, ang := range angles {
 		if i > 0 && ang-angles[i-1] < 1e-3 {
 			continue
@@ -279,7 +280,7 @@ func randomSimplePolygon(rng *rand.Rand) Polygon {
 		// star-shaped, hence simple, polygon. Do not round: rounding can
 		// nudge a vertex across an edge and break simplicity.
 		r := 1 + rng.Float64()*9
-		ring = append(ring, Point{X: 20 + r*math.Cos(ang), Y: 20 + r*math.Sin(ang)})
+		ring = append(ring, geom.Point{X: 20 + r*math.Cos(ang), Y: 20 + r*math.Sin(ang)})
 	}
 	if len(ring) < 3 {
 		return nil
@@ -287,12 +288,12 @@ func randomSimplePolygon(rng *rand.Rand) Polygon {
 	return ring
 }
 
-func randomRectMultiPolygon(rng *rand.Rand) MultiPolygon {
+func randomRectMultiPolygon(rng *rand.Rand) geom.MultiPolygon {
 	x0 := float64(rng.Intn(8))
 	y0 := float64(rng.Intn(8))
 	w := float64(1 + rng.Intn(8))
 	h := float64(1 + rng.Intn(8))
-	return MultiPolygon{{Outer: Polygon{
+	return geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: x0, Y: y0}, {X: x0 + w, Y: y0}, {X: x0 + w, Y: y0 + h}, {X: x0, Y: y0 + h},
 	}}}
 }
@@ -301,7 +302,7 @@ func randomRectMultiPolygon(rng *rand.Rand) MultiPolygon {
 // properly cross — i.e. it is a simple polygon, the precondition Triangulate
 // assumes. The random star-shaped generator can violate this when the centre
 // falls outside the sampled hull.
-func isSimplePolygon(ring Polygon) bool {
+func isSimplePolygon(ring geom.Polygon) bool {
 	n := len(ring)
 	if n < 3 {
 		return false
@@ -322,7 +323,7 @@ func isSimplePolygon(ring Polygon) bool {
 
 // properlyCross reports a transversal crossing of segments ab and cd at a point
 // interior to both (no shared endpoints, no collinear overlap).
-func properlyCross(a, b, c, d Point) bool {
+func properlyCross(a, b, c, d geom.Point) bool {
 	d1 := orient(c, d, a)
 	d2 := orient(c, d, b)
 	d3 := orient(a, b, c)

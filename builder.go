@@ -3,6 +3,7 @@ package polyclip
 import (
 	"errors"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 )
 
@@ -62,18 +63,13 @@ func toClipFill(r FillRule) clip.FillRule {
 	}
 }
 
-// Polyline is an open path: a sequence of points with no implicit closing
-// edge. It is the open-subject input type ([Builder.AddOpenSubject]) and the
-// open-result type (Result.Open).
-type Polyline []Point
-
 // Result is the output of [Builder.Execute]. Closed holds the closed-polygon
 // output (the same MultiPolygon the free functions return). Open holds any
 // surviving open-subject chains; it is nil unless open subjects were added, so
 // closed-only callers can ignore it.
 type Result struct {
-	Closed MultiPolygon
-	Open   []Polyline
+	Closed geom.MultiPolygon
+	Open   []geom.Polyline
 }
 
 // PolyTree is the nested containment hierarchy returned by
@@ -90,7 +86,7 @@ type PolyTree struct {
 // wound CCW, holes CW); IsHole reports whether it bounds a hole (odd nesting
 // depth); Children are the rings nested directly inside it.
 type PolyTreeNode struct {
-	Polygon  Polygon
+	Polygon  geom.Polygon
 	IsHole   bool
 	Children []*PolyTreeNode
 }
@@ -104,9 +100,9 @@ type PolyTreeNode struct {
 // accumulated inputs for a fresh set. A Builder is single-goroutine, the same
 // rule as a MultiPolygon.
 type Builder struct {
-	subj     MultiPolygon
-	subjOpen []Polyline
-	clip     MultiPolygon
+	subj     geom.MultiPolygon
+	subjOpen []geom.Polyline
+	clip     geom.MultiPolygon
 	fill     FillRule
 	za       ZAssigner
 }
@@ -119,7 +115,7 @@ func NewBuilder() *Builder {
 // AddSubject adds closed subject polygons. Multiple calls (and multiple
 // MultiPolygons per call) aggregate: the subject set is the union of every
 // piece added. Returns the receiver for chaining.
-func (b *Builder) AddSubject(m ...MultiPolygon) *Builder {
+func (b *Builder) AddSubject(m ...geom.MultiPolygon) *Builder {
 	for _, mp := range m {
 		b.subj = append(b.subj, mp...)
 	}
@@ -131,14 +127,14 @@ func (b *Builder) AddSubject(m ...MultiPolygon) *Builder {
 // against the closed operands and returns the surviving chains in Result.Open.
 // Open paths are subjects only (Clipper2 forbids open clips) and never clip one
 // another. Multiple calls aggregate. Returns the receiver for chaining.
-func (b *Builder) AddOpenSubject(p ...Polyline) *Builder {
+func (b *Builder) AddOpenSubject(p ...geom.Polyline) *Builder {
 	b.subjOpen = append(b.subjOpen, p...)
 	return b
 }
 
 // AddClip adds closed clip polygons. Like [Builder.AddSubject], multiple calls
 // aggregate into a single clip set. Returns the receiver for chaining.
-func (b *Builder) AddClip(m ...MultiPolygon) *Builder {
+func (b *Builder) AddClip(m ...geom.MultiPolygon) *Builder {
 	for _, mp := range m {
 		b.clip = append(b.clip, mp...)
 	}
@@ -213,7 +209,7 @@ func (b *Builder) ExecuteTree(op Operation) (*PolyTree, error) {
 // the aggregated clip set. The named free functions and Execute both route
 // through here, so all callers get identical handling. The sweep path
 // (runBooleanOp) carries the subset-invariant filter.
-func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (MultiPolygon, error) {
+func execOp(s, c geom.MultiPolygon, op Operation, fill FillRule, za ZAssigner) (geom.MultiPolygon, error) {
 	if fill != FillNonZero {
 		return execOpFilled(s, c, op, fill, za)
 	}
@@ -221,7 +217,7 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 	case OpUnion:
 		switch {
 		case len(s) == 0 && len(c) == 0:
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		case len(s) == 0:
 			return c, nil
 		case len(c) == 0:
@@ -236,7 +232,7 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 			return s, nil
 		}
 		if !s.BoundingBox().Intersects(c.BoundingBox()) {
-			out := make(MultiPolygon, 0, len(s)+len(c))
+			out := make(geom.MultiPolygon, 0, len(s)+len(c))
 			out = append(out, s...)
 			out = append(out, c...)
 			return out, nil
@@ -245,25 +241,25 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 
 	case OpIntersect:
 		if len(s) == 0 || len(c) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		if mpolyEqual(s, c) { // Intersect(A, A) = A
 			return s, nil
 		}
 		if !s.BoundingBox().Intersects(c.BoundingBox()) {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		return runBooleanOp(s, c, clip.OpIntersect, clip.FillNonZero, za)
 
 	case OpDifference:
 		if len(s) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		if len(c) == 0 {
 			return s, nil
 		}
 		if mpolyEqual(s, c) { // Difference(A, A) = ∅
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		if !s.BoundingBox().Intersects(c.BoundingBox()) {
 			return s, nil
@@ -276,9 +272,9 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 		// cross-source vertical confluence (DESIGN.md §7.7). Per-piece, that
 		// spurious lobe is a stray hole-free piece the subset filter drops.
 		if len(s) > 1 {
-			var out MultiPolygon
+			var out geom.MultiPolygon
 			for _, piece := range s {
-				d, err := execOp(MultiPolygon{piece}, c, OpDifference, FillNonZero, za)
+				d, err := execOp(geom.MultiPolygon{piece}, c, OpDifference, FillNonZero, za)
 				if err != nil {
 					return nil, err
 				}
@@ -291,17 +287,17 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 	case OpXor:
 		switch {
 		case len(s) == 0 && len(c) == 0:
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		case len(s) == 0:
 			return c, nil
 		case len(c) == 0:
 			return s, nil
 		}
 		if mpolyEqual(s, c) { // Xor(A, A) = ∅
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		if !s.BoundingBox().Intersects(c.BoundingBox()) {
-			out := make(MultiPolygon, 0, len(s)+len(c))
+			out := make(geom.MultiPolygon, 0, len(s)+len(c))
 			out = append(out, s...)
 			out = append(out, c...)
 			return out, nil
@@ -333,30 +329,30 @@ func execOp(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (Multi
 // return it verbatim). Only fill-independent empty results short-circuit; every
 // other case runs the sweep. Xor stays a composition (a set identity holds under
 // any single fill rule) to avoid the direct OpXor sweep (DESIGN.md §7.6).
-func execOpFilled(s, c MultiPolygon, op Operation, fill FillRule, za ZAssigner) (MultiPolygon, error) {
+func execOpFilled(s, c geom.MultiPolygon, op Operation, fill FillRule, za ZAssigner) (geom.MultiPolygon, error) {
 	cf := toClipFill(fill)
 	switch op {
 	case OpUnion:
 		if len(s) == 0 && len(c) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		return runBooleanOp(s, c, clip.OpUnion, cf, za)
 
 	case OpIntersect:
 		if len(s) == 0 || len(c) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		return runBooleanOp(s, c, clip.OpIntersect, cf, za)
 
 	case OpDifference:
 		if len(s) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		return runBooleanOp(s, c, clip.OpDifference, cf, za)
 
 	case OpXor:
 		if len(s) == 0 && len(c) == 0 {
-			return MultiPolygon{}, nil
+			return geom.MultiPolygon{}, nil
 		}
 		u, err := execOpFilled(s, c, OpUnion, fill, za)
 		if err != nil {

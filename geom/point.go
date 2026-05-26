@@ -1,4 +1,9 @@
-package polyclip
+// Package geom holds the value types that describe geometry — points,
+// bounding boxes, rings, polygons, and open paths — together with the
+// intrinsic queries and construction helpers that operate on them. It carries
+// no dependency on the clipping engine; the boolean and offset operations live
+// one layer up in package polyclip, which consumes these types.
+package geom
 
 import "math"
 
@@ -8,8 +13,8 @@ import "math"
 //
 // Z is auxiliary data the geometry engine never reads — boolean ops, offset,
 // and every other routine compare and snap points by X/Y only. Z is preserved
-// from input to output and, when a [ZAssigner] is installed via
-// [Builder.SetZAssigner], computed for the new vertices created where edges
+// from input to output and, when a ZAssigner is installed via
+// Builder.SetZAssigner, computed for the new vertices created where edges
 // cross (DESIGN.md §7.8h). Leave it zero if unused.
 type Point struct {
 	X, Y float64

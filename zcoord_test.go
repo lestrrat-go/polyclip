@@ -3,34 +3,35 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // constZ assigns a fixed Z to every crossing vertex.
 type constZ float64
 
-func (c constZ) AssignZ(_, _, _, _, _ Point) float64 { return float64(c) }
+func (c constZ) AssignZ(_, _, _, _, _ geom.Point) float64 { return float64(c) }
 
 // coordZ encodes the crossing point into Z as X*100+Y, so a test can assert
 // both that the callback fired and that it received the right crossing point.
 type coordZ struct{}
 
-func (coordZ) AssignZ(_, _, _, _ Point, crossing Point) float64 {
+func (coordZ) AssignZ(_, _, _, _ geom.Point, crossing geom.Point) float64 {
 	return crossing.X*100 + crossing.Y
 }
 
 // recordZ captures every AssignZ call for inspection.
 type recordZ struct {
-	calls [][5]Point
+	calls [][5]geom.Point
 }
 
-func (r *recordZ) AssignZ(e1bot, e1top, e2bot, e2top, crossing Point) float64 {
-	r.calls = append(r.calls, [5]Point{e1bot, e1top, e2bot, e2top, crossing})
+func (r *recordZ) AssignZ(e1bot, e1top, e2bot, e2top, crossing geom.Point) float64 {
+	r.calls = append(r.calls, [5]geom.Point{e1bot, e1top, e2bot, e2top, crossing})
 	return 0
 }
 
 // zAt returns the Z of the result vertex at (x,y), or NaN-substitute via found.
-func zAt(m MultiPolygon, x, y float64) (float64, bool) {
+func zAt(m geom.MultiPolygon, x, y float64) (float64, bool) {
 	for _, ex := range m {
 		for _, p := range ex.Outer {
 			if p.X == x && p.Y == y {
@@ -55,10 +56,10 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 	//   (10,10) A's vertex inside B   -> input Z 1
 	//   (10,5)  crossing A-right×B-bottom -> assigned 10*100+5 = 1005
 	//   (5,10)  crossing A-top×B-left     -> assigned 5*100+10 = 510
-	a := MultiPolygon{{Outer: Polygon{
+	a := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 0, Y: 0, Z: 1}, {X: 10, Y: 0, Z: 1}, {X: 10, Y: 10, Z: 1}, {X: 0, Y: 10, Z: 1},
 	}}}
-	b := MultiPolygon{{Outer: Polygon{
+	b := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
 	}}}
 
@@ -80,10 +81,10 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 func TestBuilderZDisabledIsZero(t *testing.T) {
 	// Without an assigner, output Z is zero even when inputs carry Z (the engine
 	// ignores Z; the free functions never touch it).
-	a := MultiPolygon{{Outer: Polygon{
+	a := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 0, Y: 0, Z: 1}, {X: 10, Y: 0, Z: 1}, {X: 10, Y: 10, Z: 1}, {X: 0, Y: 10, Z: 1},
 	}}}
-	b := MultiPolygon{{Outer: Polygon{
+	b := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
 	}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpIntersect)
@@ -99,8 +100,8 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 	// Every corner of the intersection rectangle that is a genuine crossing gets
 	// the constant; the two corners that are input vertices keep Z 0 (inputs here
 	// carry no Z).
-	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
+	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(7)).Execute(OpIntersect)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
@@ -112,8 +113,8 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 func TestBuilderZAssignerEndpoints(t *testing.T) {
 	// The assigner is called once per genuine crossing with that crossing's
 	// point; the two crossings of the overlapping squares are (10,5) and (5,10).
-	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
+	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	rec := &recordZ{}
 	_, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect)
 	require.NoError(t, err)
@@ -131,8 +132,8 @@ func TestBuilderZAssignerEndpoints(t *testing.T) {
 func TestBuilderZXorComposition(t *testing.T) {
 	// Xor is computed by composition (Union, Intersect, Difference). Z tracking
 	// must still flow through: the same crossing points appear and get assigned.
-	a := MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := MultiPolygon{{Outer: Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
+	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
+	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(9)).Execute(OpXor)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {

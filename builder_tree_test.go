@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/polyclip"
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // treeRect returns an axis-aligned rectangle ring (CCW).
-func treeRect(x0, y0, x1, y1 float64) polyclip.Polygon {
-	return polyclip.Polygon{
+func treeRect(x0, y0, x1, y1 float64) geom.Polygon {
+	return geom.Polygon{
 		{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x1, Y: y1}, {X: x0, Y: y1},
 	}
 }
@@ -19,8 +20,8 @@ func treeRect(x0, y0, x1, y1 float64) polyclip.Polygon {
 // flattenPolyTree reproduces assembleResult's flattening rule: each filled
 // node becomes an ExPolygon whose holes are its direct children, and every
 // island nested inside a hole becomes its own top-level ExPolygon.
-func flattenPolyTree(t *polyclip.PolyTree) polyclip.MultiPolygon {
-	var out polyclip.MultiPolygon
+func flattenPolyTree(t *polyclip.PolyTree) geom.MultiPolygon {
+	var out geom.MultiPolygon
 	var walk func(n *polyclip.PolyTreeNode)
 	walk = func(n *polyclip.PolyTreeNode) {
 		if n.IsHole {
@@ -29,7 +30,7 @@ func flattenPolyTree(t *polyclip.PolyTree) polyclip.MultiPolygon {
 			}
 			return
 		}
-		ex := polyclip.ExPolygon{Outer: n.Polygon}
+		ex := geom.ExPolygon{Outer: n.Polygon}
 		for _, h := range n.Children { // a filled node's children are its holes
 			ex.Holes = append(ex.Holes, h.Polygon)
 			for _, gc := range h.Children {
@@ -48,7 +49,7 @@ func flattenPolyTree(t *polyclip.PolyTree) polyclip.MultiPolygon {
 // sorted areas of every ring (outers positive, holes negative). Two
 // MultiPolygons with the same pieces (in any order, holes in any order) share
 // a signature.
-func mpolySignature(m polyclip.MultiPolygon) []float64 {
+func mpolySignature(m geom.MultiPolygon) []float64 {
 	var sig []float64
 	for _, ex := range m {
 		sig = append(sig, math.Abs(ex.Outer.SignedArea()))
@@ -60,7 +61,7 @@ func mpolySignature(m polyclip.MultiPolygon) []float64 {
 	return sig
 }
 
-func sameShape(t *testing.T, want, got polyclip.MultiPolygon) {
+func sameShape(t *testing.T, want, got geom.MultiPolygon) {
 	t.Helper()
 	require.Len(t, got, len(want), "piece count: want %d got %d", len(want), len(got))
 	ws, gs := mpolySignature(want), mpolySignature(got)
@@ -73,37 +74,37 @@ func sameShape(t *testing.T, want, got polyclip.MultiPolygon) {
 func TestExecuteTreeFlattensToClosed(t *testing.T) {
 	tests := []struct {
 		name string
-		subj polyclip.MultiPolygon
-		clip polyclip.MultiPolygon
+		subj geom.MultiPolygon
+		clip geom.MultiPolygon
 		op   polyclip.Operation
 	}{
 		{
 			name: "simple square union empty",
-			subj: polyclip.MultiPolygon{{Outer: treeRect(0, 0, 10, 10)}},
+			subj: geom.MultiPolygon{{Outer: treeRect(0, 0, 10, 10)}},
 			op:   polyclip.OpUnion,
 		},
 		{
 			name: "annulus via difference",
-			subj: polyclip.MultiPolygon{{Outer: treeRect(0, 0, 10, 10)}},
-			clip: polyclip.MultiPolygon{{Outer: treeRect(2, 2, 8, 8)}},
+			subj: geom.MultiPolygon{{Outer: treeRect(0, 0, 10, 10)}},
+			clip: geom.MultiPolygon{{Outer: treeRect(2, 2, 8, 8)}},
 			op:   polyclip.OpDifference,
 		},
 		{
 			name: "two disjoint squares union",
-			subj: polyclip.MultiPolygon{{Outer: treeRect(0, 0, 4, 4)}},
-			clip: polyclip.MultiPolygon{{Outer: treeRect(10, 10, 14, 14)}},
+			subj: geom.MultiPolygon{{Outer: treeRect(0, 0, 4, 4)}},
+			clip: geom.MultiPolygon{{Outer: treeRect(10, 10, 14, 14)}},
 			op:   polyclip.OpUnion,
 		},
 		{
 			name: "overlap union (one piece)",
-			subj: polyclip.MultiPolygon{{Outer: treeRect(0, 0, 6, 6)}},
-			clip: polyclip.MultiPolygon{{Outer: treeRect(4, 4, 10, 10)}},
+			subj: geom.MultiPolygon{{Outer: treeRect(0, 0, 6, 6)}},
+			clip: geom.MultiPolygon{{Outer: treeRect(4, 4, 10, 10)}},
 			op:   polyclip.OpUnion,
 		},
 		{
 			name: "xor of overlapping squares",
-			subj: polyclip.MultiPolygon{{Outer: treeRect(0, 0, 6, 6)}},
-			clip: polyclip.MultiPolygon{{Outer: treeRect(3, 3, 9, 9)}},
+			subj: geom.MultiPolygon{{Outer: treeRect(0, 0, 6, 6)}},
+			clip: geom.MultiPolygon{{Outer: treeRect(3, 3, 9, 9)}},
 			op:   polyclip.OpXor,
 		},
 	}
@@ -124,11 +125,11 @@ func TestExecuteTreeFlattensToClosed(t *testing.T) {
 // separate top-level piece.
 func TestExecuteTreeIslandInHole(t *testing.T) {
 	annulus, err := polyclip.Difference(
-		polyclip.MultiPolygon{{Outer: treeRect(0, 0, 12, 12)}},
-		polyclip.MultiPolygon{{Outer: treeRect(2, 2, 10, 10)}},
+		geom.MultiPolygon{{Outer: treeRect(0, 0, 12, 12)}},
+		geom.MultiPolygon{{Outer: treeRect(2, 2, 10, 10)}},
 	)
 	require.NoError(t, err, "Difference")
-	donut, err := polyclip.Union(annulus, polyclip.MultiPolygon{{Outer: treeRect(4, 4, 8, 8)}})
+	donut, err := polyclip.Union(annulus, geom.MultiPolygon{{Outer: treeRect(4, 4, 8, 8)}})
 	require.NoError(t, err, "Union")
 	require.Len(t, donut, 2, "donut pieces: want 2 got %d", len(donut)) // flat form: annulus-with-hole + island
 
@@ -159,7 +160,7 @@ func TestExecuteTreeIslandInHole(t *testing.T) {
 }
 
 func TestExecuteTreeEmpty(t *testing.T) {
-	square := polyclip.MultiPolygon{{Outer: treeRect(0, 0, 2, 2)}}
+	square := geom.MultiPolygon{{Outer: treeRect(0, 0, 2, 2)}}
 	pt, err := polyclip.NewBuilder().
 		AddSubject(square).AddClip(square).
 		ExecuteTree(polyclip.OpDifference) // A∖A = ∅

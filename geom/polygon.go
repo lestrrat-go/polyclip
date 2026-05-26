@@ -1,4 +1,4 @@
-package polyclip
+package geom
 
 import "math"
 
@@ -18,7 +18,8 @@ type Polygon []Point
 //
 // Holes must be fully contained in Outer and must not overlap each other.
 // This invariant is not checked at construction; pass an [ExPolygon] (wrapped
-// in a [MultiPolygon]) through [Simplify] if you need it normalized.
+// in a [MultiPolygon]) through the Simplify operation if you need it
+// normalized.
 type ExPolygon struct {
 	Outer Polygon
 	Holes []Polygon
@@ -28,6 +29,11 @@ type ExPolygon struct {
 // type for every boolean and offset operation — operations may produce
 // zero, one, or many output [ExPolygon] values from any given input.
 type MultiPolygon []ExPolygon
+
+// Polyline is an open path: a sequence of points with no implicit closing
+// edge. It is the open-subject input type and the open-result type for
+// operations in package polyclip.
+type Polyline []Point
 
 // SignedArea returns twice the signed area of the polygon's interior using
 // the shoelace formula. It is positive for counter-clockwise rings and
@@ -162,7 +168,7 @@ func (e ExPolygon) Contains(q Point) bool {
 		if !hole.Contains(q) {
 			continue
 		}
-		if pointOnRingBoundary(hole, q) {
+		if PointOnRingBoundary(hole, q) {
 			return true
 		}
 		return false
@@ -184,7 +190,7 @@ func (m MultiPolygon) Contains(q Point) bool {
 //
 // Uses the standard collinearity-and-bounds check. The cross product is
 // computed in float64; for inputs within typical user-coordinate ranges this
-// is sufficient for Phase 0 utility methods. The boolean engine uses exact
+// is sufficient for these utility methods. The boolean engine uses exact
 // integer predicates instead (see DESIGN.md §5.2).
 func pointOnSegment(a, b, q Point) bool {
 	cross := b.Sub(a).Cross(q.Sub(a))
@@ -227,7 +233,7 @@ func pointOnSegmentEpsilon(a, b Point) float64 {
 // vertexTol and minArea must be non-negative; pass zero to disable
 // either check (with vertexTol=0 only exact duplicates are merged).
 // Clean is purely geometric — it does not run the boolean engine and
-// cannot resolve self-intersection. For that, use [Simplify].
+// cannot resolve self-intersection. For that, use the Simplify operation.
 func (m MultiPolygon) Clean(vertexTol, minArea float64) MultiPolygon {
 	out := make(MultiPolygon, 0, len(m))
 	for _, ex := range m {
@@ -318,7 +324,8 @@ func pointCollinear(a, v, b Point, tol float64) bool {
 	return cross*cross <= tol*tol*len2
 }
 
-func pointOnRingBoundary(p Polygon, q Point) bool {
+// PointOnRingBoundary reports whether q lies on any edge of the closed ring p.
+func PointOnRingBoundary(p Polygon, q Point) bool {
 	n := len(p)
 	for i := range n {
 		j := i + 1

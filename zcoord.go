@@ -1,6 +1,7 @@
 package polyclip
 
 import (
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
@@ -16,7 +17,7 @@ import (
 // assigner the engine ignores Z entirely (the default), so the standard path is
 // unchanged and pays no cost.
 type ZAssigner interface {
-	AssignZ(e1bot, e1top, e2bot, e2top, crossing Point) float64
+	AssignZ(e1bot, e1top, e2bot, e2top, crossing geom.Point) float64
 }
 
 // zTracker carries the Z assigner and the grid-point→Z table for one run of the
@@ -75,7 +76,7 @@ func (z *zTracker) lookup(fp fixed.Point) float64 {
 }
 
 // unsnapPoint converts a grid point back to a user-unit Point (Z zero).
-func unsnapPoint(fp fixed.Point, scale fixed.Scale) Point {
+func unsnapPoint(fp fixed.Point, scale fixed.Scale) geom.Point {
 	x, y := scale.Unsnap(fp)
-	return Point{X: x, Y: y}
+	return geom.Point{X: x, Y: y}
 }

@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,10 +18,10 @@ import (
 // source ring at a coincident horizontal apex when the other source does not
 // fill above it (clip/sweep.go closeBound self-closure, DESIGN.md §7.6).
 func TestHorizIdentityRepro(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 0, Y: 1},
 	}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 1, Y: -1}, {X: 3, Y: -1}, {X: 3, Y: 3}, {X: 2, Y: 3}, {X: 2, Y: 1}, {X: 1, Y: 1},
 	}}}
 	u, _ := Union(a, b)

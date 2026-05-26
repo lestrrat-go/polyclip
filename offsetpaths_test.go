@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,8 +58,8 @@ func TestOffsetPathsStraight(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-			res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: tc.end})
+			line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
+			res, err := OffsetPaths([]geom.Polyline{line}, 2, OffsetOptions{End: tc.end})
 			require.NoError(t, err)
 			if tc.pieces != nil {
 				require.Len(t, res, *tc.pieces, "butt pieces = %d, want %d", len(res), *tc.pieces)
@@ -70,8 +71,8 @@ func TestOffsetPathsStraight(t *testing.T) {
 
 func TestOffsetPathsVerticalButt(t *testing.T) {
 	// Orientation must be CCW (positive area) regardless of path direction.
-	line := Polyline{{X: 0, Y: 10}, {X: 0, Y: 0}}
-	res, err := OffsetPaths([]Polyline{line}, 3, OffsetOptions{End: EndButt})
+	line := geom.Polyline{{X: 0, Y: 10}, {X: 0, Y: 0}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 3, OffsetOptions{End: EndButt})
 	require.NoError(t, err)
 	approx(t, res.Area(), 60, 1e-9, "vertical butt area") // 10 long, width 6
 }
@@ -80,8 +81,8 @@ func TestOffsetPathsRightAngle(t *testing.T) {
 	// An L: (0,0)->(10,0)->(10,10), half-width 1, miter join at the corner.
 	// The ribbon is a single simple piece. Area is two 10×2 arms minus the
 	// 2×2 overlap at the corner, plus the convex miter wedge.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}}
-	res, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndButt, Join: JoinMiter})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 1, OffsetOptions{End: EndButt, Join: JoinMiter})
 	require.NoError(t, err)
 	require.Len(t, res, 1, "L pieces = %d, want 1", len(res))
 	// 2 arms of 10×2 = 40, shared corner square 2×2 counted once = -4, miter
@@ -96,8 +97,8 @@ func TestOffsetPathsRightAngle(t *testing.T) {
 func TestOffsetPathsSharpTurnSinglePiece(t *testing.T) {
 	// A sharp V that doubles back: the inner side self-overlaps and must be
 	// resolved into one clean piece by the self-union.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 1}, {X: 0, Y: 2}}
-	res, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndRound, Join: JoinRound})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 1}, {X: 0, Y: 2}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 1, OffsetOptions{End: EndRound, Join: JoinRound})
 	require.NoError(t, err)
 	require.NotEmpty(t, res, "V produced empty result")
 	a := res.Area()
@@ -106,7 +107,7 @@ func TestOffsetPathsSharpTurnSinglePiece(t *testing.T) {
 
 func TestOffsetPathsMultiple(t *testing.T) {
 	// Two disjoint horizontal segments → two pieces.
-	lines := []Polyline{
+	lines := []geom.Polyline{
 		{{X: 0, Y: 0}, {X: 10, Y: 0}},
 		{{X: 0, Y: 100}, {X: 10, Y: 100}},
 	}
@@ -122,7 +123,7 @@ func TestOffsetPathsErrors(t *testing.T) {
 	// offset distance, and which ErrOffset* sentinel they expect.
 	cases := []struct {
 		name    string
-		lines   []Polyline
+		lines   []geom.Polyline
 		dist    float64
 		opts    OffsetOptions
 		wantErr error
@@ -130,7 +131,7 @@ func TestOffsetPathsErrors(t *testing.T) {
 	}{
 		{
 			name:    "EndPolygonRejected",
-			lines:   []Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
+			lines:   []geom.Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
 			dist:    2,
 			opts:    OffsetOptions{End: EndPolygon},
 			wantErr: ErrOffsetEndType,
@@ -147,7 +148,7 @@ func TestOffsetPathsErrors(t *testing.T) {
 		{
 			// A single-point path (and a zero-length repeat) has no direction; skipped.
 			name:    "ShortSkipped",
-			lines:   []Polyline{{{X: 5, Y: 5}}, {{X: 1, Y: 1}, {X: 1, Y: 1}}},
+			lines:   []geom.Polyline{{{X: 5, Y: 5}}, {{X: 1, Y: 1}, {X: 1, Y: 1}}},
 			dist:    2,
 			opts:    OffsetOptions{End: EndButt},
 			wantErr: ErrOffsetEmpty,
@@ -155,7 +156,7 @@ func TestOffsetPathsErrors(t *testing.T) {
 		},
 		{
 			name:    "ZeroWidth",
-			lines:   []Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
+			lines:   []geom.Polyline{{{X: 0, Y: 0}, {X: 10, Y: 0}}},
 			dist:    0,
 			opts:    OffsetOptions{End: EndButt},
 			wantErr: ErrOffsetEmpty,
@@ -174,8 +175,8 @@ func TestOffsetPathsJoinedSquareLoop(t *testing.T) {
 	// A square loop (4 points, open) closed and banded by 1 each side with miter
 	// joins: outer square [-1,-1]..[11,11] = 144, inner hole [1,1]..[9,9] = 64,
 	// net 80. One piece with one hole.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
-	res, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
 	require.NoError(t, err)
 	require.Len(t, res, 1, "joined pieces = %d, want 1", len(res))
 	require.Len(t, res[0].Holes, 1, "joined holes = %d, want 1", len(res[0].Holes))
@@ -187,11 +188,11 @@ func TestOffsetPathsJoinedSquareLoop(t *testing.T) {
 
 func TestOffsetPathsJoinedClosingDuplicate(t *testing.T) {
 	// An explicit closing point (last == first) is the same loop as without it.
-	open := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
-	closed := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}, {X: 0, Y: 0}}
-	o, err := OffsetPaths([]Polyline{open}, 1, OffsetOptions{End: EndJoined})
+	open := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}
+	closed := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}, {X: 0, Y: 0}}
+	o, err := OffsetPaths([]geom.Polyline{open}, 1, OffsetOptions{End: EndJoined})
 	require.NoError(t, err)
-	c, err := OffsetPaths([]Polyline{closed}, 1, OffsetOptions{End: EndJoined})
+	c, err := OffsetPaths([]geom.Polyline{closed}, 1, OffsetOptions{End: EndJoined})
 	require.NoError(t, err)
 	approx(t, c.Area(), o.Area(), 1e-9, "joined closing-dup area")
 }
@@ -199,8 +200,8 @@ func TestOffsetPathsJoinedClosingDuplicate(t *testing.T) {
 func TestOffsetPathsJoinedThinLoopSolid(t *testing.T) {
 	// A loop that encloses less than the band width on its short axis: the inner
 	// ring collapses, leaving a solid ribbon (no hole) rather than an annulus.
-	line := Polyline{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 1}, {X: 0, Y: 1}}
-	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 1}, {X: 0, Y: 1}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 2, OffsetOptions{End: EndJoined, Join: JoinMiter})
 	require.NoError(t, err)
 	require.Len(t, res, 1, "thin joined pieces = %d, want 1", len(res))
 	require.Empty(t, res[0].Holes, "thin joined holes = %d, want 0", len(res[0].Holes))
@@ -211,10 +212,10 @@ func TestOffsetPathsJoinedThinLoopSolid(t *testing.T) {
 func TestOffsetPathsJoinedNonLoopBandsClosingEdge(t *testing.T) {
 	// A non-closed L is closed into a triangle; the band wraps the whole loop
 	// including the implicit hypotenuse, so it differs from the open-cap ribbon.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}}
-	joined, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}}
+	joined, err := OffsetPaths([]geom.Polyline{line}, 1, OffsetOptions{End: EndJoined, Join: JoinMiter})
 	require.NoError(t, err)
-	butt, err := OffsetPaths([]Polyline{line}, 1, OffsetOptions{End: EndButt, Join: JoinMiter})
+	butt, err := OffsetPaths([]geom.Polyline{line}, 1, OffsetOptions{End: EndButt, Join: JoinMiter})
 	require.NoError(t, err)
 	// The triangle (legs 10, hypotenuse ~14.1) has perimeter ~34.1; a band of
 	// width 2 around it is much larger than the open two-arm ribbon (~37).
@@ -224,8 +225,8 @@ func TestOffsetPathsJoinedNonLoopBandsClosingEdge(t *testing.T) {
 func TestOffsetPathsJoinedTwoPointFallback(t *testing.T) {
 	// A 2-point path cannot form a loop with area; it falls back to a capped
 	// ribbon so the result is still a non-empty band.
-	line := Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
-	res, err := OffsetPaths([]Polyline{line}, 2, OffsetOptions{End: EndJoined})
+	line := geom.Polyline{{X: 0, Y: 0}, {X: 10, Y: 0}}
+	res, err := OffsetPaths([]geom.Polyline{line}, 2, OffsetOptions{End: EndJoined})
 	require.NoError(t, err)
 	a := res.Area()
 	require.Greater(t, a, 0.0, "joined 2-point area = %g, want > 0", a)

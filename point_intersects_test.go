@@ -3,61 +3,62 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBBoxIntersects(t *testing.T) {
 	cases := []struct {
 		name string
-		a, b BBox
+		a, b geom.BBox
 		want bool
 	}{
 		{
 			name: "identical",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			b:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			b:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
 			want: true,
 		},
 		{
 			name: "overlapping",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			b:    BBox{Min: Point{X: 5, Y: 5}, Max: Point{X: 15, Y: 15}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			b:    geom.BBox{Min: geom.Point{X: 5, Y: 5}, Max: geom.Point{X: 15, Y: 15}},
 			want: true,
 		},
 		{
 			name: "touching at a corner",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
-			b:    BBox{Min: Point{X: 5, Y: 5}, Max: Point{X: 10, Y: 10}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
+			b:    geom.BBox{Min: geom.Point{X: 5, Y: 5}, Max: geom.Point{X: 10, Y: 10}},
 			want: true,
 		},
 		{
 			name: "touching along an edge",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
-			b:    BBox{Min: Point{X: 5, Y: 0}, Max: Point{X: 10, Y: 5}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
+			b:    geom.BBox{Min: geom.Point{X: 5, Y: 0}, Max: geom.Point{X: 10, Y: 5}},
 			want: true,
 		},
 		{
 			name: "strictly disjoint on X",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
-			b:    BBox{Min: Point{X: 6, Y: 0}, Max: Point{X: 10, Y: 5}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
+			b:    geom.BBox{Min: geom.Point{X: 6, Y: 0}, Max: geom.Point{X: 10, Y: 5}},
 			want: false,
 		},
 		{
 			name: "strictly disjoint on Y",
-			a:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
-			b:    BBox{Min: Point{X: 0, Y: 6}, Max: Point{X: 5, Y: 10}},
+			a:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
+			b:    geom.BBox{Min: geom.Point{X: 0, Y: 6}, Max: geom.Point{X: 5, Y: 10}},
 			want: false,
 		},
 		{
 			name: "empty a",
-			a:    EmptyBBox(),
-			b:    BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
+			a:    geom.EmptyBBox(),
+			b:    geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
 			want: false,
 		},
 		{
 			name: "both empty",
-			a:    EmptyBBox(),
-			b:    EmptyBBox(),
+			a:    geom.EmptyBBox(),
+			b:    geom.EmptyBBox(),
 			want: false,
 		},
 	}

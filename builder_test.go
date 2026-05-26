@@ -3,12 +3,13 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // mpRect is a unit-test helper building a CCW axis-aligned rectangle MultiPolygon.
-func mpRect(x0, y0, x1, y1 float64) MultiPolygon {
-	return MultiPolygon{{Outer: Polygon{
+func mpRect(x0, y0, x1, y1 float64) geom.MultiPolygon {
+	return geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: x0, Y: y0}, {X: x1, Y: y0}, {X: x1, Y: y1}, {X: x0, Y: y1},
 	}}}
 }
@@ -21,25 +22,25 @@ func TestBuilderMatchesFreeFunctions(t *testing.T) {
 	overlapA := mpRect(0, 0, 4, 4)
 	overlapB := mpRect(2, 2, 6, 6)
 	disjointB := mpRect(10, 10, 12, 12)
-	multiA := MultiPolygon{mpRect(0, 0, 2, 2)[0], mpRect(0, 4, 2, 6)[0]}
+	multiA := geom.MultiPolygon{mpRect(0, 0, 2, 2)[0], mpRect(0, 4, 2, 6)[0]}
 	carveB := mpRect(1, -1, 3, 5)
 
 	cases := []struct {
 		name string
-		a, b MultiPolygon
+		a, b geom.MultiPolygon
 	}{
 		{"overlap", overlapA, overlapB},
 		{"disjoint", overlapA, disjointB},
 		{"identical", overlapA, overlapA},
-		{"emptyClip", overlapA, MultiPolygon{}},
-		{"emptySubject", MultiPolygon{}, overlapB},
-		{"bothEmpty", MultiPolygon{}, MultiPolygon{}},
+		{"emptyClip", overlapA, geom.MultiPolygon{}},
+		{"emptySubject", geom.MultiPolygon{}, overlapB},
+		{"bothEmpty", geom.MultiPolygon{}, geom.MultiPolygon{}},
 		{"multipieceDiff", multiA, carveB},
 	}
 
 	ops := []struct {
 		op   Operation
-		free func(a, b MultiPolygon) (MultiPolygon, error)
+		free func(a, b geom.MultiPolygon) (geom.MultiPolygon, error)
 	}{
 		{OpUnion, Union},
 		{OpIntersect, Intersect},
@@ -71,7 +72,7 @@ func TestBuilderAccumulatesAndResets(t *testing.T) {
 		AddClip(mpRect(1, -1, 3, 5))
 
 	// Aggregated two subject pieces against one clip == one multipiece subject.
-	wantSubj := MultiPolygon{mpRect(0, 0, 2, 2)[0], mpRect(0, 4, 2, 6)[0]}
+	wantSubj := geom.MultiPolygon{mpRect(0, 0, 2, 2)[0], mpRect(0, 4, 2, 6)[0]}
 	want, err := Difference(wantSubj, mpRect(1, -1, 3, 5))
 	require.NoError(t, err)
 

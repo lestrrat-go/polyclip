@@ -5,24 +5,25 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // dumbbellShape: two 10×10 pads joined by a thin neck (y in [4,6]).
-func dumbbellShape() Polygon {
-	return Polygon{
+func dumbbellShape() geom.Polygon {
+	return geom.Polygon{
 		{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 4}, {X: 20, Y: 4},
 		{X: 20, Y: 0}, {X: 30, Y: 0}, {X: 30, Y: 10}, {X: 20, Y: 10},
 		{X: 20, Y: 6}, {X: 10, Y: 6}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}
 }
 
-func rotatePoly(p Polygon, deg float64) Polygon {
+func rotatePoly(p geom.Polygon, deg float64) geom.Polygon {
 	a := deg * math.Pi / 180
 	ca, sa := math.Cos(a), math.Sin(a)
-	out := make(Polygon, len(p))
+	out := make(geom.Polygon, len(p))
 	for i, v := range p {
-		out[i] = Point{X: v.X*ca - v.Y*sa, Y: v.X*sa + v.Y*ca}
+		out[i] = geom.Point{X: v.X*ca - v.Y*sa, Y: v.X*sa + v.Y*ca}
 	}
 	return out
 }
@@ -33,7 +34,7 @@ func rotatePoly(p Polygon, deg float64) Polygon {
 // erodes to ~6×6 = 36, total ~72. Verified axis-aligned and rotated.
 func TestOffsetDumbbellSplits(t *testing.T) {
 	for _, deg := range []float64{0, 17, 90, 45, 30, 60, 7, 123} {
-		in := MultiPolygon{ExPolygon{Outer: rotatePoly(dumbbellShape(), deg)}}
+		in := geom.MultiPolygon{geom.ExPolygon{Outer: rotatePoly(dumbbellShape(), deg)}}
 		got, err := Offset(in, -2, OffsetOptions{Join: JoinMiter})
 		require.NoError(t, err, "deg=%g: unexpected error", deg)
 		require.Len(t, got, 2, "deg=%g: got %d pieces, want 2 islands (area %.1f)", deg, len(got), got.Area())
@@ -47,11 +48,11 @@ func TestOffsetDumbbellSplits(t *testing.T) {
 func TestOffsetUNotchCloses(t *testing.T) {
 	// U opening upward: outer wall 12 wide, 10 tall, with a 2-wide slot from
 	// the top down to y=4 between x=5 and x=7.
-	u := Polygon{
+	u := geom.Polygon{
 		{X: 0, Y: 0}, {X: 12, Y: 0}, {X: 12, Y: 10}, {X: 7, Y: 10},
 		{X: 7, Y: 4}, {X: 5, Y: 4}, {X: 5, Y: 10}, {X: 0, Y: 10},
 	}
-	in := MultiPolygon{ExPolygon{Outer: u}}
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: u}}
 	// Slot half-width is 1, so d=-1.5 (>1) closes it.
 	got, err := Offset(in, -1.5, OffsetOptions{Join: JoinMiter})
 	require.NoError(t, err)
@@ -73,7 +74,7 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 	const trials = 40
 	for trial := range trials {
 		poly := randomStarPolygon(rng, 6+rng.Intn(8), 30, 60)
-		in := MultiPolygon{ExPolygon{Outer: poly}}
+		in := geom.MultiPolygon{geom.ExPolygon{Outer: poly}}
 		d := 3.0 + rng.Float64()*5
 		got, err := Offset(in, -d, OffsetOptions{Join: JoinRound, ArcTol: 0.1})
 		if err == ErrOffsetEmpty {
@@ -84,7 +85,7 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 		bb := poly.BoundingBox()
 		mism, checked := 0, 0
 		for range 600 {
-			pt := Point{
+			pt := geom.Point{
 				X: bb.Min.X + rng.Float64()*(bb.Max.X-bb.Min.X),
 				Y: bb.Min.Y + rng.Float64()*(bb.Max.Y-bb.Min.Y),
 			}
@@ -115,18 +116,18 @@ func TestOffsetInwardErosionOracle(t *testing.T) {
 // randomStarPolygon builds a simple star-shaped (radially monotone) polygon
 // with n vertices at random radii in [rMin,rMax] around the origin — always
 // simple, frequently concave.
-func randomStarPolygon(rng *rand.Rand, n int, rMin, rMax float64) Polygon {
-	pts := make(Polygon, n)
+func randomStarPolygon(rng *rand.Rand, n int, rMin, rMax float64) geom.Polygon {
+	pts := make(geom.Polygon, n)
 	for i := range n {
 		ang := 2 * math.Pi * float64(i) / float64(n)
 		r := rMin + rng.Float64()*(rMax-rMin)
-		pts[i] = Point{X: r * math.Cos(ang), Y: r * math.Sin(ang)}
+		pts[i] = geom.Point{X: r * math.Cos(ang), Y: r * math.Sin(ang)}
 	}
 	return pts
 }
 
 // distToBoundary returns the minimum distance from p to any edge of ring.
-func distToBoundary(ring Polygon, p Point) float64 {
+func distToBoundary(ring geom.Polygon, p geom.Point) float64 {
 	minDist := math.Inf(1)
 	n := len(ring)
 	for i := range n {
@@ -139,7 +140,7 @@ func distToBoundary(ring Polygon, p Point) float64 {
 
 // mpContains reports whether p is inside the MultiPolygon (inside some piece's
 // outer and not inside any of that piece's holes).
-func mpContains(m MultiPolygon, p Point) bool {
+func mpContains(m geom.MultiPolygon, p geom.Point) bool {
 	for _, ex := range m {
 		if !ex.Outer.Contains(p) {
 			continue

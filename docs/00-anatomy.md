@@ -61,22 +61,30 @@ operation.
 
 ## Public surface versus engine
 
-The top-level `polyclip` package is the entire stable, public API: the four
-shape types, the boolean operations, offset, and a handful of utility methods
-(area, winding, containment, bounding box, validation, cleaning).
+The stable, public API is split across two packages by concern:
 
-Underneath it sit two subpackages:
+- **`geom`** — the shape *value types* (the four-layer ladder above, plus
+  `BBox` and the open-path `Polyline`) together with the queries intrinsic to
+  them: area, winding, containment, bounding box, validation, and cleaning.
+  This package carries no dependency on the boolean engine.
+- **`polyclip`** (top level) — the *operations* that consume those types: the
+  boolean operations, offset, and the `Builder` for advanced use. It imports
+  `geom`; the dependency only ever points this way.
 
-- **`clip/`** — the scanline boolean engine that actually computes unions,
-  intersections, and so on.
-- **`fixed/`** — the integer-grid coordinate arithmetic the engine relies on
-  for numeric robustness (see [05-numeric-robustness.md](05-numeric-robustness.md)).
+So a typical program imports both: `geom` to describe shapes, `polyclip` to
+operate on them.
 
-These subpackages are exported only so the project's own tests can address
-them. They are implementation detail. You never need to touch them to use the
-library, and their contents are not part of the stable API. The terms you
-would meet there — *sweep*, *active edge list*, *bound* — live in the
-[glossary](08-glossary.md) and in [`../DESIGN.md`](../DESIGN.md).
+Underneath sit two internal subpackages, not importable outside the module:
+
+- **`internal/clip`** — the scanline boolean engine that actually computes
+  unions, intersections, and so on.
+- **`internal/fixed`** — the integer-grid coordinate arithmetic the engine
+  relies on for numeric robustness (see
+  [05-numeric-robustness.md](05-numeric-robustness.md)).
+
+These are implementation detail. You never need to touch them to use the
+library. The terms you would meet there — *sweep*, *active edge list*, *bound*
+— live in the [glossary](08-glossary.md) and in [`../DESIGN.md`](../DESIGN.md).
 
 ## Units
 

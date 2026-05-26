@@ -1,5 +1,7 @@
 package polyclip
 
+import "github.com/lestrrat-go/polyclip/geom"
+
 // SimplifyPaths reduces the vertex count of every ring in m using Clipper2's
 // perpendicular-distance path-reduction algorithm (a Douglas–Peucker variant).
 // A vertex is removed when its perpendicular distance to the line through its
@@ -14,18 +16,18 @@ package polyclip
 // vertices are returned unchanged (no interior vertex can be dropped without
 // degenerating the ring); a ring reduced below three vertices is dropped, and
 // an [ExPolygon] whose outer ring is dropped is omitted entirely.
-func SimplifyPaths(m MultiPolygon, epsilon float64) MultiPolygon {
+func SimplifyPaths(m geom.MultiPolygon, epsilon float64) geom.MultiPolygon {
 	if epsilon < 0 {
 		epsilon = 0
 	}
 	epsSqr := epsilon * epsilon
-	out := make(MultiPolygon, 0, len(m))
+	out := make(geom.MultiPolygon, 0, len(m))
 	for _, ex := range m {
 		outer := simplifyClosedRing(ex.Outer, epsSqr)
 		if len(outer) < 3 {
 			continue
 		}
-		simplified := ExPolygon{Outer: outer}
+		simplified := geom.ExPolygon{Outer: outer}
 		for _, h := range ex.Holes {
 			hole := simplifyClosedRing(h, epsSqr)
 			if len(hole) < 3 {
@@ -41,7 +43,7 @@ func SimplifyPaths(m MultiPolygon, epsilon float64) MultiPolygon {
 // simplifyClosedRing applies Clipper2's SimplifyPath reduction to a single
 // closed ring. epsSqr is the squared distance tolerance. Rings with fewer than
 // four vertices are returned unchanged.
-func simplifyClosedRing(ring Polygon, epsSqr float64) Polygon {
+func simplifyClosedRing(ring geom.Polygon, epsSqr float64) geom.Polygon {
 	n := len(ring)
 	if n < 4 {
 		return ring
@@ -93,7 +95,7 @@ func simplifyClosedRing(ring Polygon, epsSqr float64) Polygon {
 		distSqr[curr] = perpDistSqr(ring[curr], ring[prior], ring[next])
 		distSqr[prior] = perpDistSqr(ring[prior], ring[prior2], ring[curr])
 	}
-	result := make(Polygon, 0, n)
+	result := make(geom.Polygon, 0, n)
 	for i := range n {
 		if !flags[i] {
 			result = append(result, ring[i])
@@ -104,7 +106,7 @@ func simplifyClosedRing(ring Polygon, epsSqr float64) Polygon {
 
 // perpDistSqr returns the squared perpendicular distance from pt to the line
 // through line1 and line2. It returns 0 when line1 == line2.
-func perpDistSqr(pt, line1, line2 Point) float64 {
+func perpDistSqr(pt, line1, line2 geom.Point) float64 {
 	d := line2.Sub(line1)
 	if d.X == 0 && d.Y == 0 {
 		return 0

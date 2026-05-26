@@ -8,19 +8,20 @@ import (
 	"fmt"
 
 	"github.com/lestrrat-go/polyclip"
+	"github.com/lestrrat-go/polyclip/geom"
 )
 
-func pt(x, y float64) polyclip.Point { return polyclip.Point{X: x, Y: y} }
+func pt(x, y float64) geom.Point { return geom.Point{X: x, Y: y} }
 
 func main() {
 	// Two overlapping CCW diamonds. Diamonds have no horizontal edges,
 	// so the engine handles even densely-overlapping cases robustly.
 	// Each diamond has half-diagonal 10 (area 200); they overlap by 50%.
-	a := polyclip.MultiPolygon{{
-		Outer: polyclip.Polygon{pt(0, -10), pt(10, 0), pt(0, 10), pt(-10, 0)},
+	a := geom.MultiPolygon{{
+		Outer: geom.Polygon{pt(0, -10), pt(10, 0), pt(0, 10), pt(-10, 0)},
 	}}
-	b := polyclip.MultiPolygon{{
-		Outer: polyclip.Polygon{pt(10, -10), pt(20, 0), pt(10, 10), pt(0, 0)},
+	b := geom.MultiPolygon{{
+		Outer: geom.Polygon{pt(10, -10), pt(20, 0), pt(10, 10), pt(0, 0)},
 	}}
 
 	out, err := polyclip.Union(a, b)
@@ -33,14 +34,14 @@ func main() {
 	fmt.Printf("  output pieces: %d\n\n", len(out))
 
 	// Disjoint inputs with a hole — Union preserves topology without engine work.
-	holed := polyclip.MultiPolygon{{
-		Outer: polyclip.Polygon{pt(0, 0), pt(20, 0), pt(20, 20), pt(0, 20)},
-		Holes: []polyclip.Polygon{
+	holed := geom.MultiPolygon{{
+		Outer: geom.Polygon{pt(0, 0), pt(20, 0), pt(20, 20), pt(0, 20)},
+		Holes: []geom.Polygon{
 			{pt(8, 8), pt(8, 12), pt(12, 12), pt(12, 8)}, // CW hole
 		},
 	}}
-	far := polyclip.MultiPolygon{{
-		Outer: polyclip.Polygon{pt(100, 100), pt(110, 100), pt(110, 110), pt(100, 110)},
+	far := geom.MultiPolygon{{
+		Outer: geom.Polygon{pt(100, 100), pt(110, 100), pt(110, 110), pt(100, 110)},
 	}}
 	out, err = polyclip.Union(holed, far)
 	if err != nil {

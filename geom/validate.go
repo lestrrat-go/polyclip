@@ -1,4 +1,4 @@
-package polyclip
+package geom
 
 import (
 	"fmt"
@@ -111,7 +111,7 @@ func (m MultiPolygon) Validate() []ValidationIssue {
 				Msg: fmt.Sprintf("outer signed area %v (want > 0 for CCW)", area),
 			})
 		}
-		if idx1, idx2, ok := ringSelfIntersection(ex.Outer); ok {
+		if idx1, idx2, ok := RingSelfIntersection(ex.Outer); ok {
 			issues = append(issues, ValidationIssue{
 				Kind: IssueSelfIntersecting, ExIdx: i, Ring: -1,
 				Msg: fmt.Sprintf("edges %d and %d cross", idx1, idx2),
@@ -133,7 +133,7 @@ func (m MultiPolygon) Validate() []ValidationIssue {
 					Msg: fmt.Sprintf("hole signed area %v (want < 0 for CW)", area),
 				})
 			}
-			if idx1, idx2, ok := ringSelfIntersection(h); ok {
+			if idx1, idx2, ok := RingSelfIntersection(h); ok {
 				issues = append(issues, ValidationIssue{
 					Kind: IssueSelfIntersecting, ExIdx: i, Ring: hi,
 					Msg: fmt.Sprintf("edges %d and %d cross", idx1, idx2),
@@ -158,12 +158,12 @@ func (m MultiPolygon) Validate() []ValidationIssue {
 	return issues
 }
 
-// ringSelfIntersection reports the first pair of non-adjacent edges of
-// p that strictly cross. Adjacent edges (sharing an endpoint) are
-// skipped; coincident vertices on touching but not crossing edges are
-// also tolerated. O(n²) in the number of edges; intended for
-// validation, not hot paths.
-func ringSelfIntersection(p Polygon) (int, int, bool) {
+// RingSelfIntersection reports the first pair of non-adjacent edges of
+// p that strictly cross, returning their indices and true. Adjacent edges
+// (sharing an endpoint) are skipped; coincident vertices on touching but not
+// crossing edges are also tolerated. O(n²) in the number of edges; intended
+// for validation, not hot paths.
+func RingSelfIntersection(p Polygon) (int, int, bool) {
 	n := len(p)
 	if n < 4 {
 		return 0, 0, false
@@ -270,7 +270,7 @@ func pointStrictlyInside(q Point, p Polygon) bool {
 	if !p.Contains(q) {
 		return false
 	}
-	if pointOnRingBoundary(p, q) {
+	if PointOnRingBoundary(p, q) {
 		return false
 	}
 	// p.Contains can return true with q exactly on an edge; we already

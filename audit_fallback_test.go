@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 )
 
@@ -19,18 +20,18 @@ func TestAuditFallbackPath(t *testing.T) {
 
 	cases := []struct {
 		name string
-		a, b MultiPolygon
+		a, b geom.MultiPolygon
 	}{
-		{"disjoint", MultiPolygon{sq(0, 0, 5)}, MultiPolygon{sq(20, 0, 5)}},
-		{"touchingBoundary", MultiPolygon{sq(0, 0, 5)}, MultiPolygon{sq(10, 0, 5)}},
-		{"overlapping", MultiPolygon{sq(0, 0, 5)}, MultiPolygon{sq(3, 0, 5)}},
-		{"nested", MultiPolygon{sq(0, 0, 10)}, MultiPolygon{sq(0, 0, 3)}},
-		{"overlappingDiamonds", MultiPolygon{diamond(0, 0, 10)}, MultiPolygon{diamond(5, 0, 10)}},
-		{"touchingAtVertex", MultiPolygon{sq(0, 0, 5)}, MultiPolygon{sq(10, 10, 5)}},
+		{"disjoint", geom.MultiPolygon{sq(0, 0, 5)}, geom.MultiPolygon{sq(20, 0, 5)}},
+		{"touchingBoundary", geom.MultiPolygon{sq(0, 0, 5)}, geom.MultiPolygon{sq(10, 0, 5)}},
+		{"overlapping", geom.MultiPolygon{sq(0, 0, 5)}, geom.MultiPolygon{sq(3, 0, 5)}},
+		{"nested", geom.MultiPolygon{sq(0, 0, 10)}, geom.MultiPolygon{sq(0, 0, 3)}},
+		{"overlappingDiamonds", geom.MultiPolygon{diamond(0, 0, 10)}, geom.MultiPolygon{diamond(5, 0, 10)}},
+		{"touchingAtVertex", geom.MultiPolygon{sq(0, 0, 5)}, geom.MultiPolygon{sq(10, 10, 5)}},
 	}
 	ops := []struct {
 		name string
-		fn   func(a, b MultiPolygon) (MultiPolygon, error)
+		fn   func(a, b geom.MultiPolygon) (geom.MultiPolygon, error)
 	}{
 		{opUnion, Union},
 		{opIntersect, Intersect},

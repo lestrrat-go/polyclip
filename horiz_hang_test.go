@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -10,12 +11,12 @@ import (
 // infinite loop found by the §7.5 reachability harness: Difference of two
 // axis-aligned skyline polygons spins forever in the horizontal-join merge.
 func TestHorizJoinHangRepro(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 7, Y: 0}, {X: 7, Y: 6}, {X: 6, Y: 6}, {X: 5, Y: 6},
 		{X: 5, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 3, Y: 4}, {X: 2, Y: 4},
 		{X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 3}, {X: 0, Y: 3},
 	}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 1, Y: 1}, {X: 4, Y: 1}, {X: 4, Y: 2}, {X: 3, Y: 2},
 		{X: 3, Y: 4}, {X: 2, Y: 4}, {X: 1, Y: 4},
 	}}}

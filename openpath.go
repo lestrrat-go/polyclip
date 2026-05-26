@@ -1,6 +1,10 @@
 package polyclip
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/lestrrat-go/polyclip/geom"
+)
 
 // openCrossEps is the tolerance, in normalized segment parameter, used when
 // detecting where an open path crosses a closed boundary and when deduplicating
@@ -22,12 +26,12 @@ const openCrossEps = 1e-9
 // Membership is the filled-region test (MultiPolygon.Contains); open clipping
 // uses the operands' filled regions regardless of the builder's fill rule.
 // Open paths never clip one another, matching Clipper2.
-func clipOpenPaths(lines []Polyline, op Operation, s, c MultiPolygon) []Polyline {
+func clipOpenPaths(lines []geom.Polyline, op Operation, s, c geom.MultiPolygon) []geom.Polyline {
 	if len(lines) == 0 {
 		return nil
 	}
 	keep, rings := openKeep(op, s, c)
-	var result []Polyline
+	var result []geom.Polyline
 	for _, line := range lines {
 		result = clipOpenPath(line, rings, keep, result)
 	}
@@ -38,23 +42,23 @@ func clipOpenPaths(lines []Polyline, op Operation, s, c MultiPolygon) []Polyline
 // rings the open segments must be split at (every ring whose membership the
 // predicate depends on). For OpIntersect/OpDifference/OpXor only the clip region
 // matters; OpUnion additionally depends on the subject region.
-func openKeep(op Operation, s, c MultiPolygon) (func(Point) bool, [][]Point) {
+func openKeep(op Operation, s, c geom.MultiPolygon) (func(geom.Point) bool, [][]geom.Point) {
 	switch op {
 	case OpIntersect:
-		return func(p Point) bool { return c.Contains(p) }, collectRings(c)
+		return func(p geom.Point) bool { return c.Contains(p) }, collectRings(c)
 	case OpUnion:
 		rings := collectRings(s)
 		rings = append(rings, collectRings(c)...)
-		return func(p Point) bool { return !s.Contains(p) && !c.Contains(p) }, rings
+		return func(p geom.Point) bool { return !s.Contains(p) && !c.Contains(p) }, rings
 	default: // OpDifference, OpXor
-		return func(p Point) bool { return !c.Contains(p) }, collectRings(c)
+		return func(p geom.Point) bool { return !c.Contains(p) }, collectRings(c)
 	}
 }
 
 // collectRings returns every boundary ring (each ExPolygon's outer and holes)
 // of m as a flat slice of point loops.
-func collectRings(m MultiPolygon) [][]Point {
-	var rings [][]Point
+func collectRings(m geom.MultiPolygon) [][]geom.Point {
+	var rings [][]geom.Point
 	for i := range m {
 		if len(m[i].Outer) >= 3 {
 			rings = append(rings, m[i].Outer)
@@ -73,14 +77,14 @@ func collectRings(m MultiPolygon) [][]Point {
 // Surviving runs that share an endpoint (across path vertices that are not
 // boundary crossings) stay in the same output polyline; a dropped sub-segment
 // breaks the run. Each kept run with at least two points is appended to acc.
-func clipOpenPath(line Polyline, rings [][]Point, keep func(Point) bool, acc []Polyline) []Polyline {
+func clipOpenPath(line geom.Polyline, rings [][]geom.Point, keep func(geom.Point) bool, acc []geom.Polyline) []geom.Polyline {
 	if len(line) < 2 {
 		return acc
 	}
-	var cur []Point
+	var cur []geom.Point
 	flush := func() {
 		if len(cur) >= 2 {
-			acc = append(acc, Polyline(cur))
+			acc = append(acc, geom.Polyline(cur))
 		}
 		cur = nil
 	}
@@ -106,7 +110,7 @@ func clipOpenPath(line Polyline, rings [][]Point, keep func(Point) bool, acc []P
 				continue
 			}
 			flush()
-			cur = []Point{s0, s1}
+			cur = []geom.Point{s0, s1}
 		}
 	}
 	flush()
@@ -117,7 +121,7 @@ func clipOpenPath(line Polyline, rings [][]Point, keep func(Point) bool, acc []P
 // along a→b at which the segment crosses any ring edge, always including the
 // endpoints 0 and 1. The midpoint between consecutive parameters lies strictly
 // inside a single region, so its membership is unambiguous.
-func crossingParams(a, b Point, rings [][]Point) []float64 {
+func crossingParams(a, b geom.Point, rings [][]geom.Point) []float64 {
 	ts := []float64{0, 1}
 	for _, ring := range rings {
 		n := len(ring)
@@ -143,7 +147,7 @@ func crossingParams(a, b Point, rings [][]Point) []float64 {
 // meet within both extents. Endpoint and vertex touches are included (a small
 // tolerance on each parameter) so a path passing exactly through a ring vertex
 // still registers a crossing.
-func segParam(a, b, p, q Point) (float64, bool) {
+func segParam(a, b, p, q geom.Point) (float64, bool) {
 	r := b.Sub(a)
 	s := q.Sub(p)
 	denom := r.Cross(s)
@@ -165,6 +169,6 @@ func segParam(a, b, p, q Point) (float64, bool) {
 }
 
 // lerpPoint returns the point at parameter t along a→b.
-func lerpPoint(a, b Point, t float64) Point {
-	return Point{X: a.X + t*(b.X-a.X), Y: a.Y + t*(b.Y-a.Y)}
+func lerpPoint(a, b geom.Point, t float64) geom.Point {
+	return geom.Point{X: a.X + t*(b.X-a.X), Y: a.Y + t*(b.Y-a.Y)}
 }

@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,8 +23,8 @@ import (
 
 const fuzzAreaEps = 1e-6
 
-func makeQuad(x1, y1, x2, y2, x3, y3, x4, y4 int16) MultiPolygon {
-	return MultiPolygon{ExPolygon{Outer: Polygon{
+func makeQuad(x1, y1, x2, y2, x3, y3, x4, y4 int16) geom.MultiPolygon {
+	return geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: float64(x1), Y: float64(y1)},
 		{X: float64(x2), Y: float64(y2)},
 		{X: float64(x3), Y: float64(y3)},
@@ -31,7 +32,7 @@ func makeQuad(x1, y1, x2, y2, x3, y3, x4, y4 int16) MultiPolygon {
 	}}}
 }
 
-func nonDegenerate(m MultiPolygon) bool {
+func nonDegenerate(m geom.MultiPolygon) bool {
 	if len(m) == 0 {
 		return false
 	}
@@ -46,14 +47,14 @@ func nonDegenerate(m MultiPolygon) bool {
 		// contract: SignedArea/Area no longer equal the true covered area,
 		// so the op area bounds below are meaningless. Reuse the engine's
 		// own definition of self-intersection.
-		if _, _, ok := ringSelfIntersection(ex.Outer); ok {
+		if _, _, ok := geom.RingSelfIntersection(ex.Outer); ok {
 			return false
 		}
 	}
 	return true
 }
 
-func skipFuzzInputs(t *testing.T, a, b MultiPolygon) {
+func skipFuzzInputs(t *testing.T, a, b geom.MultiPolygon) {
 	t.Helper()
 	if !nonDegenerate(a) || !nonDegenerate(b) {
 		t.Skip("degenerate input")

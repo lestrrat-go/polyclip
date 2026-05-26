@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ func TestSimplifyEmpty(t *testing.T) {
 // TestSimplifySimpleSquareUnchanged passes a simple, already-clean square
 // through Simplify and gets back one piece of the same area.
 func TestSimplifySimpleSquareUnchanged(t *testing.T) {
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 4, Y: 4}, {X: 0, Y: 4},
 	}}}
 	got, err := Simplify(in)
@@ -31,7 +32,7 @@ func TestSimplifySimpleSquareUnchanged(t *testing.T) {
 // are filled, so the result is two triangles meeting at the crossing point.
 func TestSimplifyBowtieSplits(t *testing.T) {
 	// Vertices traversed 0→1→2→3: the two diagonals cross at (2,2).
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 0, Y: 4}, {X: 4, Y: 4},
 	}}}
 	got, err := Simplify(in)
@@ -48,7 +49,7 @@ func TestSimplifyBowtieSplits(t *testing.T) {
 // itself cannot do (the idempotency short-circuit leaves it unchanged).
 func TestSimplifyResolvesSelfIntersecting(t *testing.T) {
 	// A self-intersecting arrowhead whose strokes cross each other.
-	star := MultiPolygon{ExPolygon{Outer: Polygon{
+	star := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 10, Y: 6}, {X: 0, Y: 4}, {X: 10, Y: 0}, {X: 0, Y: 6},
 	}}}
 	require.NotEmpty(t, star.Validate(), "test setup: input should be self-intersecting")

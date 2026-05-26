@@ -5,21 +5,22 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
 // polylinesEqual (rectclip_test.go) compares open-path result sets for exact
 // point equality, order-sensitive (open output follows path order).
 
-func openResult(t *testing.T, b *Builder, op Operation) []Polyline {
+func openResult(t *testing.T, b *Builder, op Operation) []geom.Polyline {
 	t.Helper()
 	res, err := b.Execute(op)
 	require.NoError(t, err, "Execute(%v): %v", op, err)
 	return res.Open
 }
 
-func pl(pts ...Point) Polyline { return Polyline(pts) }
-func pt(x, y float64) Point    { return Point{X: x, Y: y} }
+func pl(pts ...geom.Point) geom.Polyline { return geom.Polyline(pts) }
+func pt(x, y float64) geom.Point         { return geom.Point{X: x, Y: y} }
 
 // TestOpenPathCrossingClip clips a horizontal line straddling a clip square and
 // checks each op keeps the documented portions (Clipper2 IsContributingOpen).
@@ -27,12 +28,12 @@ func TestOpenPathCrossingClip(t *testing.T) {
 	clip := mpRect(2, 2, 8, 8)
 	line := pl(pt(-1, 5), pt(11, 5))
 
-	inside := []Polyline{pl(pt(2, 5), pt(8, 5))}
-	outside := []Polyline{pl(pt(-1, 5), pt(2, 5)), pl(pt(8, 5), pt(11, 5))}
+	inside := []geom.Polyline{pl(pt(2, 5), pt(8, 5))}
+	outside := []geom.Polyline{pl(pt(-1, 5), pt(2, 5)), pl(pt(8, 5), pt(11, 5))}
 
 	cases := []struct {
 		op   Operation
-		want []Polyline
+		want []geom.Polyline
 	}{
 		{OpIntersect, inside},
 		{OpDifference, outside},
@@ -56,7 +57,7 @@ func TestOpenPathUnionWithSubject(t *testing.T) {
 	b := NewBuilder().AddOpenSubject(line).AddSubject(subj).AddClip(clip)
 	got := openResult(t, b, OpUnion)
 	// Inside subject∪clip is x in (0,8); keep outside: [-1,0] and [8,11].
-	want := []Polyline{pl(pt(-1, 5), pt(0, 5)), pl(pt(8, 5), pt(11, 5))}
+	want := []geom.Polyline{pl(pt(-1, 5), pt(0, 5)), pl(pt(8, 5), pt(11, 5))}
 	require.True(t, polylinesEqual(got, want), "Union open got %v, want %v", got, want)
 }
 
@@ -68,7 +69,7 @@ func TestOpenPathStitchAcrossVertex(t *testing.T) {
 
 	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
-	want := []Polyline{pl(pt(2, 5), pt(5, 5), pt(5, 2))}
+	want := []geom.Polyline{pl(pt(2, 5), pt(5, 5), pt(5, 2))}
 	require.True(t, polylinesEqual(got, want), "stitch got %v, want %v", got, want)
 }
 
@@ -80,7 +81,7 @@ func TestOpenPathThroughVertex(t *testing.T) {
 
 	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
-	want := []Polyline{pl(pt(2, 2), pt(8, 8))}
+	want := []geom.Polyline{pl(pt(2, 2), pt(8, 8))}
 	require.True(t, polylinesEqual(got, want), "through-vertex got %v, want %v", got, want)
 }
 
@@ -92,7 +93,7 @@ func TestOpenPathMultipleClips(t *testing.T) {
 		AddClip(mpRect(2, 2, 6, 8)).
 		AddClip(mpRect(12, 2, 16, 8))
 	got := openResult(t, b, OpIntersect)
-	want := []Polyline{pl(pt(2, 5), pt(6, 5)), pl(pt(12, 5), pt(16, 5))}
+	want := []geom.Polyline{pl(pt(2, 5), pt(6, 5)), pl(pt(12, 5), pt(16, 5))}
 	require.True(t, polylinesEqual(got, want), "multi-clip got %v, want %v", got, want)
 }
 
@@ -104,7 +105,7 @@ func TestOpenPathEmptyClip(t *testing.T) {
 	gotI := openResult(t, NewBuilder().AddOpenSubject(line), OpIntersect)
 	require.Empty(t, gotI, "Intersect empty clip: got %v, want none", gotI)
 	gotD := openResult(t, NewBuilder().AddOpenSubject(line), OpDifference)
-	want := []Polyline{line}
+	want := []geom.Polyline{line}
 	require.True(t, polylinesEqual(gotD, want), "Difference empty clip: got %v, want %v", gotD, want)
 }
 
@@ -114,7 +115,7 @@ func TestOpenPathWholeRuns(t *testing.T) {
 	inside := pl(pt(2, 2), pt(8, 8))
 
 	gotI := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpIntersect)
-	require.True(t, polylinesEqual(gotI, []Polyline{inside}), "inside Intersect: got %v, want whole line", gotI)
+	require.True(t, polylinesEqual(gotI, []geom.Polyline{inside}), "inside Intersect: got %v, want whole line", gotI)
 	gotD := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpDifference)
 	require.Empty(t, gotD, "inside Difference: got %v, want none", gotD)
 }
@@ -148,7 +149,7 @@ func TestOpenPathReset(t *testing.T) {
 }
 
 // distToSeg returns the Euclidean distance from p to segment ab.
-func distToSeg(a, b, p Point) float64 {
+func distToSeg(a, b, p geom.Point) float64 {
 	ab := b.Sub(a)
 	l2 := ab.Dot(ab)
 	if l2 == 0 {
@@ -160,12 +161,12 @@ func distToSeg(a, b, p Point) float64 {
 	} else if t > 1 {
 		t = 1
 	}
-	proj := Point{X: a.X + t*ab.X, Y: a.Y + t*ab.Y}
+	proj := geom.Point{X: a.X + t*ab.X, Y: a.Y + t*ab.Y}
 	return math.Sqrt(p.Sub(proj).Dot(p.Sub(proj)))
 }
 
 // onPolylines reports whether p lies (within margin) on any segment of lines.
-func onPolylines(lines []Polyline, p Point, margin float64) bool {
+func onPolylines(lines []geom.Polyline, p geom.Point, margin float64) bool {
 	for _, ln := range lines {
 		for i := 0; i+1 < len(ln); i++ {
 			if distToSeg(ln[i], ln[i+1], p) <= margin {
@@ -178,7 +179,7 @@ func onPolylines(lines []Polyline, p Point, margin float64) bool {
 
 // nearAnyRing reports whether p is within margin of any boundary ring edge,
 // where the keep predicate is ambiguous and split rounding may differ.
-func nearAnyRing(rings [][]Point, p Point, margin float64) bool {
+func nearAnyRing(rings [][]geom.Point, p geom.Point, margin float64) bool {
 	for _, ring := range rings {
 		n := len(ring)
 		for i := range ring {
@@ -198,7 +199,7 @@ func TestOpenPathSampledOracle(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
 	const margin = 0.02
 	ri := func(hi int) float64 { return float64(rng.Intn(hi)) }
-	randRect := func() MultiPolygon {
+	randRect := func() geom.MultiPolygon {
 		x0, y0 := ri(10), ri(10)
 		return mpRect(x0, y0, x0+1+ri(6), y0+1+ri(6))
 	}
@@ -209,13 +210,13 @@ func TestOpenPathSampledOracle(t *testing.T) {
 		}
 		subj := randRect()
 		npts := 2 + rng.Intn(3)
-		line := make(Polyline, npts)
+		line := make(geom.Polyline, npts)
 		for i := range line {
 			line[i] = pt(ri(14)-2, ri(14)-2)
 		}
 		for _, op := range []Operation{OpIntersect, OpDifference, OpXor, OpUnion} {
 			keep, rings := openKeep(op, subj, clip)
-			out := clipOpenPaths([]Polyline{line}, op, subj, clip)
+			out := clipOpenPaths([]geom.Polyline{line}, op, subj, clip)
 			for i := 0; i+1 < len(line); i++ {
 				a, b := line[i], line[i+1]
 				if a == b {

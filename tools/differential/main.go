@@ -35,6 +35,7 @@ import (
 	"sync"
 
 	"github.com/lestrrat-go/polyclip"
+	"github.com/lestrrat-go/polyclip/geom"
 )
 
 type genMode int
@@ -123,7 +124,7 @@ func main() {
 
 type fail struct {
 	op        string
-	a, b      polyclip.MultiPolygon
+	a, b      geom.MultiPolygon
 	got, want float64
 }
 
@@ -131,11 +132,11 @@ type fail struct {
 // ok=false when a valid pair couldn't be built (caller skips the iteration).
 // The genRandom/genDegenerate rng call sequences are kept identical to the
 // original inline code so those scenarios' pair streams don't shift.
-func genPair(rng *rand.Rand, sc scenario) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
+func genPair(rng *rand.Rand, sc scenario) (geom.MultiPolygon, geom.MultiPolygon, bool) {
 	switch sc.mode {
 	case genRandom:
-		a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: randQuad(rng, sc.ext)}}
-		b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: randQuad(rng, sc.ext)}}
+		a := geom.MultiPolygon{geom.ExPolygon{Outer: randQuad(rng, sc.ext)}}
+		b := geom.MultiPolygon{geom.ExPolygon{Outer: randQuad(rng, sc.ext)}}
 		return a, b, true
 	case genDegenerate:
 		ra := randQuad(rng, sc.ext)
@@ -143,8 +144,8 @@ func genPair(rng *rand.Rand, sc scenario) (polyclip.MultiPolygon, polyclip.Multi
 		if !ok {
 			return nil, nil, false
 		}
-		a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: ra}}
-		b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rb}}
+		a := geom.MultiPolygon{geom.ExPolygon{Outer: ra}}
+		b := geom.MultiPolygon{geom.ExPolygon{Outer: rb}}
 		return a, b, true
 	case genHole:
 		return genHolePair(rng, sc.ext)
@@ -161,9 +162,9 @@ func genPair(rng *rand.Rand, sc scenario) (polyclip.MultiPolygon, polyclip.Multi
 // pieces and B are common — the confluences that mis-resolve on multipiece input.
 // Both inputs are Validate()-checked and the two A pieces are kept strictly
 // disjoint (a vertical gap), so only well-formed MultiPolygons reach the engine.
-func genMultipiecePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
-	rect := func(x0, x1, y0, y1 int) polyclip.Polygon {
-		return polyclip.Polygon{
+func genMultipiecePair(rng *rand.Rand, ext int) (geom.MultiPolygon, geom.MultiPolygon, bool) {
+	rect := func(x0, x1, y0, y1 int) geom.Polygon {
+		return geom.Polygon{
 			{X: float64(x0), Y: float64(y0)}, {X: float64(x1), Y: float64(y0)},
 			{X: float64(x1), Y: float64(y1)}, {X: float64(x0), Y: float64(y1)},
 		}
@@ -187,9 +188,9 @@ func genMultipiecePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip
 	ux0, ux1 := rx()
 	piece1 := rect(lx0, lx1, 0, my)
 	piece2 := rect(ux0, ux1, my+gap, uy)
-	a := polyclip.MultiPolygon{
-		polyclip.ExPolygon{Outer: piece1},
-		polyclip.ExPolygon{Outer: piece2},
+	a := geom.MultiPolygon{
+		geom.ExPolygon{Outer: piece1},
+		geom.ExPolygon{Outer: piece2},
 	}
 	// B carves the lower piece: x within [0,ext], y from (often) below 0 up into
 	// the lower piece, frequently topping out exactly at my (shared top edge).
@@ -199,7 +200,7 @@ func genMultipiecePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip
 	if rng.Intn(3) == 0 {
 		by1 = 1 + rng.Intn(my) // sometimes a partial carve below the top edge
 	}
-	b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rect(bx0, bx1, by0, by1)}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: rect(bx0, bx1, by0, by1)}}
 
 	if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
 		return nil, nil, false
@@ -211,16 +212,16 @@ func genMultipiecePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip
 // B = a quad that (half the time) is forced to share a degeneracy with the
 // hole ring so it touches or crosses the hole boundary. Both inputs are
 // Validate()-checked, so only well-formed MultiPolygons reach the engine.
-func genHolePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.MultiPolygon, bool) {
+func genHolePair(rng *rand.Rand, ext int) (geom.MultiPolygon, geom.MultiPolygon, bool) {
 	e := float64(ext)
-	outer := polyclip.Polygon{{X: 0, Y: 0}, {X: e, Y: 0}, {X: e, Y: e}, {X: 0, Y: e}}
+	outer := geom.Polygon{{X: 0, Y: 0}, {X: e, Y: 0}, {X: e, Y: e}, {X: 0, Y: e}}
 	hole := innerQuad(rng, ext)
 	if hole == nil {
 		return nil, nil, false
 	}
-	a := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: outer, Holes: []polyclip.Polygon{hole}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: outer, Holes: []geom.Polygon{hole}}}
 
-	var rb polyclip.Polygon
+	var rb geom.Polygon
 	if rng.Intn(2) == 0 {
 		var ok bool
 		if rb, ok = forceDegenerate(rng, ext, hole, rng.Intn(3)); !ok {
@@ -229,7 +230,7 @@ func genHolePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.Multi
 	} else {
 		rb = randQuad(rng, ext)
 	}
-	b := polyclip.MultiPolygon{polyclip.ExPolygon{Outer: rb}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: rb}}
 
 	if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
 		return nil, nil, false
@@ -241,13 +242,13 @@ func genHolePair(rng *rand.Rand, ext int) (polyclip.MultiPolygon, polyclip.Multi
 // inside the [0,ext] square (coords in [3,ext-3]), suitable as a hole. Returns
 // nil when ext is too small or no valid quad was found in a bounded number of
 // attempts.
-func innerQuad(rng *rand.Rand, ext int) polyclip.Polygon {
+func innerQuad(rng *rand.Rand, ext int) geom.Polygon {
 	lo, hi := 3, ext-3
 	if hi-lo < 2 {
 		return nil
 	}
 	for range 60 {
-		pts := make([]polyclip.Point, 4)
+		pts := make([]geom.Point, 4)
 		seen := map[[2]int]struct{}{}
 		ok := true
 		for i := range 4 {
@@ -257,12 +258,12 @@ func innerQuad(rng *rand.Rand, ext int) polyclip.Polygon {
 				break
 			}
 			seen[[2]int{x, y}] = struct{}{}
-			pts[i] = polyclip.Point{X: float64(x), Y: float64(y)}
+			pts[i] = geom.Point{X: float64(x), Y: float64(y)}
 		}
 		if !ok {
 			continue
 		}
-		ring := polyclip.Polygon{pts[0], pts[1], pts[2], pts[3]}
+		ring := geom.Polygon{pts[0], pts[1], pts[2], pts[3]}
 		if !validQuad(ring) {
 			continue
 		}
@@ -278,7 +279,7 @@ func run(sc scenario) {
 	// Phase 1: generate every interacting pair SEQUENTIALLY, so the rng stream —
 	// and therefore the exact set of pairs — is identical to the serial version
 	// and stable across runs (toggling a library fix never shifts the pair set).
-	type pair struct{ a, b polyclip.MultiPolygon }
+	type pair struct{ a, b geom.MultiPolygon }
 	var pairs []pair
 	for seed := range sc.seeds {
 		rng := rand.New(rand.NewSource(int64(seed)*7919 + 1))
@@ -365,9 +366,9 @@ func run(sc scenario) {
 }
 
 // randQuad returns a simple CCW quad of 4 distinct lattice points in [0,ext].
-func randQuad(rng *rand.Rand, ext int) polyclip.Polygon {
+func randQuad(rng *rand.Rand, ext int) geom.Polygon {
 	for {
-		pts := make([]polyclip.Point, 4)
+		pts := make([]geom.Point, 4)
 		seen := map[[2]int]struct{}{}
 		ok := true
 		for i := range 4 {
@@ -377,12 +378,12 @@ func randQuad(rng *rand.Rand, ext int) polyclip.Polygon {
 				break
 			}
 			seen[[2]int{x, y}] = struct{}{}
-			pts[i] = polyclip.Point{X: float64(x), Y: float64(y)}
+			pts[i] = geom.Point{X: float64(x), Y: float64(y)}
 		}
 		if !ok {
 			continue
 		}
-		ring := polyclip.Polygon{pts[0], pts[1], pts[2], pts[3]}
+		ring := geom.Polygon{pts[0], pts[1], pts[2], pts[3]}
 		if !validQuad(ring) {
 			continue
 		}
@@ -396,7 +397,7 @@ func randQuad(rng *rand.Rand, ext int) polyclip.Polygon {
 // validQuad rejects zero-area and self-intersecting (bowtie) quads, so the
 // even-odd MC containment matches the engine's nonzero semantics. A quad is
 // simple iff neither pair of non-adjacent edges properly crosses.
-func validQuad(q polyclip.Polygon) bool {
+func validQuad(q geom.Polygon) bool {
 	if math.Abs(q.SignedArea()) < 1e-3 {
 		return false
 	}
@@ -410,7 +411,7 @@ func validQuad(q polyclip.Polygon) bool {
 //	kind 2: an edge collinear+overlapping one of ref's edges
 //
 // Returns ok=false when it couldn't build a valid simple quad (caller skips).
-func forceDegenerate(rng *rand.Rand, ext int, ref polyclip.Polygon, kind int) (polyclip.Polygon, bool) {
+func forceDegenerate(rng *rand.Rand, ext int, ref geom.Polygon, kind int) (geom.Polygon, bool) {
 	base := randQuad(rng, ext)
 	idx := rng.Intn(4)
 	switch kind {
@@ -420,7 +421,7 @@ func forceDegenerate(rng *rand.Rand, ext int, ref polyclip.Polygon, kind int) (p
 		e := rng.Intn(len(ref))
 		p0, p1 := ref[e], ref[(e+1)%len(ref)]
 		t := []float64{0.25, 0.5, 0.75}[rng.Intn(3)]
-		base[idx] = polyclip.Point{X: p0.X + t*(p1.X-p0.X), Y: p0.Y + t*(p1.Y-p0.Y)}
+		base[idx] = geom.Point{X: p0.X + t*(p1.X-p0.X), Y: p0.Y + t*(p1.Y-p0.Y)}
 	case 2:
 		e := rng.Intn(len(ref))
 		base[idx] = ref[e]
@@ -444,7 +445,7 @@ func forceDegenerate(rng *rand.Rand, ext int, ref polyclip.Polygon, kind int) (p
 
 // segCross reports whether segments p1p2 and p3p4 properly cross (strict, no
 // shared-endpoint or collinear contact).
-func segCross(p1, p2, p3, p4 polyclip.Point) bool {
+func segCross(p1, p2, p3, p4 geom.Point) bool {
 	d1 := orient(p3, p4, p1)
 	d2 := orient(p3, p4, p2)
 	d3 := orient(p1, p2, p3)
@@ -454,18 +455,18 @@ func segCross(p1, p2, p3, p4 polyclip.Point) bool {
 
 // orient returns the sign of the cross product (b-a)×(c-a): >0 left turn, <0
 // right turn, 0 collinear.
-func orient(a, b, c polyclip.Point) float64 {
+func orient(a, b, c geom.Point) float64 {
 	return b.Sub(a).Cross(c.Sub(a))
 }
 
 // mcOracle returns Monte-Carlo area estimates of all four ops from a single
 // sample loop over the combined bounding box.
-func mcOracle(a, b polyclip.MultiPolygon, rng *rand.Rand, samples int) (u, i, d, x float64) {
+func mcOracle(a, b geom.MultiPolygon, rng *rand.Rand, samples int) (u, i, d, x float64) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	w, h := bbox.Max.X-bbox.Min.X, bbox.Max.Y-bbox.Min.Y
 	var cu, ci, cd, cx int
 	for range samples {
-		p := polyclip.Point{X: bbox.Min.X + rng.Float64()*w, Y: bbox.Min.Y + rng.Float64()*h}
+		p := geom.Point{X: bbox.Min.X + rng.Float64()*w, Y: bbox.Min.Y + rng.Float64()*h}
 		inA, inB := a.Contains(p), b.Contains(p)
 		if inA || inB {
 			cu++

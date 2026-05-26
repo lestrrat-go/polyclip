@@ -65,10 +65,13 @@ Requires Go 1.26 or later.
 ### Boolean ops
 
 ```go
-import "github.com/lestrrat-go/polyclip"
+import (
+	"github.com/lestrrat-go/polyclip"
+	"github.com/lestrrat-go/polyclip/geom"
+)
 
-a := polyclip.MultiPolygon{{Outer: polyclip.Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
-b := polyclip.MultiPolygon{{Outer: polyclip.Polygon{{5, 5}, {15, 5}, {15, 15}, {5, 15}}}}
+a := geom.MultiPolygon{{Outer: geom.Polygon{{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}
+b := geom.MultiPolygon{{Outer: geom.Polygon{{5, 5}, {15, 5}, {15, 15}, {5, 15}}}}
 
 u, err := polyclip.Union(a, b)        // a ∪ b
 i, err := polyclip.Intersect(a, b)    // a ∩ b

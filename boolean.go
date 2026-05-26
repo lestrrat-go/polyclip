@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/lestrrat-go/polyclip/internal/fixed"
 )
@@ -38,7 +39,7 @@ var ErrHorizontalNotSupported = errors.New("polyclip: input contains a horizonta
 // Inputs containing a mid-bound horizontal (a staircase step) return
 // [ErrHorizontalNotSupported] when the bound-model pre-pass fails on
 // shared-vertex inputs that fall back to the per-edge path.
-func Union(a, b MultiPolygon) (MultiPolygon, error) {
+func Union(a, b geom.MultiPolygon) (geom.MultiPolygon, error) {
 	return execOp(a, b, OpUnion, FillNonZero, nil)
 }
 
@@ -49,16 +50,16 @@ func Union(a, b MultiPolygon) (MultiPolygon, error) {
 //
 // Empty input slice returns an empty [MultiPolygon]; a single-element
 // slice returns that element unchanged.
-func UnionAll(polys ...MultiPolygon) (MultiPolygon, error) {
+func UnionAll(polys ...geom.MultiPolygon) (geom.MultiPolygon, error) {
 	if len(polys) == 0 {
-		return MultiPolygon{}, nil
+		return geom.MultiPolygon{}, nil
 	}
 	if len(polys) == 1 {
 		return polys[0], nil
 	}
 	// Work on a local copy so the caller's slice isn't mutated when we
 	// overwrite entries between rounds.
-	current := make([]MultiPolygon, len(polys))
+	current := make([]geom.MultiPolygon, len(polys))
 	copy(current, polys)
 	for len(current) > 1 {
 		n := len(current)
@@ -88,7 +89,7 @@ func UnionAll(polys ...MultiPolygon) (MultiPolygon, error) {
 // MultiPolygon. Otherwise the Vatti engine runs with [clip.OpIntersect]
 // and the §11.4 / §12.5 classification rules emit exactly the region
 // covered by BOTH inputs.
-func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
+func Intersect(a, b geom.MultiPolygon) (geom.MultiPolygon, error) {
 	return execOp(a, b, OpIntersect, FillNonZero, nil)
 }
 
@@ -97,7 +98,7 @@ func Intersect(a, b MultiPolygon) (MultiPolygon, error) {
 // Empty subject (a) short-circuits to empty; empty clip (b) returns a
 // unchanged. Disjoint bounding boxes return a unchanged. Otherwise the
 // Vatti engine runs with [clip.OpDifference].
-func Difference(a, b MultiPolygon) (MultiPolygon, error) {
+func Difference(a, b geom.MultiPolygon) (geom.MultiPolygon, error) {
 	return execOp(a, b, OpDifference, FillNonZero, nil)
 }
 
@@ -107,7 +108,7 @@ func Difference(a, b MultiPolygon) (MultiPolygon, error) {
 // Empty operands short-circuit to the other input (or empty if both are
 // empty). Disjoint bounding boxes return the concatenation, equivalent to
 // Union. Otherwise the Vatti engine runs with [clip.OpXor].
-func Xor(a, b MultiPolygon) (MultiPolygon, error) {
+func Xor(a, b geom.MultiPolygon) (geom.MultiPolygon, error) {
 	return execOp(a, b, OpXor, FillNonZero, nil)
 }
 
@@ -130,9 +131,9 @@ func Xor(a, b MultiPolygon) (MultiPolygon, error) {
 // to the same fixed-point limitation as the rest of the engine (DESIGN.md
 // §7.2); callers needing robustness there should use [Offset], which adds its
 // own multi-frame resolution.
-func Simplify(m MultiPolygon) (MultiPolygon, error) {
+func Simplify(m geom.MultiPolygon) (geom.MultiPolygon, error) {
 	if len(m) == 0 {
-		return MultiPolygon{}, nil
+		return geom.MultiPolygon{}, nil
 	}
 	bbox := m.BoundingBox()
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
@@ -150,7 +151,7 @@ func Simplify(m MultiPolygon) (MultiPolygon, error) {
 // §12.6.1); identical inputs are a degenerate case where every edge collapses
 // to a same-vertex local minimum, which the bound-model pre-pass can't
 // disambiguate.
-func mpolyEqual(a, b MultiPolygon) bool {
+func mpolyEqual(a, b geom.MultiPolygon) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -170,7 +171,7 @@ func mpolyEqual(a, b MultiPolygon) bool {
 	return true
 }
 
-func polyEqual(a, b Polygon) bool {
+func polyEqual(a, b geom.Polygon) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -188,7 +189,7 @@ func polyEqual(a, b Polygon) bool {
 // fixed-point scale used to build segs). It is the single seam shared by
 // [runBooleanOp] and [Simplify]; op- and operand-specific post-filtering (the
 // subset invariant) stays in the caller.
-func sweepSegments(segs []clip.Segment, op clip.Operation, fill clip.FillRule, scale fixed.Scale, zt *zTracker) (MultiPolygon, error) {
+func sweepSegments(segs []clip.Segment, op clip.Operation, fill clip.FillRule, scale fixed.Scale, zt *zTracker) (geom.MultiPolygon, error) {
 	segs = clip.Preprocess(segs)
 	// SweepFillZ additionally records crossings for Z assignment; it is X/Y-
 	// identical to SweepFill, so the standard (zt == nil) path is unchanged.
@@ -211,7 +212,7 @@ func sweepSegments(segs []clip.Segment, op clip.Operation, fill clip.FillRule, s
 // runBooleanOp is the engine path: snap inputs to a fixed-point grid, feed
 // segments through the sweep, and convert rings back to a user-space
 // MultiPolygon.
-func runBooleanOp(a, b MultiPolygon, op clip.Operation, fill clip.FillRule, za ZAssigner) (MultiPolygon, error) {
+func runBooleanOp(a, b geom.MultiPolygon, op clip.Operation, fill clip.FillRule, za ZAssigner) (geom.MultiPolygon, error) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
@@ -258,7 +259,7 @@ func runBooleanOp(a, b MultiPolygon, op clip.Operation, fill clip.FillRule, za Z
 // collectSegments converts every input edge into a fixed-point Segment and
 // returns the slice. Horizontal segments are kept; the engine classifies
 // them in a pre-pass.
-func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale, zt *zTracker) []clip.Segment {
+func collectSegments(m geom.MultiPolygon, src clip.Source, scale fixed.Scale, zt *zTracker) []clip.Segment {
 	var out []clip.Segment
 	for _, ex := range m {
 		appendRing(&out, ex.Outer, src, scale, true, zt)
@@ -285,7 +286,7 @@ func collectSegments(m MultiPolygon, src clip.Source, scale fixed.Scale, zt *zTr
 // DESIGN.md §12.11). Removal happens here, on the INPUT ring, before
 // [clip.SplitOverlaps] / [clip.SplitTJunctions] introduce their own (intended)
 // collinear split vertices at crossings.
-func appendRing(dst *[]clip.Segment, ring Polygon, src clip.Source, scale fixed.Scale, wantCCW bool, zt *zTracker) {
+func appendRing(dst *[]clip.Segment, ring geom.Polygon, src clip.Source, scale fixed.Scale, wantCCW bool, zt *zTracker) {
 	n := len(ring)
 	if n < 3 {
 		return
@@ -361,19 +362,19 @@ func simplifyCollinearRing(pts []fixed.Point) []fixed.Point {
 // classifiedRing is an output ring prepared for containment classification: its
 // polygon, bounding box, absolute area, and a precomputed interior point.
 type classifiedRing struct {
-	poly Polygon
-	bbox BBox
+	poly geom.Polygon
+	bbox geom.BBox
 	area float64 // absolute (unsigned) area
 	// interior is a point of poly's OPEN interior, precomputed once per ring
 	// (it depends only on poly). hasInterior is false for a degenerate ring
 	// with no interior. Hoisted out of ringContains so the O(n^2) containment
 	// scan does not recompute it on every candidate container.
-	interior    Point
+	interior    geom.Point
 	hasInterior bool
 }
 
 // newClassifiedRing precomputes the classification fields for poly.
-func newClassifiedRing(poly Polygon) classifiedRing {
+func newClassifiedRing(poly geom.Polygon) classifiedRing {
 	interior, hasInterior := interiorPoint(poly)
 	return classifiedRing{
 		poly: poly, bbox: poly.BoundingBox(),
@@ -533,7 +534,7 @@ func classifyOutRecs(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) []cl
 			if len(fixedPts) < 3 {
 				continue
 			}
-			poly := make(Polygon, len(fixedPts))
+			poly := make(geom.Polygon, len(fixedPts))
 			for i, fp := range fixedPts {
 				poly[i].X, poly[i].Y = scale.Unsnap(fp)
 				poly[i].Z = zt.lookup(fp)
@@ -547,7 +548,7 @@ func classifyOutRecs(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) []cl
 // assembleResult converts the sweep's closed output rings into a user-space
 // MultiPolygon, classifying each ring as outer or hole by its signed area
 // and grouping holes into their containing outer.
-func assembleResult(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) MultiPolygon {
+func assembleResult(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) geom.MultiPolygon {
 	rings2 := classifyOutRecs(rings, scale, zt)
 	parent := buildContainmentForest(rings2)
 
@@ -561,7 +562,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) Multi
 	}
 
 	idxMap := make(map[int]int, len(rings2))
-	var result MultiPolygon
+	var result geom.MultiPolygon
 	for i := range rings2 {
 		if len(rings2[i].poly) == 0 || depth(i)%2 != 0 {
 			continue
@@ -570,7 +571,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) Multi
 			rings2[i].poly.Reverse()
 		}
 		idxMap[i] = len(result)
-		result = append(result, ExPolygon{Outer: rings2[i].poly})
+		result = append(result, geom.ExPolygon{Outer: rings2[i].poly})
 	}
 	for i := range rings2 {
 		if len(rings2[i].poly) == 0 || depth(i)%2 == 0 {
@@ -601,7 +602,7 @@ func assembleResult(rings []*clip.OutRec, scale fixed.Scale, zt *zTracker) Multi
 // container is it. Even depth = a filled region, odd depth = a hole; winding is
 // normalized as elsewhere (filled CCW, hole CW). Top-level nodes (no container)
 // are the tree's roots.
-func buildPolyTree(m MultiPolygon) *PolyTree {
+func buildPolyTree(m geom.MultiPolygon) *PolyTree {
 	var rings []classifiedRing
 	for _, ex := range m {
 		if len(ex.Outer) >= 3 {
@@ -623,7 +624,7 @@ func buildPolyTree(m MultiPolygon) *PolyTree {
 		// Union(s,∅)→s) can return the caller's own polygons, which Reverse must
 		// not mutate. For a well-formed MultiPolygon the orientation already
 		// matches depth parity, so the reversal below is normally a no-op.
-		poly := append(Polygon(nil), rings[i].poly...)
+		poly := append(geom.Polygon(nil), rings[i].poly...)
 		switch {
 		case isHole && poly.SignedArea() > 0: // a hole must be CW
 			poly.Reverse()
@@ -709,10 +710,10 @@ func dedupConsecutive(pts []fixed.Point) []fixed.Point {
 // that two rings which merely touch are never reported as nested (DESIGN.md
 // §12.11). Returns false for degenerate rings (<3 vertices, or no interior span
 // found, e.g. zero area).
-func interiorPoint(p Polygon) (Point, bool) {
+func interiorPoint(p geom.Polygon) (geom.Point, bool) {
 	n := len(p)
 	if n < 3 {
-		return Point{}, false
+		return geom.Point{}, false
 	}
 	// Choose the scanline Y strictly between two adjacent distinct vertex Ys
 	// (the widest gap), so it grazes no vertex and runs along no horizontal
@@ -733,7 +734,7 @@ func interiorPoint(p Polygon) (Point, bool) {
 		}
 	}
 	if gap <= 0 {
-		return Point{}, false // degenerate: all vertices share one Y
+		return geom.Point{}, false // degenerate: all vertices share one Y
 	}
 	y := gapLo + gap/2
 
@@ -750,7 +751,7 @@ func interiorPoint(p Polygon) (Point, bool) {
 		xs = append(xs, a.X+t*(b.X-a.X))
 	}
 	if len(xs) < 2 {
-		return Point{}, false
+		return geom.Point{}, false
 	}
 	sort.Float64s(xs)
 
@@ -763,7 +764,7 @@ func interiorPoint(p Polygon) (Point, bool) {
 		}
 	}
 	if bestW <= 0 {
-		return Point{}, false
+		return geom.Point{}, false
 	}
-	return Point{X: (bestLo + bestHi) / 2, Y: y}, true
+	return geom.Point{X: (bestLo + bestHi) / 2, Y: y}, true
 }

@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,12 +25,12 @@ import (
 func TestSelfUnionPositiveRobustDegenerate(t *testing.T) {
 	cases := []struct {
 		name  string
-		rings []Polygon
+		rings []geom.Polygon
 	}{
 		{
 			// Reconcile non-convergence spin/OOM in the ang=0.21 frame.
 			name: "spin",
-			rings: []Polygon{
+			rings: []geom.Polygon{
 				{{X: 0, Y: 0}, {X: 3, Y: 0}, {X: 3, Y: 1}, {X: 2, Y: 1}, {X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 1}, {X: 0, Y: 1}},
 				{{X: 0, Y: -3}, {X: 1, Y: -3}, {X: 1, Y: 2}, {X: 0, Y: 2}},
 			},
@@ -37,7 +38,7 @@ func TestSelfUnionPositiveRobustDegenerate(t *testing.T) {
 		{
 			// doHorizontal nil-deref panic in the ang=0 (axis-aligned) frame.
 			name: "panic",
-			rings: []Polygon{
+			rings: []geom.Polygon{
 				{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 4}, {X: 4, Y: 4}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 6}, {X: 2, Y: 6}, {X: 1, Y: 6}, {X: 1, Y: 2}, {X: 0, Y: 2}},
 				{{X: 3, Y: 2}, {X: 9, Y: 2}, {X: 9, Y: 3}, {X: 8, Y: 3}, {X: 8, Y: 4}, {X: 7, Y: 4}, {X: 7, Y: 6}, {X: 6, Y: 6}, {X: 6, Y: 4}, {X: 5, Y: 4}, {X: 5, Y: 5}, {X: 4, Y: 5}, {X: 4, Y: 7}, {X: 3, Y: 7}},
 			},

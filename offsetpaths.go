@@ -3,6 +3,8 @@ package polyclip
 import (
 	"errors"
 	"math"
+
+	"github.com/lestrrat-go/polyclip/geom"
 )
 
 // ErrOffsetEndType is returned by [OffsetPaths] when given an end type that is
@@ -26,7 +28,7 @@ var ErrOffsetEndType = errors.New("polyclip: invalid open-path end type")
 // [EndJoined]; [EndPolygon] returns [ErrOffsetEndType]. [EndJoined] closes each
 // path into a loop and bands it on both sides (see [EndJoined]). If every path
 // is too short or the result is empty, OffsetPaths returns [ErrOffsetEmpty].
-func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon, error) {
+func OffsetPaths(lines []geom.Polyline, d float64, opts OffsetOptions) (geom.MultiPolygon, error) {
 	if opts.End == EndPolygon {
 		// EndPolygon is the closed-input behaviour of Offset; not a cap.
 		return nil, ErrOffsetEndType
@@ -45,7 +47,7 @@ func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon,
 		opts.ArcTol = w * 0.01
 	}
 
-	result := MultiPolygon{}
+	result := geom.MultiPolygon{}
 	for _, line := range lines {
 		if opts.End == EndJoined {
 			result = append(result, offsetJoinedBand(line, w, opts)...)
@@ -55,7 +57,7 @@ func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon,
 		if len(ring) < 3 {
 			continue
 		}
-		result = append(result, resolveOffsetPiece([]Polygon{ring})...)
+		result = append(result, resolveOffsetPiece([]geom.Polygon{ring})...)
 	}
 	if len(result) == 0 {
 		return nil, ErrOffsetEmpty
@@ -69,21 +71,21 @@ func OffsetPaths(lines []Polyline, d float64, opts OffsetOptions) (MultiPolygon,
 // The result is CCW (positive winding inside) regardless of path direction, so
 // it feeds the positive-fill self-union directly; interior turns that
 // self-overlap are cleaned up there. Mirrors Clipper2's OffsetOpenPath.
-func offsetRibbon(line Polyline, w float64, opts OffsetOptions) Polygon {
+func offsetRibbon(line geom.Polyline, w float64, opts OffsetOptions) geom.Polygon {
 	pts := dedupPolyline(line)
 	n := len(pts)
 	if n < 2 {
 		return nil
 	}
 	// Right-hand unit normals of each edge pts[i]→pts[i+1] (n-1 of them).
-	norms := make([]Point, n-1)
+	norms := make([]geom.Point, n-1)
 	for i := range n - 1 {
 		dir := pts[i+1].Sub(pts[i])
 		l := dir.Len()
-		norms[i] = Point{X: dir.Y / l, Y: -dir.X / l}
+		norms[i] = geom.Point{X: dir.Y / l, Y: -dir.X / l}
 	}
 
-	out := make(Polygon, 0, 2*n+8)
+	out := make(geom.Polygon, 0, 2*n+8)
 	// Start cap at pts[0] using the first edge's normal.
 	emitEndCap(&out, pts[0], norms[0], w, opts)
 	// Forward side: interior vertices, prev edge normal then next edge normal.
@@ -110,7 +112,7 @@ func offsetRibbon(line Polyline, w float64, opts OffsetOptions) Polygon {
 // (the inner ring collapses / crosses out) otherwise. Every corner — including
 // the former endpoints, now interior to the loop — uses opts.Join exactly as
 // [Offset] does. Mirrors Clipper2's EndType::Joined.
-func offsetJoinedBand(line Polyline, w float64, opts OffsetOptions) MultiPolygon {
+func offsetJoinedBand(line geom.Polyline, w float64, opts OffsetOptions) geom.MultiPolygon {
 	pts := dedupPolyline(line)
 	for len(pts) >= 2 && pts[0] == pts[len(pts)-1] {
 		pts = pts[:len(pts)-1] // drop a closing duplicate; the loop is implicit
@@ -122,9 +124,9 @@ func offsetJoinedBand(line Polyline, w float64, opts OffsetOptions) MultiPolygon
 		if len(ring) < 3 {
 			return nil
 		}
-		return resolveOffsetPiece([]Polygon{ring})
+		return resolveOffsetPiece([]geom.Polygon{ring})
 	}
-	loop := Polygon(pts)
+	loop := geom.Polygon(pts)
 	if loop.SignedArea() < 0 {
 		loop.Reverse() // orient CCW so +w grows outward, -w shrinks inward
 	}
@@ -132,7 +134,7 @@ func offsetJoinedBand(line Polyline, w float64, opts OffsetOptions) MultiPolygon
 	if len(outer) < 3 {
 		return nil
 	}
-	rings := []Polygon{outer}
+	rings := []geom.Polygon{outer}
 	if inner := offsetRing(loop, -w, opts); len(inner) >= 3 {
 		inner.Reverse() // CW so it contributes negative winding (a hole)
 		rings = append(rings, inner)
@@ -145,9 +147,9 @@ func offsetJoinedBand(line Polyline, w float64, opts OffsetOptions) MultiPolygon
 // is (m.Y, -m.X). The cap connects the two side offsets a = v−w·m and
 // c = v+w·m, per opts.End. Mirrors Clipper2's DoBevel/DoSquare/DoRound for the
 // j==k (endpoint) case.
-func emitEndCap(out *Polygon, v, m Point, w float64, opts OffsetOptions) {
-	a := Point{X: v.X - w*m.X, Y: v.Y - w*m.Y}
-	c := Point{X: v.X + w*m.X, Y: v.Y + w*m.Y}
+func emitEndCap(out *geom.Polygon, v, m geom.Point, w float64, opts OffsetOptions) {
+	a := geom.Point{X: v.X - w*m.X, Y: v.Y - w*m.Y}
+	c := geom.Point{X: v.X + w*m.X, Y: v.Y + w*m.Y}
 	switch opts.End {
 	case EndRound:
 		// Semicircle from a to c bulging outward; reuse the convex-join arc
@@ -155,18 +157,18 @@ func emitEndCap(out *Polygon, v, m Point, w float64, opts OffsetOptions) {
 		appendRoundJoin(out, v, a, c, w, opts.ArcTol)
 	case EndSquare:
 		// Extend both side offsets |w| along the outward tangent and square off.
-		t := Point{X: m.Y, Y: -m.X}
+		t := geom.Point{X: m.Y, Y: -m.X}
 		*out = append(*out,
-			Point{X: a.X + w*t.X, Y: a.Y + w*t.Y},
-			Point{X: c.X + w*t.X, Y: c.Y + w*t.Y})
+			geom.Point{X: a.X + w*t.X, Y: a.Y + w*t.Y},
+			geom.Point{X: c.X + w*t.X, Y: c.Y + w*t.Y})
 	default: // EndButt
 		*out = append(*out, a, c)
 	}
 }
 
 // dedupPolyline returns line with consecutive duplicate points removed.
-func dedupPolyline(line Polyline) []Point {
-	out := make([]Point, 0, len(line))
+func dedupPolyline(line geom.Polyline) []geom.Point {
+	out := make([]geom.Point, 0, len(line))
 	for _, p := range line {
 		if len(out) > 0 && out[len(out)-1] == p {
 			continue

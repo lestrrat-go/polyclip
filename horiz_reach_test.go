@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/stretchr/testify/require"
 )
@@ -16,33 +17,33 @@ import (
 // columns sitting on y=0 with the given heights. Rich in mid-bound horizontal
 // edges (every monotone run of column tops is a staircase step that
 // ClassifyHorizontals would reject as HorizClassMid).
-func skyline(x0, y0 int, heights []int) Polygon {
+func skyline(x0, y0 int, heights []int) geom.Polygon {
 	m := len(heights)
-	ring := Polygon{}
+	ring := geom.Polygon{}
 	// bottom-left up the left wall, then the top profile left-to-right is built
 	// by walking columns; assemble CCW: bottom edge first.
-	ring = append(ring, Point{X: float64(x0), Y: float64(y0)})
-	ring = append(ring, Point{X: float64(x0 + m), Y: float64(y0)})
+	ring = append(ring, geom.Point{X: float64(x0), Y: float64(y0)})
+	ring = append(ring, geom.Point{X: float64(x0 + m), Y: float64(y0)})
 	// right wall up to last column top
 	cur := heights[m-1]
-	ring = append(ring, Point{X: float64(x0 + m), Y: float64(y0 + cur)})
+	ring = append(ring, geom.Point{X: float64(x0 + m), Y: float64(y0 + cur)})
 	// walk columns right-to-left along the top profile
 	for i := m - 1; i >= 0; i-- {
 		h := heights[i]
 		if h != cur {
 			// vertical step at x = x0+i+1
-			ring = append(ring, Point{X: float64(x0 + i + 1), Y: float64(y0 + h)})
+			ring = append(ring, geom.Point{X: float64(x0 + i + 1), Y: float64(y0 + h)})
 			cur = h
 		}
 		// horizontal top of column i to its left boundary x=x0+i
-		ring = append(ring, Point{X: float64(x0 + i), Y: float64(y0 + h)})
+		ring = append(ring, geom.Point{X: float64(x0 + i), Y: float64(y0 + h)})
 	}
 	// down the left wall back to start (the last point added is (x0, heights[0]))
 	// closing edge to (x0,y0) is implicit.
 	return ring
 }
 
-func randSkyline(rng *rand.Rand, x0, y0, m, maxH int) Polygon {
+func randSkyline(rng *rand.Rand, x0, y0, m, maxH int) geom.Polygon {
 	heights := make([]int, m)
 	for i := range heights {
 		heights[i] = 1 + rng.Intn(maxH)
@@ -86,10 +87,10 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 
 	// runOp runs fn under a 2s watchdog, failing the test (with the input) on a
 	// hang. Returns the result area and whether the op errored.
-	runOp := func(opName string, fn func(a, b MultiPolygon) (MultiPolygon, error), a, b MultiPolygon) (float64, bool) {
+	runOp := func(opName string, fn func(a, b geom.MultiPolygon) (geom.MultiPolygon, error), a, b geom.MultiPolygon) (float64, bool) {
 		clip.ClearFallbackTrace()
 		type res struct {
-			m MultiPolygon
+			m geom.MultiPolygon
 			e error
 		}
 		done := make(chan res, 1)
@@ -128,12 +129,12 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 		rng := rand.New(rand.NewSource(int64(seed)*7919 + 3))
 		for range 400 {
 			m := 2 + rng.Intn(6)
-			a := MultiPolygon{ExPolygon{Outer: randSkyline(rng, 0, 0, m, 6)}}
+			a := geom.MultiPolygon{geom.ExPolygon{Outer: randSkyline(rng, 0, 0, m, 6)}}
 			// B overlaps A's domain so preprocessing creates shared vertices /
 			// collinear overlaps; bias toward shared coordinates by reusing the
 			// same lattice and frequently the same origin.
 			bx, by := rng.Intn(m+1), rng.Intn(7)-3
-			b := MultiPolygon{ExPolygon{Outer: randSkyline(rng, bx, by, 1+rng.Intn(6), 6)}}
+			b := geom.MultiPolygon{geom.ExPolygon{Outer: randSkyline(rng, bx, by, 1+rng.Intn(6), 6)}}
 			if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
 				continue
 			}
@@ -159,7 +160,7 @@ func TestHorizontalFallbackReachability(t *testing.T) {
 				}
 			}
 			// Simplify on both as a single self-overlapping source.
-			both := MultiPolygon{a[0], b[0]}
+			both := geom.MultiPolygon{a[0], b[0]}
 			clip.ClearFallbackTrace()
 			sdone := make(chan error, 1)
 			go func() { _, e := Simplify(both); sdone <- e }()
@@ -207,7 +208,7 @@ func abs(f float64) float64 {
 
 func ftoaf(f float64) string { return fmt.Sprintf("%g", f) }
 
-func mpStr(m MultiPolygon) string {
+func mpStr(m geom.MultiPolygon) string {
 	var b strings.Builder
 	for _, ex := range m {
 		b.WriteByte('[')

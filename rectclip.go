@@ -1,5 +1,7 @@
 package polyclip
 
+import "github.com/lestrrat-go/polyclip/geom"
+
 // RectClip clips every ring of m against the axis-aligned rectangle rect and
 // returns the clipped region. It is a specialized, sweep-free fast path for the
 // common "clip a layer to the build plate" case: each ring is clipped in O(n)
@@ -20,11 +22,11 @@ package polyclip
 // dropped, as is any ExPolygon whose outer ring vanishes. An empty rect (see
 // [BBox.Empty]) yields an empty result. Output winding follows the library
 // convention: outer rings CCW, holes CW.
-func RectClip(m MultiPolygon, rect BBox) MultiPolygon {
+func RectClip(m geom.MultiPolygon, rect geom.BBox) geom.MultiPolygon {
 	if rect.Empty() || len(m) == 0 {
-		return MultiPolygon{}
+		return geom.MultiPolygon{}
 	}
-	out := make(MultiPolygon, 0, len(m))
+	out := make(geom.MultiPolygon, 0, len(m))
 	for i := range m {
 		outer := clipRingToRect(m[i].Outer, rect)
 		if len(outer) < 3 {
@@ -33,7 +35,7 @@ func RectClip(m MultiPolygon, rect BBox) MultiPolygon {
 		if !outer.IsCCW() {
 			outer.Reverse()
 		}
-		ex := ExPolygon{Outer: outer}
+		ex := geom.ExPolygon{Outer: outer}
 		for _, h := range m[i].Holes {
 			hole := clipRingToRect(h, rect)
 			if len(hole) < 3 {
@@ -59,11 +61,11 @@ func RectClip(m MultiPolygon, rect BBox) MultiPolygon {
 // independently (Liang–Barsky) and no boundary seam is introduced. Polylines
 // with fewer than two points, and any clipped fragment that degenerates to a
 // single point, are dropped. An empty rect yields no output.
-func RectClipLines(lines []Polyline, rect BBox) []Polyline {
+func RectClipLines(lines []geom.Polyline, rect geom.BBox) []geom.Polyline {
 	if rect.Empty() || len(lines) == 0 {
 		return nil
 	}
-	var result []Polyline
+	var result []geom.Polyline
 	for _, line := range lines {
 		result = clipPolylineToRect(line, rect, result)
 	}
@@ -74,14 +76,14 @@ func RectClipLines(lines []Polyline, rect BBox) []Polyline {
 // acc. Consecutive segments whose clipped pieces share an endpoint are kept in
 // the same output polyline; a gap (a segment with no inside portion, or a
 // re-entry at a different point) starts a new one.
-func clipPolylineToRect(line Polyline, rect BBox, acc []Polyline) []Polyline {
+func clipPolylineToRect(line geom.Polyline, rect geom.BBox, acc []geom.Polyline) []geom.Polyline {
 	if len(line) < 2 {
 		return acc
 	}
-	var cur []Point
+	var cur []geom.Point
 	flush := func() {
 		if len(cur) >= 2 {
-			acc = append(acc, Polyline(cur))
+			acc = append(acc, geom.Polyline(cur))
 		}
 		cur = nil
 	}
@@ -99,7 +101,7 @@ func clipPolylineToRect(line Polyline, rect BBox, acc []Polyline) []Polyline {
 		}
 		flush()
 		if p0 != p1 {
-			cur = []Point{p0, p1}
+			cur = []geom.Point{p0, p1}
 		}
 	}
 	flush()
@@ -110,35 +112,35 @@ func clipPolylineToRect(line Polyline, rect BBox, acc []Polyline) []Polyline {
 // half-planes of rect in turn. The result preserves the ring's winding
 // direction and is deduplicated of consecutive coincident vertices; a ring that
 // clips away returns fewer than three points.
-func clipRingToRect(poly Polygon, rect BBox) Polygon {
+func clipRingToRect(poly geom.Polygon, rect geom.BBox) geom.Polygon {
 	if len(poly) < 3 {
 		return nil
 	}
-	pts := []Point(poly)
+	pts := []geom.Point(poly)
 	// Left: x >= Min.X.
-	pts = clipHalfplane(pts, func(p Point) bool { return p.X >= rect.Min.X },
-		func(a, b Point) Point { return intersectVert(a, b, rect.Min.X) })
+	pts = clipHalfplane(pts, func(p geom.Point) bool { return p.X >= rect.Min.X },
+		func(a, b geom.Point) geom.Point { return intersectVert(a, b, rect.Min.X) })
 	// Right: x <= Max.X.
-	pts = clipHalfplane(pts, func(p Point) bool { return p.X <= rect.Max.X },
-		func(a, b Point) Point { return intersectVert(a, b, rect.Max.X) })
+	pts = clipHalfplane(pts, func(p geom.Point) bool { return p.X <= rect.Max.X },
+		func(a, b geom.Point) geom.Point { return intersectVert(a, b, rect.Max.X) })
 	// Bottom: y >= Min.Y.
-	pts = clipHalfplane(pts, func(p Point) bool { return p.Y >= rect.Min.Y },
-		func(a, b Point) Point { return intersectHoriz(a, b, rect.Min.Y) })
+	pts = clipHalfplane(pts, func(p geom.Point) bool { return p.Y >= rect.Min.Y },
+		func(a, b geom.Point) geom.Point { return intersectHoriz(a, b, rect.Min.Y) })
 	// Top: y <= Max.Y.
-	pts = clipHalfplane(pts, func(p Point) bool { return p.Y <= rect.Max.Y },
-		func(a, b Point) Point { return intersectHoriz(a, b, rect.Max.Y) })
-	return Polygon(dedupRingVertices(pts))
+	pts = clipHalfplane(pts, func(p geom.Point) bool { return p.Y <= rect.Max.Y },
+		func(a, b geom.Point) geom.Point { return intersectHoriz(a, b, rect.Max.Y) })
+	return geom.Polygon(dedupRingVertices(pts))
 }
 
 // clipHalfplane returns the portion of the closed ring in that lies on the
 // inside of a single half-plane, inserting intersection points where edges
 // cross the boundary. inside reports membership; isect returns where the edge
 // a→b meets the boundary line.
-func clipHalfplane(in []Point, inside func(Point) bool, isect func(a, b Point) Point) []Point {
+func clipHalfplane(in []geom.Point, inside func(geom.Point) bool, isect func(a, b geom.Point) geom.Point) []geom.Point {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]Point, 0, len(in)+4)
+	out := make([]geom.Point, 0, len(in)+4)
 	prev := in[len(in)-1]
 	prevIn := inside(prev)
 	for _, cur := range in {
@@ -157,20 +159,20 @@ func clipHalfplane(in []Point, inside func(Point) bool, isect func(a, b Point) P
 }
 
 // intersectVert returns where the segment a→b crosses the vertical line x=cx.
-func intersectVert(a, b Point, cx float64) Point {
+func intersectVert(a, b geom.Point, cx float64) geom.Point {
 	t := (cx - a.X) / (b.X - a.X)
-	return Point{X: cx, Y: a.Y + t*(b.Y-a.Y)}
+	return geom.Point{X: cx, Y: a.Y + t*(b.Y-a.Y)}
 }
 
 // intersectHoriz returns where the segment a→b crosses the horizontal line y=cy.
-func intersectHoriz(a, b Point, cy float64) Point {
+func intersectHoriz(a, b geom.Point, cy float64) geom.Point {
 	t := (cy - a.Y) / (b.Y - a.Y)
-	return Point{X: a.X + t*(b.X-a.X), Y: cy}
+	return geom.Point{X: a.X + t*(b.X-a.X), Y: cy}
 }
 
 // dedupRingVertices removes runs of identical points, treating the slice as a
 // closed ring (the last point is also compared against the first).
-func dedupRingVertices(pts []Point) []Point {
+func dedupRingVertices(pts []geom.Point) []geom.Point {
 	if len(pts) < 2 {
 		return pts
 	}
@@ -190,7 +192,7 @@ func dedupRingVertices(pts []Point) []Point {
 // clipSegmentToRect clips the open segment a→b against rect by the Liang–Barsky
 // algorithm, returning the surviving endpoints and whether any portion lies
 // inside. Boundary contact counts as inside.
-func clipSegmentToRect(a, b Point, rect BBox) (Point, Point, bool) {
+func clipSegmentToRect(a, b geom.Point, rect geom.BBox) (geom.Point, geom.Point, bool) {
 	dx, dy := b.X-a.X, b.Y-a.Y
 	t0, t1 := 0.0, 1.0
 	edges := [4][2]float64{
@@ -203,14 +205,14 @@ func clipSegmentToRect(a, b Point, rect BBox) (Point, Point, bool) {
 		p, q := e[0], e[1]
 		if p == 0 {
 			if q < 0 {
-				return Point{}, Point{}, false // parallel to and outside this edge
+				return geom.Point{}, geom.Point{}, false // parallel to and outside this edge
 			}
 			continue
 		}
 		r := q / p
 		if p < 0 {
 			if r > t1 {
-				return Point{}, Point{}, false
+				return geom.Point{}, geom.Point{}, false
 			}
 			if r > t0 {
 				t0 = r
@@ -218,13 +220,13 @@ func clipSegmentToRect(a, b Point, rect BBox) (Point, Point, bool) {
 			continue
 		}
 		if r < t0 {
-			return Point{}, Point{}, false
+			return geom.Point{}, geom.Point{}, false
 		}
 		if r < t1 {
 			t1 = r
 		}
 	}
-	p0 := Point{X: a.X + t0*dx, Y: a.Y + t0*dy}
-	p1 := Point{X: a.X + t1*dx, Y: a.Y + t1*dy}
+	p0 := geom.Point{X: a.X + t0*dx, Y: a.Y + t0*dy}
+	p1 := geom.Point{X: a.X + t1*dx, Y: a.Y + t1*dy}
 	return p0, p1, true
 }

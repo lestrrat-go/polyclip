@@ -5,11 +5,12 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
-func rectAsPolygon(r BBox) MultiPolygon {
-	return MultiPolygon{{Outer: Polygon{
+func rectAsPolygon(r geom.BBox) geom.MultiPolygon {
+	return geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: r.Min.X, Y: r.Min.Y},
 		{X: r.Max.X, Y: r.Min.Y},
 		{X: r.Max.X, Y: r.Max.Y},
@@ -17,7 +18,7 @@ func rectAsPolygon(r BBox) MultiPolygon {
 	}}}
 }
 
-func mpArea(m MultiPolygon) float64 {
+func mpArea(m geom.MultiPolygon) float64 {
 	var a float64
 	for i := range m {
 		a += m[i].Area()
@@ -28,8 +29,8 @@ func mpArea(m MultiPolygon) float64 {
 func TestRectClip(t *testing.T) {
 	cases := []struct {
 		name string
-		rect BBox
-		sub  MultiPolygon
+		rect geom.BBox
+		sub  geom.MultiPolygon
 		// wantPieces, when checkPieces is true, asserts the exact number of
 		// clipped pieces (require.Len). EmptyRect/FullyOutside expect 0.
 		checkPieces bool
@@ -39,47 +40,47 @@ func TestRectClip(t *testing.T) {
 		checkArea bool
 		wantArea  float64
 		// extra runs any additional bespoke assertions on the result.
-		extra func(t *testing.T, got MultiPolygon)
+		extra func(t *testing.T, got geom.MultiPolygon)
 	}{
 		{
 			name:        "FullyInside",
-			rect:        BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			sub:         MultiPolygon{{Outer: Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}}},
+			rect:        geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 2, Y: 2}, {X: 6, Y: 2}, {X: 6, Y: 6}, {X: 2, Y: 6}}}},
 			checkPieces: true,
 			wantPieces:  1,
 			checkArea:   true,
 			wantArea:    16,
-			extra: func(t *testing.T, got MultiPolygon) {
+			extra: func(t *testing.T, got geom.MultiPolygon) {
 				require.True(t, got[0].Outer.IsCCW(), "outer ring not normalized to CCW")
 			},
 		},
 		{
 			name:        "FullyOutside",
-			rect:        BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 5, Y: 5}},
-			sub:         MultiPolygon{{Outer: Polygon{{X: 20, Y: 20}, {X: 30, Y: 20}, {X: 30, Y: 30}, {X: 20, Y: 30}}}},
+			rect:        geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 5, Y: 5}},
+			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 20, Y: 20}, {X: 30, Y: 20}, {X: 30, Y: 30}, {X: 20, Y: 30}}}},
 			checkPieces: true,
 			wantPieces:  0,
 		},
 		{
 			// A small rect entirely within a large solid polygon clips to the full rect.
 			name:      "RectInsideSolid",
-			rect:      BBox{Min: Point{X: 40, Y: 40}, Max: Point{X: 60, Y: 60}},
-			sub:       MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 100, Y: 0}, {X: 100, Y: 100}, {X: 0, Y: 100}}}},
+			rect:      geom.BBox{Min: geom.Point{X: 40, Y: 40}, Max: geom.Point{X: 60, Y: 60}},
+			sub:       geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 100, Y: 0}, {X: 100, Y: 100}, {X: 0, Y: 100}}}},
 			checkArea: true,
 			wantArea:  400,
 		},
 		{
 			// Subject overlaps only the top-right corner region [6,10]x[6,10] of the rect.
 			name:      "CornerOverlap",
-			rect:      BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			sub:       MultiPolygon{{Outer: Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}},
+			rect:      geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			sub:       geom.MultiPolygon{{Outer: geom.Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}},
 			checkArea: true,
 			wantArea:  16,
 		},
 		{
 			name:        "EmptyRect",
-			rect:        EmptyBBox(),
-			sub:         MultiPolygon{{Outer: Polygon{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 0, Y: 5}}}},
+			rect:        geom.EmptyBBox(),
+			sub:         geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 0, Y: 5}}}},
 			checkPieces: true,
 			wantPieces:  0,
 		},
@@ -106,10 +107,10 @@ func TestRectClip(t *testing.T) {
 }
 
 func TestRectClipHolePreserved(t *testing.T) {
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}}
-	sub := MultiPolygon{{
-		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}},
+	rect := geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}}
+	sub := geom.MultiPolygon{{
+		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []geom.Polygon{{{X: 3, Y: 3}, {X: 3, Y: 7}, {X: 7, Y: 7}, {X: 7, Y: 3}}},
 	}}
 	got := RectClip(sub, rect)
 	require.True(t, len(got) == 1 && len(got[0].Holes) == 1, "got %d pieces with holes %v, want 1 piece 1 hole", len(got), got)
@@ -120,8 +121,8 @@ func TestRectClipHolePreserved(t *testing.T) {
 func TestRectClipConcaveSplitAreaParity(t *testing.T) {
 	// A U-shape the rectangle splits into two prongs: Sutherland–Hodgman keeps
 	// one seam-joined ring, but the enclosed area must still equal Intersect's.
-	rect := BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 4}}
-	u := MultiPolygon{{Outer: Polygon{
+	rect := geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 4}}
+	u := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 1, Y: -2}, {X: 3, Y: -2}, {X: 3, Y: 8}, {X: 7, Y: 8},
 		{X: 7, Y: -2}, {X: 9, Y: -2}, {X: 9, Y: 12}, {X: 1, Y: 12},
 	}}}
@@ -138,7 +139,7 @@ func TestRectClipIntersectParityRandom(t *testing.T) {
 	for iter := range 2000 {
 		// Random integer triangle (convex → SH output is a single piece, so the
 		// area parity with Intersect is exact on the integer grid).
-		tri := Polygon{
+		tri := geom.Polygon{
 			{X: randInt(-10, 20), Y: randInt(-10, 20)},
 			{X: randInt(-10, 20), Y: randInt(-10, 20)},
 			{X: randInt(-10, 20), Y: randInt(-10, 20)},
@@ -151,11 +152,11 @@ func TestRectClipIntersectParityRandom(t *testing.T) {
 		if x0 == x1 || y0 == y1 {
 			continue
 		}
-		rect := BBox{
-			Min: Point{X: math.Min(x0, x1), Y: math.Min(y0, y1)},
-			Max: Point{X: math.Max(x0, x1), Y: math.Max(y0, y1)},
+		rect := geom.BBox{
+			Min: geom.Point{X: math.Min(x0, x1), Y: math.Min(y0, y1)},
+			Max: geom.Point{X: math.Max(x0, x1), Y: math.Max(y0, y1)},
 		}
-		sub := MultiPolygon{{Outer: tri}}
+		sub := geom.MultiPolygon{{Outer: tri}}
 		got := RectClip(sub, rect)
 		want, err := Intersect(sub, rectAsPolygon(rect))
 		require.NoErrorf(t, err, "iter %d Intersect", iter)
@@ -168,49 +169,49 @@ func TestRectClipIntersectParityRandom(t *testing.T) {
 func TestRectClipLines(t *testing.T) {
 	cases := []struct {
 		name string
-		rect BBox
-		in   []Polyline
+		rect geom.BBox
+		in   []geom.Polyline
 		// want is the expected clipped output; when empty is true the result
 		// must be empty instead (require.Empty) and want is ignored.
-		want  []Polyline
+		want  []geom.Polyline
 		empty bool
 	}{
 		{
 			name: "Crossing",
-			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			in:   []Polyline{{{X: -5, Y: 5}, {X: 15, Y: 5}}},
-			want: []Polyline{{{X: 0, Y: 5}, {X: 10, Y: 5}}},
+			rect: geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			in:   []geom.Polyline{{{X: -5, Y: 5}, {X: 15, Y: 5}}},
+			want: []geom.Polyline{{{X: 0, Y: 5}, {X: 10, Y: 5}}},
 		},
 		{
 			name: "FullyInside",
-			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			in:   []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
-			want: []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
+			rect: geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			in:   []geom.Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
+			want: []geom.Polyline{{{X: 2, Y: 2}, {X: 5, Y: 8}, {X: 8, Y: 3}}},
 		},
 		{
 			name:  "FullyOutside",
-			rect:  BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			in:    []Polyline{{{X: 20, Y: 20}, {X: 30, Y: 30}}},
+			rect:  geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			in:    []geom.Polyline{{{X: 20, Y: 20}, {X: 30, Y: 30}}},
 			empty: true,
 		},
 		{
 			// A path that dips out of the rect and back in is split into two polylines.
 			name: "Reentry",
-			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			in:   []Polyline{{{X: 2, Y: 5}, {X: 2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}}},
-			want: []Polyline{{{X: 2, Y: 5}, {X: 2, Y: 0}}, {{X: 8, Y: 0}, {X: 8, Y: 5}}},
+			rect: geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			in:   []geom.Polyline{{{X: 2, Y: 5}, {X: 2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}}},
+			want: []geom.Polyline{{{X: 2, Y: 5}, {X: 2, Y: 0}}, {{X: 8, Y: 0}, {X: 8, Y: 5}}},
 		},
 		{
 			// A vertex sitting exactly on the boundary must not split the polyline.
 			name: "TouchVertexStaysJoined",
-			rect: BBox{Min: Point{X: 0, Y: 0}, Max: Point{X: 10, Y: 10}},
-			in:   []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
-			want: []Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
+			rect: geom.BBox{Min: geom.Point{X: 0, Y: 0}, Max: geom.Point{X: 10, Y: 10}},
+			in:   []geom.Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
+			want: []geom.Polyline{{{X: 2, Y: 2}, {X: 5, Y: 0}, {X: 8, Y: 2}}},
 		},
 		{
 			name:  "EmptyRect",
-			rect:  EmptyBBox(),
-			in:    []Polyline{{{X: 0, Y: 0}, {X: 5, Y: 5}}},
+			rect:  geom.EmptyBBox(),
+			in:    []geom.Polyline{{{X: 0, Y: 0}, {X: 5, Y: 5}}},
 			empty: true,
 		},
 	}
@@ -227,7 +228,7 @@ func TestRectClipLines(t *testing.T) {
 	}
 }
 
-func polylinesEqual(a, b []Polyline) bool {
+func polylinesEqual(a, b []geom.Polyline) bool {
 	if len(a) != len(b) {
 		return false
 	}

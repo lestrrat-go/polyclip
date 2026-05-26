@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/lestrrat-go/polyclip/internal/clip"
 	"github.com/lestrrat-go/polyclip/internal/fixed"
 	"github.com/stretchr/testify/require"
@@ -14,7 +15,7 @@ import (
 // ops). It exposes the true IN-SWEEP correctness so the §7.6/§7.7 confluence
 // rework can be measured directly — the public ops report zero identity
 // violations only because those masks hide the residual sweep-level over-trace.
-func rawOp(a, b MultiPolygon, op clip.Operation) (MultiPolygon, error) {
+func rawOp(a, b geom.MultiPolygon, op clip.Operation) (geom.MultiPolygon, error) {
 	bbox := a.BoundingBox().Union(b.BoundingBox())
 	scale := fixed.ScaleFromBBox(bbox.Min.X, bbox.Min.Y, bbox.Max.X, bbox.Max.Y)
 
@@ -38,9 +39,9 @@ func countRawIdFails() (int, int, int, int) {
 		rng := rand.New(rand.NewSource(int64(seed)*7919 + 3))
 		for range 400 {
 			m := 2 + rng.Intn(6)
-			a := MultiPolygon{ExPolygon{Outer: randSkyline(rng, 0, 0, m, 6)}}
+			a := geom.MultiPolygon{geom.ExPolygon{Outer: randSkyline(rng, 0, 0, m, 6)}}
 			bx, by := rng.Intn(m+1), rng.Intn(7)-3
-			b := MultiPolygon{ExPolygon{Outer: randSkyline(rng, bx, by, 1+rng.Intn(6), 6)}}
+			b := geom.MultiPolygon{geom.ExPolygon{Outer: randSkyline(rng, bx, by, 1+rng.Intn(6), 6)}}
 			if len(a.Validate()) != 0 || len(b.Validate()) != 0 {
 				continue
 			}
@@ -98,10 +99,10 @@ func TestRawInSweepIdFailRatchet(t *testing.T) {
 // terminating-or-continuing wall must not over-trace into a spurious lobe
 // outside A). Raw (unmasked) Intersect must equal the true area, not 6.
 func TestRawIntersectOuterCornerCloses(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: []Point{
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: []geom.Point{
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 2}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 2, Y: 2}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: 4}, {X: 0, Y: 4},
 	}}}
-	b := MultiPolygon{ExPolygon{Outer: []Point{
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: []geom.Point{
 		{X: 2, Y: -1}, {X: 7, Y: -1}, {X: 7, Y: 5}, {X: 6, Y: 5}, {X: 6, Y: 3}, {X: 5, Y: 3}, {X: 5, Y: 2}, {X: 4, Y: 2}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 5}, {X: 2, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpIntersect)
@@ -115,10 +116,10 @@ func TestRawIntersectOuterCornerCloses(t *testing.T) {
 // alone), inflating the symmetric difference. Enabling the horz-join
 // reconnection pass for Xor (as U/I/D use) closes them. True Xor = U−I = 5.
 func TestRawXorCoincidentReconnect(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: []Point{
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: []geom.Point{
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 3}, {X: 4, Y: 3}, {X: 4, Y: 1}, {X: 3, Y: 1}, {X: 3, Y: 5}, {X: 2, Y: 5}, {X: 2, Y: 1}, {X: 1, Y: 1}, {X: 1, Y: 5}, {X: 0, Y: 5},
 	}}}
-	b := MultiPolygon{ExPolygon{Outer: []Point{
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: []geom.Point{
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 5, Y: 5}, {X: 4, Y: 5}, {X: 4, Y: 2}, {X: 3, Y: 2}, {X: 3, Y: 5}, {X: 2, Y: 5}, {X: 2, Y: 3}, {X: 1, Y: 3}, {X: 1, Y: 5}, {X: 0, Y: 5},
 	}}}
 	got, err := rawOp(a, b, clip.OpXor)

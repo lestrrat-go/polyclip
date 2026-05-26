@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -11,7 +12,7 @@ import (
 func TestSimplifyPathsRemovesCollinear(t *testing.T) {
 	// A unit-area-100 square with two redundant collinear midpoints on its
 	// bottom and right edges.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0},
 		{X: 10, Y: 5}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
@@ -26,8 +27,8 @@ func TestSimplifyPathsRemovesCollinear(t *testing.T) {
 func TestSimplifyPathsEpsilonThreshold(t *testing.T) {
 	// Bottom edge has a bump at (5, 0.4): perpendicular distance 0.4 from the
 	// (0,0)-(10,0) line. eps=0.5 removes it; eps=0.3 keeps it.
-	mk := func() MultiPolygon {
-		return MultiPolygon{ExPolygon{Outer: Polygon{
+	mk := func() geom.MultiPolygon {
+		return geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 			{X: 0, Y: 0}, {X: 5, Y: 0.4}, {X: 10, Y: 0},
 			{X: 10, Y: 10}, {X: 0, Y: 10},
 		}}}
@@ -40,9 +41,9 @@ func TestSimplifyPathsEpsilonThreshold(t *testing.T) {
 
 // TestSimplifyPathsSimplifiesHoles applies reduction to hole rings too.
 func TestSimplifyPathsSimplifiesHoles(t *testing.T) {
-	in := MultiPolygon{ExPolygon{
-		Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
-		Holes: []Polygon{{
+	in := geom.MultiPolygon{geom.ExPolygon{
+		Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}},
+		Holes: []geom.Polygon{{
 			{X: 2, Y: 2}, {X: 4, Y: 2}, {X: 6, Y: 2}, // (4,2) collinear
 			{X: 6, Y: 6}, {X: 2, Y: 6},
 		}},
@@ -55,7 +56,7 @@ func TestSimplifyPathsSimplifiesHoles(t *testing.T) {
 // TestSimplifyPathsKeepsSmallRings leaves rings of fewer than four vertices
 // untouched — no interior vertex can be removed without degenerating them.
 func TestSimplifyPathsKeepsSmallRings(t *testing.T) {
-	tri := MultiPolygon{ExPolygon{Outer: Polygon{
+	tri := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 4, Y: 0}, {X: 2, Y: 3},
 	}}}
 	got := SimplifyPaths(tri, 100) // huge epsilon
@@ -67,7 +68,7 @@ func TestSimplifyPathsKeepsSmallRings(t *testing.T) {
 func TestSimplifyPathsDropsDegenerateRing(t *testing.T) {
 	// Four near-collinear points forming a thin sliver; a large epsilon
 	// removes the interior pair, leaving < 3 vertices.
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 3, Y: 0.01}, {X: 6, Y: 0}, {X: 3, Y: -0.01},
 	}}}
 	got := SimplifyPaths(in, 1.0)
@@ -77,7 +78,7 @@ func TestSimplifyPathsDropsDegenerateRing(t *testing.T) {
 // TestSimplifyPathsNegativeEpsilon treats a negative epsilon as zero: only
 // exactly-collinear vertices are removed.
 func TestSimplifyPathsNegativeEpsilon(t *testing.T) {
-	in := MultiPolygon{ExPolygon{Outer: Polygon{
+	in := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{
 		{X: 0, Y: 0}, {X: 5, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10},
 	}}}
 	got := SimplifyPaths(in, -5)

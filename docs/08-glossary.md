@@ -1,7 +1,7 @@
 # Glossary
 
 Every term in one place. Entries marked **(engine)** name internal mechanisms
-you will only meet inside the `clip/` and `fixed/` subpackages or in
+you will only meet inside the `internal/clip` and `internal/fixed` packages or in
 [`../DESIGN.md`](../DESIGN.md); you do not need them to use the library, but
 they are defined here so the engine documentation reads clearly.
 

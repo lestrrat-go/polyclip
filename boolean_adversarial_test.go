@@ -3,6 +3,7 @@ package polyclip
 import (
 	"testing"
 
+	"github.com/lestrrat-go/polyclip/geom"
 	"github.com/stretchr/testify/require"
 )
 
@@ -12,8 +13,8 @@ func TestDifferenceAnnulus(t *testing.T) {
 	// Outer 10x10 square minus inner 4x4 square produces an annulus —
 	// outer ring with a hole. The inner square sits strictly inside the
 	// outer with no edge touches; coincident edges are not exercised.
-	outer := MultiPolygon{sq(0, 0, 10)}
-	inner := MultiPolygon{sq(0, 0, 4)}
+	outer := geom.MultiPolygon{sq(0, 0, 10)}
+	inner := geom.MultiPolygon{sq(0, 0, 4)}
 	got, err := Difference(outer, inner)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "expected 1 piece, got %d: %+v", len(got), got)
@@ -24,8 +25,8 @@ func TestDifferenceAnnulus(t *testing.T) {
 
 func TestIntersectAreaInvariantOverlappingDiamonds(t *testing.T) {
 	// Area(Union) + Area(Intersect) == Area(A) + Area(B).
-	a := MultiPolygon{diamond(0, 0, 10)}
-	b := MultiPolygon{diamond(5, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
+	b := geom.MultiPolygon{diamond(5, 0, 10)}
 	u, err := Union(a, b)
 	require.NoError(t, err)
 	i, err := Intersect(a, b)
@@ -37,8 +38,8 @@ func TestIntersectAreaInvariantOverlappingDiamonds(t *testing.T) {
 
 func TestDifferenceOverlappingDiamonds(t *testing.T) {
 	// A ∖ B for two overlapping diamonds. Result area = Area(A) − Area(A∩B).
-	a := MultiPolygon{diamond(0, 0, 10)}
-	b := MultiPolygon{diamond(5, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
+	b := geom.MultiPolygon{diamond(5, 0, 10)}
 	got, err := Difference(a, b)
 	require.NoError(t, err)
 	require.NotEmpty(t, got, "expected non-empty difference")
@@ -50,8 +51,8 @@ func TestDifferenceOverlappingDiamonds(t *testing.T) {
 
 func TestXorOverlappingDiamonds(t *testing.T) {
 	// Xor(A,B) = symmetric difference. Area = Area(A) + Area(B) − 2·Area(A∩B).
-	a := MultiPolygon{diamond(0, 0, 10)}
-	b := MultiPolygon{diamond(5, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
+	b := geom.MultiPolygon{diamond(5, 0, 10)}
 	got, err := Xor(a, b)
 	require.NoError(t, err)
 	require.NotEmpty(t, got, "expected non-empty xor")
@@ -66,8 +67,8 @@ func TestUnionTouchingAtVertex(t *testing.T) {
 	// the source-based disambiguation in BuildLocalMinima, the two rings
 	// are traced independently; the merged result is two ExPolygons (the
 	// touch doesn't fuse the rings into one).
-	a := MultiPolygon{diamond(0, 0, 5)}
-	b := MultiPolygon{diamond(10, 0, 5)} // touches a at (5,0)
+	a := geom.MultiPolygon{diamond(0, 0, 5)}
+	b := geom.MultiPolygon{diamond(10, 0, 5)} // touches a at (5,0)
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	// Total area must equal sum of the two (touch is measure-zero overlap).
@@ -79,14 +80,14 @@ func TestUnionTouchingAtVertex(t *testing.T) {
 
 func TestUnionIdempotent(t *testing.T) {
 	// Union(A, A) should equal A (modulo orientation/start-vertex).
-	a := MultiPolygon{diamond(0, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
 	got, err := Union(a, a)
 	require.NoError(t, err)
 	require.InDelta(t, a.Area(), got.Area(), 0.5, "Union(A,A) area %v want %v", got.Area(), a.Area())
 }
 
 func TestIntersectIdempotent(t *testing.T) {
-	a := MultiPolygon{diamond(0, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
 	got, err := Intersect(a, a)
 	require.NoError(t, err)
 	require.InDelta(t, a.Area(), got.Area(), 0.5, "Intersect(A,A) area %v want %v", got.Area(), a.Area())
@@ -94,7 +95,7 @@ func TestIntersectIdempotent(t *testing.T) {
 
 func TestDifferenceSelf(t *testing.T) {
 	// Difference(A, A) should be empty.
-	a := MultiPolygon{diamond(0, 0, 10)}
+	a := geom.MultiPolygon{diamond(0, 0, 10)}
 	got, err := Difference(a, a)
 	require.NoError(t, err)
 	require.InDelta(t, 0.0, got.Area(), 0.5, "Diff(A,A) area %v want ≈0", got.Area())
@@ -103,8 +104,8 @@ func TestDifferenceSelf(t *testing.T) {
 // ===== Non-Union adversarial coverage on AXIAL inputs =====
 
 func TestIntersectTouchingBoundaryAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(10, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(10, 0, 5)}
 	got, err := Intersect(a, b)
 	require.NoError(t, err)
 	// Touching only at boundary edge — intersection has zero area.
@@ -112,8 +113,8 @@ func TestIntersectTouchingBoundaryAxisAligned(t *testing.T) {
 }
 
 func TestDifferenceTouchingBoundaryAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(10, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(10, 0, 5)}
 	got, err := Difference(a, b)
 	require.NoError(t, err)
 	// Touching boundary doesn't subtract anything from A's area.
@@ -121,8 +122,8 @@ func TestDifferenceTouchingBoundaryAxisAligned(t *testing.T) {
 }
 
 func TestXorTouchingBoundaryAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(10, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(10, 0, 5)}
 	got, err := Xor(a, b)
 	require.NoError(t, err)
 	wantArea := a.Area() + b.Area()
@@ -130,8 +131,8 @@ func TestXorTouchingBoundaryAxisAligned(t *testing.T) {
 }
 
 func TestIntersectNestedAxialSquares(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 10)}
-	b := MultiPolygon{sq(0, 0, 3)}
+	a := geom.MultiPolygon{sq(0, 0, 10)}
+	b := geom.MultiPolygon{sq(0, 0, 3)}
 	got, err := Intersect(a, b)
 	require.NoError(t, err)
 	// Inner square fully contained → intersection equals the inner square.
@@ -139,8 +140,8 @@ func TestIntersectNestedAxialSquares(t *testing.T) {
 }
 
 func TestDifferenceNestedAxialSquares(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 10)}
-	b := MultiPolygon{sq(0, 0, 3)}
+	a := geom.MultiPolygon{sq(0, 0, 10)}
+	b := geom.MultiPolygon{sq(0, 0, 3)}
 	got, err := Difference(a, b)
 	require.NoError(t, err)
 	wantArea := a.Area() - b.Area()
@@ -148,8 +149,8 @@ func TestDifferenceNestedAxialSquares(t *testing.T) {
 }
 
 func TestXorNestedAxialSquares(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 10)}
-	b := MultiPolygon{sq(0, 0, 3)}
+	a := geom.MultiPolygon{sq(0, 0, 10)}
+	b := geom.MultiPolygon{sq(0, 0, 3)}
 	got, err := Xor(a, b)
 	require.NoError(t, err)
 	wantArea := a.Area() - b.Area() // outer minus inner; equivalent to Difference here
@@ -157,16 +158,16 @@ func TestXorNestedAxialSquares(t *testing.T) {
 }
 
 func TestIntersectTouchingAtVertex(t *testing.T) {
-	a := MultiPolygon{diamond(0, 0, 5)}
-	b := MultiPolygon{diamond(10, 0, 5)}
+	a := geom.MultiPolygon{diamond(0, 0, 5)}
+	b := geom.MultiPolygon{diamond(10, 0, 5)}
 	got, err := Intersect(a, b)
 	require.NoError(t, err)
 	require.InDelta(t, 0.0, got.Area(), 0.01, "Intersect(touching vertex) area %v want ≈0", got.Area())
 }
 
 func TestDifferenceTouchingAtVertex(t *testing.T) {
-	a := MultiPolygon{diamond(0, 0, 5)}
-	b := MultiPolygon{diamond(10, 0, 5)}
+	a := geom.MultiPolygon{diamond(0, 0, 5)}
+	b := geom.MultiPolygon{diamond(10, 0, 5)}
 	got, err := Difference(a, b)
 	require.NoError(t, err)
 	require.InDelta(t, a.Area(), got.Area(), 0.01, "Difference(touching vertex) area %v want %v", got.Area(), a.Area())
@@ -180,8 +181,8 @@ func TestDifferenceTouchingAtVertex(t *testing.T) {
 // coincident-horizontal dispatch (DESIGN.md §12.6.1, §12.11).
 
 func TestIntersectOverlappingAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(3, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(3, 0, 5)}
 	got, err := Intersect(a, b)
 	require.NoError(t, err)
 	wantArea := 70.0 // overlap rectangle [-2,5]×[-5,5]
@@ -189,8 +190,8 @@ func TestIntersectOverlappingAxisAligned(t *testing.T) {
 }
 
 func TestDifferenceOverlappingAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(3, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(3, 0, 5)}
 	got, err := Difference(a, b)
 	require.NoError(t, err)
 	wantArea := 30.0 // L-shape: sq1 minus overlap
@@ -198,8 +199,8 @@ func TestDifferenceOverlappingAxisAligned(t *testing.T) {
 }
 
 func TestXorOverlappingAxisAligned(t *testing.T) {
-	a := MultiPolygon{sq(0, 0, 5)}
-	b := MultiPolygon{sq(3, 0, 5)}
+	a := geom.MultiPolygon{sq(0, 0, 5)}
+	b := geom.MultiPolygon{sq(3, 0, 5)}
 	got, err := Xor(a, b)
 	require.NoError(t, err)
 	wantArea := 60.0 // two L-shapes: (sq1 ∪ sq2) − 2·overlap = 130 − 140? Let me recompute.
@@ -215,8 +216,8 @@ func TestXorOverlappingAxisAligned(t *testing.T) {
 // crossing flows through the normal IntersectEdges path. Expected single
 // merged piece of area 184 (100 + 100 − 16 overlap).
 func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 6, Y: 6}, {X: 16, Y: 6}, {X: 16, Y: 16}, {X: 6, Y: 16}}}}
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 184.0 // 100 + 100 − 16 overlap [6,10]×[6,10]
@@ -240,8 +241,8 @@ func TestUnionOverlappingSquaresVertexInsideOther(t *testing.T) {
 // between-edges via IntersectEdges, mirroring Clipper2's DoMaxima
 // (engine.cpp:2729). Expected area 130: pentagon (-5,-5),(8,-5),(8,5),(-2,5),(-5,5).
 func TestUnionCoincidentHorizConfluence(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: -5, Y: -5}, {X: 5, Y: -5}, {X: -2, Y: 5}, {X: -5, Y: 5}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: -2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}, {X: -2, Y: 5}}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -5, Y: -5}, {X: 5, Y: -5}, {X: -2, Y: 5}, {X: -5, Y: 5}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -2, Y: -5}, {X: 8, Y: -5}, {X: 8, Y: 5}, {X: -2, Y: 5}}}}
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 130.0
@@ -264,8 +265,8 @@ func TestUnionCoincidentHorizConfluence(t *testing.T) {
 //
 // Expected area 254.5454…: |a|+|b| − overlap = 155 + 100 − 5/11.
 func TestUnionSlantCoincidentBottom(t *testing.T) {
-	a := MultiPolygon{ExPolygon{Outer: Polygon{{X: -5, Y: -5}, {X: 16, Y: -5}, {X: 5, Y: 5}, {X: -5, Y: 5}}}}
-	b := MultiPolygon{ExPolygon{Outer: Polygon{{X: 15, Y: -5}, {X: 25, Y: -5}, {X: 25, Y: 5}, {X: 15, Y: 5}}}}
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: -5, Y: -5}, {X: 16, Y: -5}, {X: 5, Y: 5}, {X: -5, Y: 5}}}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.Polygon{{X: 15, Y: -5}, {X: 25, Y: -5}, {X: 25, Y: 5}, {X: 15, Y: 5}}}}
 	got, err := Union(a, b)
 	require.NoError(t, err)
 	wantArea := 255.0 - 5.0/11.0

@@ -104,11 +104,18 @@ func BuildLocalMinima(segs []Segment) ([]LocalMin, error) {
 		if err != nil {
 			return nil, err
 		}
-		ringMins, err := findRingMinima(ring)
-		if err != nil {
-			return nil, err
+		// traceRing may return a self-touching closed walk (two same-source loops
+		// pinched at a shared vertex — e.g. a polygon and its hole whose corners
+		// snap onto one grid point). Decompose it into its simple loops so each
+		// builds correct bounds; a genuinely simple ring is returned as a single
+		// loop unchanged. Mirrors the output-side splitSelfTouchingRings.
+		for _, loop := range splitSelfTouchingLoops(ring) {
+			ringMins, err := findRingMinima(loop)
+			if err != nil {
+				return nil, err
+			}
+			minima = append(minima, ringMins...)
 		}
-		minima = append(minima, ringMins...)
 	}
 
 	sort.Slice(minima, func(i, j int) bool {
@@ -117,37 +124,41 @@ func BuildLocalMinima(segs []Segment) ([]LocalMin, error) {
 	return minima, nil
 }
 
-// traceRing walks from start following input-direction End→Start links
-// until it returns to start. All visited segments are marked. Returns
-// [ErrOpenRing] if the chain breaks or visits a non-start segment twice.
+// traceRing walks from start following input-direction End→Start links until
+// it returns to the start vertex. All visited segments are marked. Returns
+// [ErrOpenRing] only if the chain breaks (a vertex with no unvisited outgoing
+// segment that is not the start vertex) — an open chain that cannot close.
 //
 // At a vertex where multiple segments start (shared corner between two
-// touching rings), the next segment is chosen by: (1) source match —
-// prefer same-Src as the incoming segment, then (2) smallest CCW turn
-// from the incoming direction, which keeps the walk within a single ring
-// when two rings of the same source touch at a vertex.
+// touching rings), the next UNVISITED segment is chosen by: (1) source match —
+// prefer same-Src as the incoming segment, then (2) smallest CCW turn from the
+// incoming direction, which keeps the walk within a single ring when two rings
+// of the same source touch at a vertex.
+//
+// The walk closes when it returns to the start vertex (cur.End() ==
+// start.Start()) with no same-source unvisited continuation. A SAME-source
+// unvisited edge at the start vertex is followed instead of closing: a
+// self-intersecting ring legitimately passes through a vertex that may equal
+// its start vertex without ending there, and a same-source loop pinched at the
+// start vertex must be absorbed and split out later. A DIFFERENT-source
+// unvisited edge at the start vertex is left alone (it belongs to another
+// ring); the walk closes. The returned ring is therefore a closed walk that may
+// be self-touching; [BuildLocalMinima] splits it into simple loops.
 func traceRing(start *Segment, byStart map[fixed.Point][]*Segment, visited map[*Segment]struct{}) ([]*Segment, error) {
 	ring := []*Segment{start}
 	visited[start] = struct{}{}
 	cur := start
 	for {
 		candidates := byStart[cur.End()]
-		next := pickNextSegment(cur, candidates, visited)
-		if next == nil {
-			return nil, fmt.Errorf("%w: chain breaks at vertex %v (no outgoing segment)", ErrOpenRing, cur.End())
-		}
-		if next == start {
+		next, sameSrc := pickNextSegment(cur, candidates, visited)
+		atStart := cur.End() == start.Start()
+		if atStart && (next == nil || !sameSrc) {
+			// Back at the start vertex with nothing of this ring left to follow:
+			// the accumulated segments form a closed (possibly self-touching) loop.
 			return ring, nil
 		}
-		// pickNextSegment may return an already-visited candidate (it includes
-		// them so this loop can detect closure via next == start above). A
-		// visited segment that is NOT start means the chain has stepped into a
-		// segment already consumed by this or another ring — a self-touching or
-		// self-intersecting input where no simple ring closes. Without this
-		// check the walk follows a non-start sub-cycle forever, growing ring
-		// without bound until the process exhausts memory and the OS kills it.
-		if _, seen := visited[next]; seen {
-			return nil, fmt.Errorf("%w: chain revisits %v before closing the ring started at %v", ErrOpenRing, next.Start(), start.Start())
+		if next == nil {
+			return nil, fmt.Errorf("%w: chain breaks at vertex %v (no outgoing segment)", ErrOpenRing, cur.End())
 		}
 		visited[next] = struct{}{}
 		ring = append(ring, next)
@@ -155,57 +166,46 @@ func traceRing(start *Segment, byStart map[fixed.Point][]*Segment, visited map[*
 	}
 }
 
-// pickNextSegment chooses the next segment of cur's ring at vertex
-// cur.End() from the candidate list. Filter rules:
-//
-//  1. Drop already-visited segments (those are part of completed rings),
-//     unless one of them is the start of the ring being traced.
-//  2. Among the survivors, prefer same-Src as cur.
-//  3. If still ambiguous, pick the candidate with the smallest CCW turn
-//     from cur's input direction.
-func pickNextSegment(cur *Segment, candidates []*Segment, visited map[*Segment]struct{}) *Segment {
+// pickNextSegment chooses the next UNVISITED segment of cur's ring at vertex
+// cur.End() from the candidate list, and reports whether the chosen segment
+// shares cur's source. Selection: prefer same-Src as cur, then smallest CCW
+// turn from cur's incoming direction. Returns (nil, false) when no unvisited
+// candidate remains (cur itself and already-consumed segments are skipped) —
+// the caller decides whether that means ring closure or a broken chain.
+func pickNextSegment(cur *Segment, candidates []*Segment, visited map[*Segment]struct{}) (*Segment, bool) {
 	var matches []*Segment
 	for _, c := range candidates {
 		if c == cur {
 			continue
 		}
 		if _, seen := visited[c]; seen {
-			// Allow re-visit only if c is the start of the ring being
-			// traced — that's how traceRing detects ring closure. Since
-			// traceRing already checks `next == start`, we don't need to
-			// special-case here: include visited candidates and let the
-			// outer loop catch the closure. But filter out OTHER visited
-			// (non-start) segs to avoid jumping into a different ring.
-			matches = append(matches, c)
 			continue
 		}
 		matches = append(matches, c)
 	}
 	if len(matches) == 0 {
-		return nil
+		return nil, false
 	}
-	if len(matches) == 1 {
-		return matches[0]
-	}
-	// Multiple candidates — prefer same-Src.
+	// Prefer same-Src.
 	var sameSrc []*Segment
 	for _, c := range matches {
 		if c.Src == cur.Src {
 			sameSrc = append(sameSrc, c)
 		}
 	}
-	if len(sameSrc) == 1 {
-		return sameSrc[0]
-	}
 	pool := matches
-	if len(sameSrc) > 1 {
+	isSameSrc := false
+	if len(sameSrc) > 0 {
 		pool = sameSrc
+		isSameSrc = true
 	}
-	// Smallest CCW turn from cur's incoming direction. The "turn angle"
-	// is the angle from (-cur_dir) to candidate_dir measured CCW. For two
-	// rings of the same source touching at a vertex, the candidate from
-	// the same ring forms the smaller CCW turn (the ring continues on the
-	// same side).
+	if len(pool) == 1 {
+		return pool[0], isSameSrc
+	}
+	// Smallest CCW turn from cur's incoming direction. The "turn angle" is the
+	// angle from (-cur_dir) to candidate_dir measured CCW. For two rings of the
+	// same source touching at a vertex, the candidate from the same ring forms
+	// the smaller CCW turn (the ring continues on the same side).
 	incoming := vec(cur.End(), cur.Start()) // reversed: points BACK along cur
 	bestIdx := -1
 	bestAngle := 0.0
@@ -217,7 +217,41 @@ func pickNextSegment(cur *Segment, candidates []*Segment, visited map[*Segment]s
 			bestAngle = ang
 		}
 	}
-	return pool[bestIdx]
+	return pool[bestIdx], isSameSrc
+}
+
+// splitSelfTouchingLoops decomposes a closed segment walk into simple loops at
+// every vertex it revisits. Walking the segments by their Start vertex, when
+// the walk returns to a vertex already on the open path, the run since that
+// vertex forms a closed sub-loop and is split off; the shared vertex continues
+// on the path. A walk with no repeated vertex returns as a single loop. This is
+// the segment-level analogue of splitSelfTouchingRings (which operates on output
+// point lists).
+func splitSelfTouchingLoops(ring []*Segment) [][]*Segment {
+	if len(ring) == 0 {
+		return nil
+	}
+	var loops [][]*Segment
+	stack := make([]*Segment, 0, len(ring))
+	at := make(map[fixed.Point]int, len(ring))
+	for _, s := range ring {
+		v := s.Start()
+		if j, ok := at[v]; ok {
+			loop := make([]*Segment, len(stack)-j)
+			copy(loop, stack[j:])
+			loops = append(loops, loop)
+			for k := j; k < len(stack); k++ {
+				delete(at, stack[k].Start())
+			}
+			stack = stack[:j]
+		}
+		at[v] = len(stack)
+		stack = append(stack, s)
+	}
+	if len(stack) > 0 {
+		loops = append(loops, stack)
+	}
+	return loops
 }
 
 func vec(from, to fixed.Point) [2]float64 {

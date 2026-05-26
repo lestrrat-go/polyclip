@@ -252,16 +252,21 @@ the slicer's thin-wall / gap-fill / single-extrusion features.
 
 ### 7.5 Reachable `ErrHorizontalNotSupported`
 
-The legacy per-edge fallback can return `ErrHorizontalNotSupported` when
-`BuildLocalMinima` fails on a shared-vertex axis-aligned input: preprocessing
-creates a degree-4 collinear vertex its segment-soup `traceRing` can't
-disambiguate, after which the legacy `ClassifyHorizontals` rejects the staircase
-(mid-bound) horizontals. This is readily reachable on overlapping skyline
-polygons, so the error is part of the contract and callers must handle it. The
-intended fix — wiring the ordered-ring reconstruction (`SweepRingsFill` /
-`splitOrderedRings`, built for §7.2) into the boolean path so minima
-reconstruction is robust to shared vertices — is deferred; the error path is the
-accepted interim behaviour, not a bug.
+The legacy per-edge fallback returns `ErrHorizontalNotSupported` only when
+`BuildLocalMinima` fails AND the fallback's `ClassifyHorizontals` then meets a
+staircase (mid-bound) horizontal. Historically this was readily hit on
+non-simple axis-aligned input — a polygon and its hole (or two offset/slicer
+loops) snapping onto one grid point makes a degree-4 self-touching vertex that
+the old `traceRing` could not reconstruct, dropping the engine onto the
+staircase-rejecting fallback (~32 % of ops on some real slicer layers).
+
+`BuildLocalMinima` now **decomposes self-touching rings** (§12.10.7): such a
+vertex pinch reconstructs into its simple loops, which the bound model handles
+natively (including their mid-bound horizontals), so this case no longer errors.
+The error remains reachable only for genuinely **open / broken** input chains
+(reconstruction cannot close a ring) that also carry a mid-bound horizontal, so
+it stays part of the contract and callers should handle it — but well-formed
+closed input, even self-touching or self-intersecting, no longer hits it.
 
 ### 7.6 Axis-aligned identity violations (collinear shared edge)
 
@@ -776,6 +781,7 @@ Called when a bound's cursor reaches its last segment (or walks through its trai
 - **Maxima gate on `IsHotEdge`, not `Contributing`.** A post-swap reclassification can leave an edge non-contributing yet still hot; its ring must still close/join, or the top half of an overlapping-shapes union is dropped.
 - **Cursor advance must reschedule intersections.** The new segment may cross neighbours the old one didn't; without `maybeScheduleIntersect` against the new neighbours, a crossing silently never fires.
 - **`BuildLocalMinima` is tried before `ClassifyHorizontals`.** The bound model handles mid-bound horizontals natively (a staircase); the legacy `ClassifyHorizontals` rejects them. The bound model is used whenever `BuildLocalMinima` succeeds.
+- **`BuildLocalMinima` decomposes self-touching rings.** Input-direction adjacency reconstructs a ring that touches itself at a vertex (two same-source loops pinched at one grid point — e.g. a polygon and its hole whose corners snap together, or non-simple offset/slicer output) as a single closed walk that revisits the pinch vertex. `traceRing` follows a **same-source** unvisited edge at the start vertex (a self-intersecting ring legitimately passes through its own start vertex; a same-source pinched loop must be absorbed) and closes only when the walk returns to the start vertex with no same-source continuation — leaving a **different-source** touching ring for a separate trace. `splitSelfTouchingLoops` then splits the closed walk into its simple loops (the input-side analogue of `splitSelfTouchingRings`), so each loop builds correct bounds. This keeps the bound model — not the staircase-rejecting legacy fallback — handling non-simple axis-aligned input. A genuinely open chain still returns `ErrOpenRing` and falls back. **Contract:** the boolean ops therefore accept self-touching / self-intersecting input directly (resolved by non-zero winding), and `Simplify` cleans it; callers need not pre-`Simplify`. Transversal self-crossings remain subject to the fixed-point snap limitation of §7.2.
 
 ### 12.11 Degenerate-confluence handling
 
@@ -789,7 +795,7 @@ The residual complexity is **degeneracies**: shared vertices, vertices on edges,
 - **Notch-plateau joins (hole∪clip void merges).** `intersectNotchPlateau` (Intersect) and `differenceNotchPlateauJoin` (Difference) handle a hole bound made hot by a "bite" crossing that rides up to the hole apex: the void boundary must continue along the hole's top plateau to its near end, where a cross-source clip ring re-bounds the void, and the two rings join there. Without this the hot bound is dropped and the hole's uncovered region stays filled.
 - **Ring closure / same-side maxima.** polyclip's bottom-up sweep, with its mirrored front/back convention, builds rings that meet **same-side** at an apex where Clipper2's top-down sweep closes a ring on itself. `AddLocalMaxPoly` resolves this two ways: a **figure-8 pinch** (emit the apex on each ring, cross-link the two apex `OutPt`s into one self-touching cycle that `splitSelfTouchingRings` later decomposes — no orientation guess) for a genuine interleaving; and a **reverse-one-ring + opposite-side join** when the same-side arrival is a mirror artifact. The two are distinguished by whether a ring was spawned at a crossing (`fromInputMin == false`, the legitimate figure-8) versus two input-minimum rings meeting same-side (the artifact — `fromInputMin`, equal `WindOther`, both-back → reverse+join). The both-back continuing case reverses the spawned ring's sides to restore Clipper2's always-opposite-side invariant.
 - **Coincident horizontals.** A coincident different-source horizontal pair does not cross transversally. `dispatchIntersect` returns nil for an **opposite-interior** pair (read from `Segment.Reversed`) — a doubled/cancelling boundary — for non-Xor ops; `processHorzJoins` (`clip/horzjoin.go`) reconnects the skip-separated runs once global topology is known. The skip is suppressed at a boundary **exit** (one bound continues past the overlap), gated by `continuesCollinearHorizontal`, `respawnHandoffAtOverlap`, and an `IsBoundLast` requirement. For Xor the coincident hot edges **interleave** instead (the tunnel branch would collapse a shared plateau apex to a 2-point spike), and Xor is excluded from the horizontal-join pass.
-- **Postprocess nesting** (§11.9) and the `traceRing` open-ring guard (returns `ErrOpenRing` rather than following a self-touching sub-cycle to OOM).
+- **Postprocess nesting** (§11.9) and the `traceRing` reconstruction: a ring that touches itself at a vertex is traced as one closed walk and decomposed into simple loops by `splitSelfTouchingLoops` (§12.10.7); only a genuinely open chain returns `ErrOpenRing` (rather than following a sub-cycle to OOM) and falls back.
 
 **Validation — Monte-Carlo oracle, NOT Clipper2.** Correctness is measured against a Monte-Carlo area oracle and the noise-free set identities (§6). Clipper2 is **not** a usable reference for degenerate small-integer inputs: at native scale it rounds fractional crossings to the integer grid and is itself wrong on all four ops (pre-scaling its input by 1e6 confirms the MC values). On these inputs polyclip's fine fixed-point grid is *more* accurate.
 

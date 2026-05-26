@@ -173,3 +173,67 @@ func TestBuildLocalMinimaWShape(t *testing.T) {
 	require.Equal(t, fixed.Point{X: 2, Y: 0}, minima[0].Vertex, "first min: %v want (2,0)", minima[0].Vertex)
 	require.Equal(t, fixed.Point{X: 8, Y: 0}, minima[1].Vertex, "second min: %v want (8,0)", minima[1].Vertex)
 }
+
+// TestBuildLocalMinimaSelfTouchingVertex covers a ring that touches itself at a
+// single vertex — two same-source loops pinched at one point, as happens when a
+// polygon and its hole snap onto a shared grid point (the makislicer
+// mid-bound-horizontal repro). Input-direction adjacency reconstructs this as
+// one closed walk that revisits the pinch vertex; BuildLocalMinima must
+// decompose it into its two simple loops rather than returning ErrOpenRing.
+// Before the fix this fell through to the legacy per-edge path, which rejected
+// the loops' mid-bound horizontals.
+func TestBuildLocalMinimaSelfTouchingVertex(t *testing.T) {
+	// Two unit squares sharing only the corner (2,2), traced as a single ring:
+	//   (0,0)->(2,0)->(2,2)->(4,2)->(4,4)->(2,4)->(2,2)->(0,2)->(0,0)
+	// The walk visits (2,2) twice. Correct decomposition: the lower-left square
+	// (local min (0,0)) and the upper-right square (local min (2,2)).
+	pts := []fixed.Point{
+		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2},
+		{X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4},
+		{X: 2, Y: 2}, {X: 0, Y: 2},
+	}
+	n := len(pts)
+	segs := make([]Segment, 0, n)
+	for i := range n {
+		j := i + 1
+		if j == n {
+			j = 0
+		}
+		seg := NewSegment(pts[i], pts[j], Subject)
+		if !seg.Degenerate() {
+			segs = append(segs, seg)
+		}
+	}
+	minima, err := BuildLocalMinima(segs)
+	require.NoError(t, err)
+	require.Len(t, minima, 2, "expected one local minimum per pinched loop; minima=%v", minima)
+	require.Equal(t, fixed.Point{X: 0, Y: 0}, minima[0].Vertex, "first min: %v want (0,0)", minima[0].Vertex)
+	require.Equal(t, fixed.Point{X: 2, Y: 2}, minima[1].Vertex, "second min: %v want (2,2)", minima[1].Vertex)
+}
+
+// TestSplitSelfTouchingLoops checks the segment-level decomposition directly: a
+// closed walk with no repeated vertex stays one loop; one that revisits a vertex
+// splits at that vertex into two loops.
+func TestSplitSelfTouchingLoops(t *testing.T) {
+	mk := func(pts []fixed.Point) []*Segment {
+		n := len(pts)
+		segs := make([]*Segment, 0, n)
+		for i := range n {
+			s := NewSegment(pts[i], pts[(i+1)%n], Subject)
+			segs = append(segs, &s)
+		}
+		return segs
+	}
+	simple := mk([]fixed.Point{{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2}, {X: 0, Y: 2}})
+	require.Len(t, splitSelfTouchingLoops(simple), 1, "a simple ring stays one loop")
+
+	touching := mk([]fixed.Point{
+		{X: 0, Y: 0}, {X: 2, Y: 0}, {X: 2, Y: 2},
+		{X: 4, Y: 2}, {X: 4, Y: 4}, {X: 2, Y: 4},
+		{X: 2, Y: 2}, {X: 0, Y: 2},
+	})
+	loops := splitSelfTouchingLoops(touching)
+	require.Len(t, loops, 2, "a ring pinched at one vertex splits into two loops")
+	require.Len(t, loops[0], 4, "first split loop (upper-right square)")
+	require.Len(t, loops[1], 4, "second split loop (lower-left square)")
+}

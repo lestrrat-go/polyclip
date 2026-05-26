@@ -13,6 +13,58 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestHorizJoinHangRepro is the minimal repro for the processHorzJoins
+// infinite loop found by the §7.5 reachability harness: Difference of two
+// axis-aligned skyline polygons spins forever in the horizontal-join merge.
+func TestHorizJoinHangRepro(t *testing.T) {
+	a := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(0, 0).Point(7, 0).Point(7, 6).Point(6, 6).Point(5, 6).
+		Point(5, 2).Point(4, 2).Point(3, 2).Point(3, 4).Point(2, 4).
+		Point(2, 6).Point(1, 6).Point(1, 3).Point(0, 3).
+		MustPolygon()}}
+	b := geom.MultiPolygon{geom.ExPolygon{Outer: geom.New().
+		Point(1, 1).Point(4, 1).Point(4, 2).Point(3, 2).
+		Point(3, 4).Point(2, 4).Point(1, 4).
+		MustPolygon()}}
+	require.Empty(t, a.Validate(), "A invalid: %v", a.Validate())
+	require.Empty(t, b.Validate(), "B invalid: %v", b.Validate())
+	got, err := Difference(a, b)
+	require.NoError(t, err)
+	t.Logf("Difference area=%v result=%v", got.Area(), got)
+}
+
+// TestHorizIdentityRepro is the regression for the §7.6 axis-aligned Intersect
+// spurious-lobe bug. A and B share the collinear boundary segment (1,1)-(2,1);
+// the true intersection is the unit square [1,2]x[0,1] (area 1). The sweep used
+// to emit a second, spurious triangle lobe (2,1)-(3,3)-(2,3) lying inside B's
+// upper-right region but OUTSIDE A, so Intersect returned area 2 and the U/D/X
+// algebraic identities (computed off that wrong I) broke. The figure-8 formed
+// because at the shared edge — A's outer local maximum — B's hot bound was
+// dragged up out of A instead of the ring closing. Fixed by closing the cross-
+// source ring at a coincident horizontal apex when the other source does not
+// fill above it (clip/sweep.go closeBound self-closure, DESIGN.md §7.6).
+func TestHorizIdentityRepro(t *testing.T) {
+	a := geom.New().
+		Point(0, 0).Point(2, 0).Point(2, 1).Point(1, 1).Point(0, 1).
+		MustBuild()
+	b := geom.New().
+		Point(1, -1).Point(3, -1).Point(3, 3).Point(2, 3).Point(2, 1).Point(1, 1).
+		MustBuild()
+	u, _ := Union(a, b)
+	i, _ := Intersect(a, b)
+	d, _ := Difference(a, b)
+	x, _ := Xor(a, b)
+	aA, bA := a.Area(), b.Area()
+	uA, iA, dA, xA := u.Area(), i.Area(), d.Area(), x.Area()
+	t.Logf("A=%v B=%v U=%v I=%v D=%v X=%v", aA, bA, uA, iA, dA, xA)
+	// The intersection is the unit square [1,2]x[0,1]; the spurious triangle
+	// lobe (which made I=2) must be gone.
+	require.InDelta(t, 1, iA, 1e-6, "intersect area: got %v want 1 (spurious lobe?)", iA)
+	require.InDelta(t, aA+bA-iA, uA, 1e-6, "U identity: U=%v want %v", uA, aA+bA-iA)
+	require.InDelta(t, aA-iA, dA, 1e-6, "D identity: D=%v want %v", dA, aA-iA)
+	require.InDelta(t, uA-iA, xA, 1e-6, "X identity: X=%v want %v", xA, uA-iA)
+}
+
 // skyline builds a simple CCW rectilinear "histogram" polygon: m unit-width
 // columns sitting on y=0 with the given heights. Rich in mid-bound horizontal
 // edges (every monotone run of column tops is a staircase step that

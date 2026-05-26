@@ -14,10 +14,9 @@ type Triangle [3]Point
 // same region. Each [ExPolygon] is triangulated independently and the results
 // are concatenated; the order of triangles is otherwise unspecified.
 //
-// The triangulation is a faithful, from-scratch implementation of the ear-
+// The triangulation is an implementation of the ear-
 // clipping algorithm with hole elimination (the approach popularized by
-// mapbox/earcut), chosen because Clipper2's own triangulation module is known
-// to mis-handle several cases. Holes are connected to their outer ring by
+// mapbox/earcut). Holes are connected to their outer ring by
 // bridge edges, then the resulting polygon is triangulated by ear clipping with
 // self-intersection cures and recursive splitting as robustness fallbacks. The
 // output uses only the input's own vertices — no Steiner points are introduced

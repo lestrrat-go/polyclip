@@ -18,11 +18,11 @@ A pure-Go library for 2D polygon operations:
 
 The shape primitive is a simple-polygon-with-holes (`ExPolygon`) and collections of them (`MultiPolygon`); every operation is closed over `MultiPolygon`.
 
-The downstream consumer is [`lestrrat-go/makislicer`](../makislicer), a 3D-printer slicer, where nearly every quality feature needs reliable polygon arithmetic. The reference-quality C++ library for this is **Clipper2** (Angus Johnson); the Go ecosystem lacks an equivalent. This library fills that gap.
+The target workload is 3D-printer slicing, where nearly every quality feature needs reliable polygon arithmetic, and the Go ecosystem lacks a robust pure-Go library for it. The established C++ reference for this problem is **Clipper2** (Angus Johnson), whose algorithm polyclip's engine is built on (§4.1).
 
-**Goals:** correctness on adversarial input (concentric circles, self-touching polygons, collinear/coincident edges, near-degenerate slivers); pure Go (no cgo); closed (`MultiPolygon` in, `MultiPolygon` out); idiomatic small API; acceptable performance (within 5–10× of Clipper2 on slicer workloads).
+**Goals:** correctness on adversarial input (concentric circles, self-touching polygons, collinear/coincident edges, near-degenerate slivers); pure Go (no cgo); closed (`MultiPolygon` in, `MultiPolygon` out); idiomatic small API; acceptable performance on slicer workloads.
 
-**Non-goals:** 3D, curved geometry (NURBS / true arcs — arcs are polyline-approximated), cgo bindings to Clipper2. Everything Clipper2 does on planar polygons is in scope; the parity surface and the design choice behind each feature are in §7.8.
+**Non-goals:** 3D, curved geometry (NURBS / true arcs — arcs are polyline-approximated), cgo bindings to a native clipping library. The planar-polygon feature surface and the design choice behind each feature are in §7.8.
 
 ---
 
@@ -78,7 +78,7 @@ Open-polyline clipping is available via `Builder.AddOpenSubject` + `Result.Open`
 
 ### 4.1 Boolean engine: Vatti / Clipper2 model
 
-The engine is a Vatti scanline modeled on **Clipper2** (Angus Johnson, `CPP/Clipper2Lib/src/clipper.engine.cpp`). Clipper2 is BSL-1.0 and is used as an algorithmic reference only; this library is independently implemented under MIT (no code copied).
+The engine is a Vatti scanline modeled on **Clipper2** (Angus Johnson, `CPP/Clipper2Lib/src/clipper.engine.cpp`); polyclip's sweep follows its algorithm and data model, and `engine.cpp:line` references throughout this document point into that source. See [`NOTICE`](NOTICE) for attribution.
 
 Plain-English sketch:
 
@@ -180,8 +180,8 @@ Beyond the core sweep (§11–§12), each feature area below records the design
 decision taken and why — including the limitations deliberately accepted and the
 alternatives rejected. The boolean engine targets the noise-free set identities
 (§6.2) across random, large, degenerate, and holed inputs at slicer-grade
-correctness; the choices here extend that surface toward a drop-in for
-`makislicer`.
+correctness; the choices here extend that surface toward a drop-in slicer
+geometry layer.
 
 ### 7.1 Offset: inward-offset topology changes
 
@@ -233,8 +233,8 @@ naive quadratic path:
   intercept carries enough rounding error to mis-order and drop a crossing. This
   is what keeps dense mutually-intersecting inputs (meshing gears) tractable.
 
-Acknowledged gap: the "within 5–10× of Clipper2" goal (§1) is not measured against
-Clipper2 directly, because the correctness oracle is Monte-Carlo, not Clipper2.
+Acknowledged gap: there is no standing benchmark suite, so absolute throughput is
+uncharacterized.
 
 ### 7.4 Open-path offset (`EndType`)
 
@@ -299,14 +299,14 @@ subset filter drops; pieces clear of `B` short-circuit on bbox. `Intersect`,
 its subject. The single-pass in-sweep resolution that would remove the need is the
 same deferred rework as §7.6.
 
-### 7.8 Clipper2 feature parity
+### 7.8 Planar feature surface
 
-The guiding design principle: nothing Clipper2 does on planar polygons should be
-missing here, and each parity feature should be **additive** — layered over the
-existing sweep, the containment forest (§11.9), or `Union` — so the core engine
-stays untouched. The map of Clipper2's planar API to where its design is recorded:
+The guiding design principle: each feature beyond the core boolean ops should be
+**additive** — layered over the existing sweep, the containment forest (§11.9), or
+`Union` — so the core engine stays untouched. The map of features to where each
+one's design is recorded:
 
-| Clipper2 feature                 | Where / how       |
+| Feature                          | Where / how       |
 |----------------------------------|-------------------|
 | `Builder` accumulator API        | (0)               |
 | Boolean ops (∪ ∩ − ⊕)            | §4, §11–§12        |
@@ -328,7 +328,7 @@ Z-coords (h) touches the engine, and only minimally — a recording hook in the 
 behind an off-by-default flag. Open-path clipping (c) was expected to need engine
 changes too but is designed as a standalone post-sweep pass instead.
 
-**(0) `Builder` accumulator API.** The Clipper2-style entry point the other
+**(0) `Builder` accumulator API.** The entry point the other
 features build on: `NewBuilder().AddSubject(…).AddClip(…).Execute(op)` returning
 `Result{Closed, Open}`, with a root-package `Operation`
 (`OpUnion`/`OpIntersect`/`OpDifference`/`OpXor`). The accumulator is the general
@@ -466,9 +466,8 @@ by interpolation and carries no Z. Consequence to note: adding the field is a
 (pre-1.0) breaking change to positional `Point{x, y}` / `Polygon{{x,y},…}` literals
 — use keyed fields.
 
-**(i) Triangulation.** Clipper2 ships a triangulation utility, but it is known
-unreliable and was deliberately **not** used as a reference. `Triangulate(MultiPolygon)
-[]Triangle` is a standalone, from-scratch transcription of the ear-clipping
+**(i) Triangulation.** `Triangulate(MultiPolygon)
+[]Triangle` is a standalone implementation of the ear-clipping
 algorithm with hole elimination popularized by mapbox/earcut (ISC-licensed):
 a doubly-linked-list ear clip, hole bridging via `findHoleBridge`/`splitPolygon`,
 and the full robustness ladder (`filterPoints` → `cureLocalIntersections` →
@@ -483,7 +482,7 @@ region area catches both overlap and gaps). Input must be well-formed (the form
 
 ### 7.9 Open items to revisit
 
-Capability parity with Clipper2 is reached (§7.8) and the differential oracle holds
+The planar feature surface is complete (§7.8) and the differential oracle holds
 at zero identity violation (§6.2). What remains is **quality, not coverage** — each
 item below is correct as shipped but is a deliberate shortcut over the ideal
 single-pass engine, or an unverified goal. Recorded here as one list so the
@@ -501,10 +500,9 @@ remaining work is findable; the rationale lives in the cross-referenced section.
    through `execOpFilled`, which drops the per-piece decomposition of item 2, so it
    runs one sweep and can hit the coincident-confluence over-trace. Closing items
    1–2 closes this.
-4. **Performance vs Clipper2 unmeasured (§7.3).** The "within 5–10× of Clipper2"
-   goal (§1) was never benchmarked against Clipper2 — the correctness oracle is
-   Monte-Carlo, not Clipper2. Triangulation is additionally O(n²) (z-order hashing
-   omitted by choice, §7.8(i)). Needs a direct benchmark harness to confirm.
+4. **Performance unmeasured (§7.3).** There is no standing benchmark suite, so
+   absolute throughput is uncharacterized. Triangulation is additionally O(n²)
+   (z-order hashing omitted by choice, §7.8(i)). Needs a benchmark harness.
 5. **Representational rough edges.** `RectClip` returns a single ring joined by a
    zero-width seam where a rectangle bisects a concave ring, rather than separate
    `ExPolygon` values (same area; `Simplify` separates them — §7.8(f)).
@@ -586,12 +584,12 @@ not a bug — current behaviour is correct. Ordered by impact. Profiled on
 - **Dependencies:** zero external modules — standard library only. Non-negotiable; the point is to be a clean leaf dependency.
 - **Concurrency:** the public API is safe for concurrent use on different inputs. A `MultiPolygon` value is not synchronized (same rule as `[]int`). No internal parallelism in the library itself.
 - **Style:** `gofmt`/`go vet`/`staticcheck` clean; errors wrap `fmt.Errorf("polyclip: …: %w", …)`; public symbols have doc comments; no package-global mutable state; no working `init()`.
-- **Pitfalls that look tempting but are wrong:** float64 coordinates in the sweep (breaks topology, §5.1); copying Clipper2 source (license); Greiner-Hormann (can't handle coincident edges); offset via miter math without an engine (the naive approach this library replaces).
+- **Pitfalls that look tempting but are wrong:** float64 coordinates in the sweep (breaks topology, §5.1); Greiner-Hormann (can't handle coincident edges); offset via miter math without an engine (the naive approach this library replaces).
 
 ## 9. References
 
 1. Vatti, B. R. (1992). *A Generic Solution to Polygon Clipping.* CACM 35(7), 56–63.
-2. Johnson, A. *Clipper2.* https://github.com/AngusJohnson/Clipper2 — algorithmic reference, BSL-1.0; not copied.
+2. Johnson, A. *Clipper2.* https://github.com/AngusJohnson/Clipper2 — BSL-1.0; the sweep engine's algorithm and data model derive from it (see [`NOTICE`](NOTICE)).
 3. Shewchuk, J. R. (1997). *Adaptive Precision Floating-Point Arithmetic and Fast Robust Geometric Predicates.* DCG 18(3), 305–363.
 4. Martínez, F., Rueda, A. J., Feito, F. R. (2009). *A new algorithm for computing Boolean operations on polygons.* (Rejected alternative.)
 
@@ -698,7 +696,7 @@ Checked as post-conditions by `clip.CheckInvariants` (from `clip/invariants_test
 
 ## 12. Sweep engine: bounds, dispatch, horizontals, degeneracies
 
-This chapter distills the parts of the algorithm translated from Clipper2 (`CPP/Clipper2Lib/src/clipper.engine.cpp`; file:line references point into that tree). Clipper2 is BSL-1.0 — algorithmic reference only, written from scratch under MIT.
+This chapter distills the parts of the algorithm translated from Clipper2 (`CPP/Clipper2Lib/src/clipper.engine.cpp`; `engine.cpp:line` references point into that tree). See [`NOTICE`](NOTICE) for attribution.
 
 ### 12.1 Bounds and local minima
 

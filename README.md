@@ -6,9 +6,7 @@
 (union, intersection, difference, XOR), polygon offsetting (Minkowski
 sum / erosion with a disk), and the surrounding toolbox a slicer needs.
 It is a slicer-grade replacement for the older Vatti ports in the Go
-ecosystem, comparable in scope to
-[Clipper2](https://github.com/AngusJohnson/Clipper2) — independently
-implemented under MIT, with Clipper2 used only as an algorithmic reference.
+ecosystem.
 
 The engine is a Vatti scanline that works internally on an exact
 fixed-point integer grid for numeric robustness, so it handles the cases
@@ -24,7 +22,8 @@ collinear and coincident edges, and near-degenerate slivers.
 
 ## Status
 
-Capability parity with Clipper2's planar-polygon surface is reached. The API
+The planar-polygon feature surface — boolean ops, offsetting, and the toolbox
+above — is complete. The API
 under the top-level `polyclip` package is the stable public surface; packages
 under `internal/` are implementation detail and may change without notice.
 See [`DESIGN.md`](DESIGN.md) for the full design rationale and engine internals.
@@ -102,3 +101,7 @@ Runnable programs live in [`examples/`](examples).
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+The sweep engine's algorithm and data model are derived from
+[Clipper2](https://github.com/AngusJohnson/Clipper2) by Angus Johnson
+(Boost Software License 1.0); see [`NOTICE`](NOTICE) for attribution.

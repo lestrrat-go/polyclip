@@ -9,7 +9,8 @@ import (
 // ZAssigner computes the Z coordinate for a vertex the engine creates where two
 // input edges cross. The four points are the lower and upper endpoints of the
 // two crossing edges; crossing is the new vertex with X and Y set and Z zero.
-// The returned value becomes that vertex's Z.
+// The returned value is stored verbatim as that vertex's Z, so return a finite
+// value: a NaN or Inf rides straight through to the output unchecked.
 //
 // Install one with [Builder.SetZAssigner] to enable Z tracking: input vertices'
 // Z values are then carried through to the output, and each crossing vertex

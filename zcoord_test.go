@@ -63,7 +63,7 @@ func TestBuilderZCrossingAndInputPreserved(t *testing.T) {
 		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
 	}}}
 
-	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(coordZ{}).Execute(OpIntersect)
+	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(coordZ{}).Execute(OpIntersect)
 	require.NoError(t, err)
 	want := map[[2]float64]float64{
 		{5, 5}:   2,
@@ -87,7 +87,7 @@ func TestBuilderZDisabledIsZero(t *testing.T) {
 	b := geom.MultiPolygon{{Outer: geom.Polygon{
 		{X: 5, Y: 5, Z: 2}, {X: 15, Y: 5, Z: 2}, {X: 15, Y: 15, Z: 2}, {X: 5, Y: 15, Z: 2},
 	}}}
-	res, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpIntersect)
+	res, err := New().AddSubject(a).AddClip(b).Execute(OpIntersect)
 	require.NoError(t, err)
 	for _, ex := range res.Closed {
 		for _, p := range ex.Outer {
@@ -102,7 +102,7 @@ func TestBuilderZConstantOnAllCrossings(t *testing.T) {
 	// carry no Z).
 	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
-	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(7)).Execute(OpIntersect)
+	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(constZ(7)).Execute(OpIntersect)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
 		z, ok := zAt(res.Closed, xy[0], xy[1])
@@ -116,7 +116,7 @@ func TestBuilderZAssignerEndpoints(t *testing.T) {
 	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
 	rec := &recordZ{}
-	_, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect)
+	_, err := New().AddSubject(a).AddClip(b).SetZAssigner(rec).Execute(OpIntersect)
 	require.NoError(t, err)
 	require.Len(t, rec.calls, 2, "AssignZ called %d times, want 2", len(rec.calls))
 	seen := map[[2]float64]bool{}
@@ -134,7 +134,7 @@ func TestBuilderZXorComposition(t *testing.T) {
 	// must still flow through: the same crossing points appear and get assigned.
 	a := geom.MultiPolygon{{Outer: geom.Polygon{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 0, Y: 10}}}}
 	b := geom.MultiPolygon{{Outer: geom.Polygon{{X: 5, Y: 5}, {X: 15, Y: 5}, {X: 15, Y: 15}, {X: 5, Y: 15}}}}
-	res, err := NewBuilder().AddSubject(a).AddClip(b).SetZAssigner(constZ(9)).Execute(OpXor)
+	res, err := New().AddSubject(a).AddClip(b).SetZAssigner(constZ(9)).Execute(OpXor)
 	require.NoError(t, err)
 	for _, xy := range [][2]float64{{10, 5}, {5, 10}} {
 		z, ok := zAt(res.Closed, xy[0], xy[1])

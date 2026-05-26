@@ -51,7 +51,7 @@ func TestBuilderMatchesFreeFunctions(t *testing.T) {
 	for _, tc := range cases {
 		for _, o := range ops {
 			want, werr := o.free(tc.a, tc.b)
-			got, gerr := NewBuilder().AddSubject(tc.a).AddClip(tc.b).Execute(o.op)
+			got, gerr := New().AddSubject(tc.a).AddClip(tc.b).Execute(o.op)
 			require.Equal(t, werr == nil, gerr == nil, "%s op=%d: error mismatch free=%v clipper=%v", tc.name, o.op, werr, gerr)
 			if werr != nil {
 				continue
@@ -66,7 +66,7 @@ func TestBuilderMatchesFreeFunctions(t *testing.T) {
 // their pieces into a single subject/clip set, that Execute is non-destructive
 // (repeatable), and that Reset clears the inputs.
 func TestBuilderAccumulatesAndResets(t *testing.T) {
-	c := NewBuilder().
+	c := New().
 		AddSubject(mpRect(0, 0, 2, 2)).
 		AddSubject(mpRect(0, 4, 2, 6)).
 		AddClip(mpRect(1, -1, 3, 5))
@@ -94,6 +94,6 @@ func TestBuilderAccumulatesAndResets(t *testing.T) {
 // TestBuilderUnknownOperation asserts an out-of-range Operation errors rather
 // than silently producing wrong output.
 func TestBuilderUnknownOperation(t *testing.T) {
-	_, err := NewBuilder().AddSubject(mpRect(0, 0, 1, 1)).Execute(Operation(99))
+	_, err := New().AddSubject(mpRect(0, 0, 1, 1)).Execute(Operation(99))
 	require.Error(t, err, "Execute with unknown op: want error, got nil")
 }

@@ -110,9 +110,9 @@ func TestExecuteTreeFlattensToClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := polyclip.NewBuilder().AddSubject(tt.subj).AddClip(tt.clip).Execute(tt.op)
+			res, err := polyclip.New().AddSubject(tt.subj).AddClip(tt.clip).Execute(tt.op)
 			require.NoError(t, err, "Execute")
-			tree, err := polyclip.NewBuilder().AddSubject(tt.subj).AddClip(tt.clip).ExecuteTree(tt.op)
+			tree, err := polyclip.New().AddSubject(tt.subj).AddClip(tt.clip).ExecuteTree(tt.op)
 			require.NoError(t, err, "ExecuteTree")
 			sameShape(t, res.Closed, flattenPolyTree(tree))
 		})
@@ -133,7 +133,7 @@ func TestExecuteTreeIslandInHole(t *testing.T) {
 	require.NoError(t, err, "Union")
 	require.Len(t, donut, 2, "donut pieces: want 2 got %d", len(donut)) // flat form: annulus-with-hole + island
 
-	tree, err := polyclip.NewBuilder().AddSubject(donut).ExecuteTree(polyclip.OpUnion)
+	tree, err := polyclip.New().AddSubject(donut).ExecuteTree(polyclip.OpUnion)
 	require.NoError(t, err, "ExecuteTree")
 
 	require.Len(t, tree.Children, 1, "top-level regions: want 1 got %d", len(tree.Children))
@@ -161,7 +161,7 @@ func TestExecuteTreeIslandInHole(t *testing.T) {
 
 func TestExecuteTreeEmpty(t *testing.T) {
 	square := geom.MultiPolygon{{Outer: treeRect(0, 0, 2, 2)}}
-	pt, err := polyclip.NewBuilder().
+	pt, err := polyclip.New().
 		AddSubject(square).AddClip(square).
 		ExecuteTree(polyclip.OpDifference) // A∖A = ∅
 	require.NoError(t, err, "ExecuteTree")

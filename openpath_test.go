@@ -41,7 +41,7 @@ func TestOpenPathCrossingClip(t *testing.T) {
 		{OpUnion, outside}, // no closed subject, so Union keeps outside the clip
 	}
 	for _, c := range cases {
-		b := NewBuilder().AddOpenSubject(line).AddClip(clip)
+		b := New().AddOpenSubject(line).AddClip(clip)
 		got := openResult(t, b, c.op)
 		require.True(t, polylinesEqual(got, c.want), "op %v: got %v, want %v", c.op, got, c.want)
 	}
@@ -54,7 +54,7 @@ func TestOpenPathUnionWithSubject(t *testing.T) {
 	clip := mpRect(2, 2, 8, 8) // covers x in (2,8) at y=5
 	line := pl(pt(-1, 5), pt(11, 5))
 
-	b := NewBuilder().AddOpenSubject(line).AddSubject(subj).AddClip(clip)
+	b := New().AddOpenSubject(line).AddSubject(subj).AddClip(clip)
 	got := openResult(t, b, OpUnion)
 	// Inside subject∪clip is x in (0,8); keep outside: [-1,0] and [8,11].
 	want := []geom.Polyline{pl(pt(-1, 5), pt(0, 5)), pl(pt(8, 5), pt(11, 5))}
@@ -67,7 +67,7 @@ func TestOpenPathStitchAcrossVertex(t *testing.T) {
 	clip := mpRect(2, 2, 8, 8)
 	line := pl(pt(-1, 5), pt(5, 5), pt(5, -1))
 
-	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
+	b := New().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
 	want := []geom.Polyline{pl(pt(2, 5), pt(5, 5), pt(5, 2))}
 	require.True(t, polylinesEqual(got, want), "stitch got %v, want %v", got, want)
@@ -79,7 +79,7 @@ func TestOpenPathThroughVertex(t *testing.T) {
 	clip := mpRect(2, 2, 8, 8)
 	line := pl(pt(0, 0), pt(10, 10))
 
-	b := NewBuilder().AddOpenSubject(line).AddClip(clip)
+	b := New().AddOpenSubject(line).AddClip(clip)
 	got := openResult(t, b, OpIntersect)
 	want := []geom.Polyline{pl(pt(2, 2), pt(8, 8))}
 	require.True(t, polylinesEqual(got, want), "through-vertex got %v, want %v", got, want)
@@ -89,7 +89,7 @@ func TestOpenPathThroughVertex(t *testing.T) {
 // Intersect yields one chain per square.
 func TestOpenPathMultipleClips(t *testing.T) {
 	line := pl(pt(0, 5), pt(20, 5))
-	b := NewBuilder().AddOpenSubject(line).
+	b := New().AddOpenSubject(line).
 		AddClip(mpRect(2, 2, 6, 8)).
 		AddClip(mpRect(12, 2, 16, 8))
 	got := openResult(t, b, OpIntersect)
@@ -102,9 +102,9 @@ func TestOpenPathMultipleClips(t *testing.T) {
 func TestOpenPathEmptyClip(t *testing.T) {
 	line := pl(pt(0, 0), pt(10, 0))
 
-	gotI := openResult(t, NewBuilder().AddOpenSubject(line), OpIntersect)
+	gotI := openResult(t, New().AddOpenSubject(line), OpIntersect)
 	require.Empty(t, gotI, "Intersect empty clip: got %v, want none", gotI)
-	gotD := openResult(t, NewBuilder().AddOpenSubject(line), OpDifference)
+	gotD := openResult(t, New().AddOpenSubject(line), OpDifference)
 	want := []geom.Polyline{line}
 	require.True(t, polylinesEqual(gotD, want), "Difference empty clip: got %v, want %v", gotD, want)
 }
@@ -114,15 +114,15 @@ func TestOpenPathWholeRuns(t *testing.T) {
 	clip := mpRect(0, 0, 10, 10)
 	inside := pl(pt(2, 2), pt(8, 8))
 
-	gotI := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpIntersect)
+	gotI := openResult(t, New().AddOpenSubject(inside).AddClip(clip), OpIntersect)
 	require.True(t, polylinesEqual(gotI, []geom.Polyline{inside}), "inside Intersect: got %v, want whole line", gotI)
-	gotD := openResult(t, NewBuilder().AddOpenSubject(inside).AddClip(clip), OpDifference)
+	gotD := openResult(t, New().AddOpenSubject(inside).AddClip(clip), OpDifference)
 	require.Empty(t, gotD, "inside Difference: got %v, want none", gotD)
 }
 
 // TestOpenPathNoOpenSubject confirms closed-only Execute leaves Open nil.
 func TestOpenPathNoOpenSubject(t *testing.T) {
-	res, err := NewBuilder().AddSubject(mpRect(0, 0, 4, 4)).
+	res, err := New().AddSubject(mpRect(0, 0, 4, 4)).
 		AddClip(mpRect(2, 2, 6, 6)).Execute(OpIntersect)
 	require.NoError(t, err)
 	require.Nil(t, res.Open, "closed-only Open = %v, want nil", res.Open)
@@ -131,7 +131,7 @@ func TestOpenPathNoOpenSubject(t *testing.T) {
 // TestOpenPathShortDropped checks polylines with fewer than two points produce
 // no output and do not panic.
 func TestOpenPathShortDropped(t *testing.T) {
-	b := NewBuilder().
+	b := New().
 		AddOpenSubject(pl(pt(5, 5))). // single point
 		AddOpenSubject(pl()).         // empty
 		AddClip(mpRect(0, 0, 10, 10))
@@ -141,7 +141,7 @@ func TestOpenPathShortDropped(t *testing.T) {
 
 // TestOpenPathReset confirms Reset clears accumulated open subjects.
 func TestOpenPathReset(t *testing.T) {
-	b := NewBuilder().AddOpenSubject(pl(pt(0, 0), pt(10, 0)))
+	b := New().AddOpenSubject(pl(pt(0, 0), pt(10, 0)))
 	b.Reset()
 	res, err := b.Execute(OpDifference)
 	require.NoError(t, err)

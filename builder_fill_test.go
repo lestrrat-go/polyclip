@@ -31,7 +31,7 @@ func countHoles(m geom.MultiPolygon) int {
 func TestEvenOddUnionOverlappingSquares(t *testing.T) {
 	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
-	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
+	eo, err := New().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
 	require.NoError(t, err)
 	require.InDelta(t, 6, eo.Closed.Area(), 1e-9, "even-odd union area = %v, want 6", eo.Closed.Area())
 	require.Equal(t, 1, countHoles(eo.Closed), "even-odd union holes, want 1 (overlap is a hole)")
@@ -50,7 +50,7 @@ func TestEvenOddUnionOverlappingSquares(t *testing.T) {
 func TestEvenOddNestedSquaresAnnulus(t *testing.T) {
 	subj := geom.MultiPolygon{exRect(0, 0, 4, 4), exRect(1, 1, 3, 3)}
 
-	eo, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
+	eo, err := New().AddSubject(subj).Fill(FillEvenOdd).Execute(OpUnion)
 	require.NoError(t, err)
 	require.InDelta(t, 12, eo.Closed.Area(), 1e-9, "even-odd annulus area = %v, want 12", eo.Closed.Area())
 	require.Equal(t, 1, countHoles(eo.Closed), "even-odd annulus holes, want 1")
@@ -67,7 +67,7 @@ func TestEvenOddNestedSquaresAnnulus(t *testing.T) {
 func TestEvenOddDifferenceEmptyClipResolves(t *testing.T) {
 	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
-	got, err := NewBuilder().AddSubject(subj).Fill(FillEvenOdd).Execute(OpDifference)
+	got, err := New().AddSubject(subj).Fill(FillEvenOdd).Execute(OpDifference)
 	require.NoError(t, err)
 	require.InDelta(t, 6, got.Closed.Area(), 1e-9, "even-odd difference area = %v, want 6", got.Closed.Area())
 	require.Equal(t, 1, countHoles(got.Closed), "even-odd difference holes, want 1")
@@ -81,9 +81,9 @@ func TestEvenOddWellFormedEqualsNonZero(t *testing.T) {
 	b := geom.MultiPolygon{exRect(1, 1, 3, 3)}
 
 	for _, op := range []Operation{OpUnion, OpIntersect, OpDifference, OpXor} {
-		eo, err := NewBuilder().AddSubject(a).AddClip(b).Fill(FillEvenOdd).Execute(op)
+		eo, err := New().AddSubject(a).AddClip(b).Fill(FillEvenOdd).Execute(op)
 		require.NoError(t, err, "op=%d even-odd", op)
-		nz, err := NewBuilder().AddSubject(a).AddClip(b).Execute(op)
+		nz, err := New().AddSubject(a).AddClip(b).Execute(op)
 		require.NoError(t, err, "op=%d non-zero", op)
 		require.InDelta(t, nz.Closed.Area(), eo.Closed.Area(), 1e-9, "op=%d: even-odd area %v != non-zero area %v", op, eo.Closed.Area(), nz.Closed.Area())
 	}
@@ -95,9 +95,9 @@ func TestBuilderFillDefaultIsNonZero(t *testing.T) {
 	a := geom.MultiPolygon{exRect(0, 0, 4, 4)}
 	b := geom.MultiPolygon{exRect(2, 2, 6, 6)}
 
-	def, err := NewBuilder().AddSubject(a).AddClip(b).Execute(OpUnion)
+	def, err := New().AddSubject(a).AddClip(b).Execute(OpUnion)
 	require.NoError(t, err)
-	explicit, err := NewBuilder().AddSubject(a).AddClip(b).Fill(FillNonZero).Execute(OpUnion)
+	explicit, err := New().AddSubject(a).AddClip(b).Fill(FillNonZero).Execute(OpUnion)
 	require.NoError(t, err)
 	free, err := Union(a, b)
 	require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestBuilderFillDefaultIsNonZero(t *testing.T) {
 func TestResetClearsFill(t *testing.T) {
 	subj := geom.MultiPolygon{exRect(0, 0, 2, 2), exRect(1, 1, 3, 3)}
 
-	b := NewBuilder().AddSubject(subj).Fill(FillEvenOdd)
+	b := New().AddSubject(subj).Fill(FillEvenOdd)
 	eo, err := b.Execute(OpUnion)
 	require.NoError(t, err)
 	require.InDelta(t, 6, eo.Closed.Area(), 1e-9, "even-odd area = %v, want 6", eo.Closed.Area())

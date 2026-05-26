@@ -107,8 +107,8 @@ type Builder struct {
 	za       ZAssigner
 }
 
-// NewBuilder returns an empty Builder.
-func NewBuilder() *Builder {
+// New returns an empty Builder.
+func New() *Builder {
 	return &Builder{}
 }
 

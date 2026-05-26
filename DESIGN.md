@@ -54,7 +54,7 @@ github.com/lestrrat-go/polyclip
 │   └── invariants.go      post-condition checks
 ├── internal/fixed/        fixed-point arithmetic (coord.go, mul.go)
 ├── tools/differential/    Monte-Carlo differential harness (correctness oracle)
-└── examples/{union,offset}/
+└── examples/               runnable, output-verified testable examples (package examples_test)
 ```
 
 The `internal/clip` and `internal/fixed` packages hold the engine and are not

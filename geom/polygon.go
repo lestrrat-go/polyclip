@@ -62,6 +62,35 @@ func (p Polygon) Area() float64 {
 	return math.Abs(p.SignedArea())
 }
 
+// Perimeter returns the total length of the ring's edges, the implicit closing
+// edge from the last point back to the first included. A ring of fewer than two
+// points encloses nothing and has no edges, so it measures 0.
+//
+// Winding does not affect it: a ring and its reverse have the same perimeter,
+// where [Polygon.SignedArea] would differ in sign.
+func (p Polygon) Perimeter() float64 {
+	n := len(p)
+	if n < 2 {
+		return 0
+	}
+	total := p[n-1].Dist(p[0])
+	for i := 1; i < n; i++ {
+		total += p[i-1].Dist(p[i])
+	}
+	return total
+}
+
+// Length returns the total length of the path's segments. A [Polyline] is open,
+// so — unlike [Polygon.Perimeter] — there is no closing edge from the last point
+// back to the first. A path of fewer than two points measures 0.
+func (l Polyline) Length() float64 {
+	var total float64
+	for i := 1; i < len(l); i++ {
+		total += l[i-1].Dist(l[i])
+	}
+	return total
+}
+
 // IsCCW reports whether the polygon is wound counter-clockwise.
 //
 // A degenerate polygon (fewer than 3 distinct points, or zero signed area)

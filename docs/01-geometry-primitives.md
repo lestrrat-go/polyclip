@@ -13,6 +13,21 @@ just a place.
 Points are the atoms of every shape. A ring is a sequence of points; a region
 is a collection of rings.
 
+The same type also stands in for a **vector** — a direction and a length —
+because the two need the same arithmetic, and the difference is in how you read
+the number rather than in what is stored. Subtracting two points gives the
+vector between them; `Add`, `Neg` and `Scale` do what their names say.
+`Normalize` shortens a vector to unit length and reports whether there was a
+direction to keep: the zero vector has none, and neither does one whose
+coordinates are not finite.
+
+A point may also carry a **Z** value. Z is auxiliary data riding along with a
+location — the engine never reads it when comparing or snapping points, and it
+is preserved from input to output. Because it is not a third coordinate that the
+geometry means, the vector operations leave Z zero in their results rather than
+assert a value they did not compute. `Equal` ignores it for the same reason: it
+compares locations, and Z is not part of one.
+
 ## Bounding box
 
 A **bounding box** (`BBox`) is the smallest
@@ -57,6 +72,11 @@ defect rather than a closed square.
 This is one of the most common sources of confusion when moving from another
 library, so it is worth stating plainly: **list each vertex once; the loop
 closes itself.**
+
+The implicit edge is a real edge, and `Perimeter` counts it: the square above
+measures 4 sides, not 3. That is the whole difference between a ring's
+`Perimeter` and the `Length` of a `Polyline` — an open path drawn through the
+same four points — so the two names are worth keeping straight.
 
 ## Winding and orientation
 

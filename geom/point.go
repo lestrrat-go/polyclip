@@ -21,14 +21,30 @@ type Point struct {
 	Z    float64
 }
 
+// The vector operations below — Sub, Add, Neg and Scale — read X and Y and
+// leave Z zero in the result. Z is auxiliary data attached to a location, not a
+// third coordinate the geometry means, so carrying it through an arithmetic
+// result would assert a value the operation did not compute. Read Z off the
+// operand where you need it.
+
 // Sub returns the vector p - q.
 func (p Point) Sub(q Point) Point {
 	return Point{X: p.X - q.X, Y: p.Y - q.Y}
 }
 
+// Add returns the vector p + q, which is p displaced by q.
+func (p Point) Add(q Point) Point {
+	return Point{X: p.X + q.X, Y: p.Y + q.Y}
+}
+
 // Neg returns the vector -p.
 func (p Point) Neg() Point {
 	return Point{X: -p.X, Y: -p.Y}
+}
+
+// Scale returns p multiplied by s.
+func (p Point) Scale(s float64) Point {
+	return Point{X: p.X * s, Y: p.Y * s}
 }
 
 // Cross returns the 2D cross product p × q (p.X*q.Y - p.Y*q.X). Treating p and
@@ -50,9 +66,63 @@ func (p Point) Dist2(q Point) float64 {
 	return dx*dx + dy*dy
 }
 
+// Dist returns the Euclidean distance between p and q. It goes through
+// [math.Hypot], so it is accurate for operands whose squares would overflow or
+// underflow; use [Point.Dist2] where only comparisons are needed and the square
+// root is waste.
+func (p Point) Dist(q Point) float64 {
+	return math.Hypot(p.X-q.X, p.Y-q.Y)
+}
+
 // Len returns the Euclidean magnitude of p treated as a vector from the origin.
 func (p Point) Len() float64 {
 	return math.Hypot(p.X, p.Y)
+}
+
+// Normalize returns p scaled to unit length, and whether there was a direction
+// to return.
+//
+// It reports false — and a zero Point — for a p that has no direction: the zero
+// vector, one whose coordinates are not finite, and one so small that its length
+// underflows to zero. A caller that ignored the bool would otherwise get a NaN
+// or an infinity in the shape of a perfectly ordinary unit vector, which is the
+// one result worth refusing here.
+//
+// The length is [math.Hypot], so a vector whose squared length would overflow —
+// (1e300, 1e300) — normalizes correctly rather than to a NaN.
+func (p Point) Normalize() (Point, bool) {
+	l := p.Len()
+	if l == 0 || math.IsInf(l, 0) || math.IsNaN(l) {
+		return Point{}, false
+	}
+	return Point{X: p.X / l, Y: p.Y / l}, true
+}
+
+// Equal reports whether p and q are within tol of each other, measured as the
+// Euclidean distance between them.
+//
+// A tol of 0 asks whether the two are the same point exactly, which is the right
+// question only for coordinates that came from the same computation. Anything
+// derived through different arithmetic wants a tolerance. A negative or NaN tol
+// is no bound on a distance and admits nothing.
+//
+// Only X and Y are compared. Z is auxiliary data attached to a location, not
+// part of the location being judged.
+//
+// A point whose X or Y is not finite is not a location, and is equal to nothing —
+// itself included, and at every tol, +Inf among them. There is no real distance
+// for a tolerance to bound, and the alternative is that an infinite tol quietly
+// declares two infinities the same place.
+func (p Point) Equal(q Point, tol float64) bool {
+	if !(tol >= 0) || !p.finite() || !q.finite() {
+		return false
+	}
+	return p.Dist(q) <= tol
+}
+
+// finite reports whether p names a location: both coordinates real numbers.
+func (p Point) finite() bool {
+	return !math.IsInf(p.X, 0) && !math.IsNaN(p.X) && !math.IsInf(p.Y, 0) && !math.IsNaN(p.Y)
 }
 
 // BBox is an axis-aligned bounding box. The zero value represents an empty
